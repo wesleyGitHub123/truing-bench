@@ -12,6 +12,7 @@
 #include "firmware_version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "orch_demo.h"
 
 static const char *TAG = "main";
 
@@ -35,7 +36,8 @@ void app_main(void)
     ESP_LOGI(TAG, "truing firmware %s on %s", TRUING_FIRMWARE_VERSION, truing_board_name());
     truing_bringup_report_t report;
     truing_bringup_run(&report);
-    ESP_LOGI(TAG, "bring-up done (passed=%d failed=%d); orchestrator is Phase 1d -- idling on core 0",
+    ESP_LOGI(TAG, "bring-up done (passed=%d failed=%d); starting the Phase 1d workflow self-play on core 0",
              report.checks_passed, report.checks_failed);
+    truing_orch_demo_start();
     xTaskCreatePinnedToCore(heartbeat_task, "heartbeat", 4096, NULL, tskIDLE_PRIORITY + 1, NULL, 0);
 }
