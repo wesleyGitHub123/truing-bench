@@ -124,12 +124,16 @@ static truing_audio_result_t i2s_capture(truing_audio_source_if_t *self, int32_t
     if (c == NULL || !c->open || !c->stats.running) return TRUING_AUDIO_ERR_NOT_OPEN;
     if (n_words == 0u) return TRUING_AUDIO_ERR_CAPACITY;
     c->stats.captures++;
-    /* Pre-trigger tail from the ring, then live words. */
+    /* Pre-trigger tail from the ring, then live words. The head is sampled ONCE: the drain task
+     * writes the ring without the lock, so re-reading it inside the loop would let the tail slide
+     * and skip or duplicate samples. With a ring far longer than the tail, the writer cannot
+     * overtake this copy in the microseconds it takes. */
     xSemaphoreTake(c->lock, portMAX_DELAY);
+    const uint32_t head = c->ring_head;
     uint32_t pre = c->cfg.pre_trigger_words < c->ring_filled ? c->cfg.pre_trigger_words : c->ring_filled;
     if (pre > n_words) pre = n_words;
     for (uint32_t i = 0; i < pre; ++i) {
-        const uint32_t idx = (c->ring_head + c->ring_cap - pre + i) % c->ring_cap;
+        const uint32_t idx = (head + c->ring_cap - pre + i) % c->ring_cap;
         words[i] = c->ring[idx];
     }
     c->cap_out = words;
