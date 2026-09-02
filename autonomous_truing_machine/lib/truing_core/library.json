@@ -1,0 +1,16 @@
+{
+  "name": "truing_core",
+  "version": "0.1.0",
+  "description": "Framework-free core of the wheel truing firmware (SPEC P3): data model, configuration, status/provenance, row layouts, operator-intent correlation, config serialization. No ESP-IDF, no FreeRTOS, no I/O.",
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}

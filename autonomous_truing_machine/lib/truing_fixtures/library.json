@@ -1,0 +1,19 @@
+{
+  "name": "truing_fixtures",
+  "version": "0.1.0",
+  "description": "SYNTHETIC test-fixture configurations shared by host unit tests and the on-device bring-up self-test. These are not defaults and describe no real wheel (SPEC P5, §11.3.1 'no defaults, ever').",
+  "dependencies": {
+    "truing_core": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
