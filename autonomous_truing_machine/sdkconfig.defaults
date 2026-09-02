@@ -21,6 +21,15 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 # SPEC §9.4.1 invariant 3: reserve internal DMA-capable memory.
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 
+# Performance. The acoustic DSP (SPEC §9.2 layers 2-4) is the only compute-bound work in the
+# firmware and it runs against PSRAM, so the ESP-IDF defaults were costing roughly a factor of
+# three: the CPU ran at 160 MHz, the compiler at -Og, and the data cache was 32 KB with 32-byte
+# lines against two long sequential streams per FFT stage. None of these changes any arithmetic.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
 # RTOS / system
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
