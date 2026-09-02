@@ -174,3 +174,55 @@ this run proves the solver and the workflow around it, not the truing of a
 physical wheel. The twelve −0.000 rev prompts are worth an owner's look: they
 are what the SPEC deadband rule prescribes when a neighbour's error puts a rim
 index out of tolerance, and a human operator would find them pointless.
+
+## 2026-09-03 — Phase 1f acoustic subsystem on the DevKitC-1
+
+Firmware `0.1.0-phase1f` (image 917 KB flash, 100 KB static RAM; the growth
+over 1c is the recorded campaign excerpts compiled in as C arrays). Bring-up:
+**52 checks passed, 0 failed.** Same capture method as before.
+
+### I2S front end (SPEC §9.3, §9.4, §9.4.1)
+
+| Observation | Value |
+|---|---|
+| Channel | 48 kHz, 24-bit in 32-bit slots, mono; 8 descriptors x 240 frames (960 B each, a multiple of 3, under the 4092 B limit) |
+| Drain task | core 1, priority 23, separate from the DSP path (SPEC §4.5) |
+| Ring | 48,000 words in PSRAM, 9,600-word pre-trigger tail |
+| 200 ms capture | OK, 9,600 words returned in 2 ms, entirely from the pre-trigger tail, which is the intended behaviour when the request is no longer than the tail |
+| Captured signal | every word zero: **no microphone is connected to GPIO 6, and this run verifies nothing about a transducer** |
+| Live `measure_spoke_tension` | rejected / NO_ONSET_DETECTED in 1,430 ms, after commanding a 19,098 µs excitation pulse; a status, never a fabricated value |
+| 1 s capture with a compute task at DSP priority on core 1 | no overrun; 20 reads, longest gap between successful reads 95,954 µs |
+
+The longest read gap is close to the 100 ms read timeout, but each read
+requests 40 ms of audio and therefore blocks for about that long, so the
+figure mostly measures the request size rather than starvation. No overrun
+occurred. The mandatory test in SPEC §9.4 is capture integrity under **WiFi**
+load, and this build has no WiFi stack: that test is deferred to Phase 1e and
+is **not** claimed here.
+
+### Layers 2–4 against the Python reference, on target (SPEC §14.2)
+
+Three recorded plucks from the tension-sweep campaign, compiled in as C arrays
+and analysed by the same code the host tests exercise.
+
+| Pluck | f1 (Hz) | reference | SNR (dB) | candidates / strong | T ideal-string (N) | analysis |
+|---|---|---|---|---|---|---|
+| ts00_e2 | 423.886 | 423.886 | 45.90 | 8 / 12 | 663.7 | 17.96 s |
+| ts03_e2 | 379.800 | 379.800 | 75.61 | 5 / 5 | 532.8 | 16.35 s |
+| d3_e1 | 432.039 | 432.039 | 57.38 | 7 / 7 | 689.4 | 16.30 s |
+
+Worst deviation across all three: **0.0000 Hz in f1 and 0.000 dB in SNR.**
+Onset sample, gate start, window length, transform length, candidate count and
+strong-peak count are identical to the reference, and every estimate is
+`suspect` / `PROVISIONAL_MODE_ID` / `presumed_fundamental`. The recorded noise
+floor (−70.8 dBFS rms) is rejected with `NO_ONSET_DETECTED` and yields no
+tension. The DSP scratch is 6,542,832 bytes in PSRAM for a 262,144-point
+transform.
+
+Two things this does **not** show. The tensiometer read 1332.8 N for the
+ts00 pluck while the ideal-string model on the fixture profile gives 664 N;
+the fixture's `L_eff` is the crossing distance, which is synthetic content,
+and the effective-length question of SPEC §4.4.1 remains open. And the
+analysis takes **16 to 18 seconds per pluck** against roughly 0.6 s on the
+host, which is recorded as the phase's open performance item in
+docs/IMPLEMENTATION_NOTES.md.

@@ -79,6 +79,31 @@ needs network access once. `git clone` of that repository into a very long path
 fails on Windows with "Filename too long"; clone with `-c core.longpaths=true`
 or into a short path if you want its examples.
 
+## Host acoustic fixtures (Phase 1f, `../acoustic_prep`)
+
+The C port of acoustic layers 2–4 is verified against the research
+repository's Python pipeline on recorded campaign excerpts (SPEC §14.2). The
+generator imports that repository read-only and writes the excerpts, the
+reference values and the C fixtures:
+
+```bash
+# needs numpy, scipy and pyyaml; the system Python 3.12 on this PC has them
+python acoustic_prep/make_golden.py --acoustic-repo "../Acoustic Repo" --out-dir autonomous_truing_machine
+python -m pytest -q acoustic_prep/tests    # the committed fixtures still reproduce the committed values
+```
+
+Regenerate only when the excerpt selection or a DSP parameter changes, and
+commit the regenerated `.pcm` files, `acoustic_golden.json`,
+`acoustic_golden.h` and `fixture_acoustic_pcm.c` together.
+
+The excerpts are compiled into the firmware as C arrays rather than embedded
+as binaries. None of the binary-embedding routes works here: PlatformIO reads
+CMake for sources and flags but builds with SCons, so the assembly file that
+`EMBED_FILES` and `target_add_binary_data` generate through a CMake custom
+command is never produced, and `board_build.embed_files` is ignored when the
+project supplies its own `src/CMakeLists.txt`. The arrays cost about 550 KB
+of flash, which the 4 MB factory partition absorbs comfortably.
+
 ## Notes
 
 - The first ESP-IDF build downloads the framework and toolchains (about 1.5 GB)

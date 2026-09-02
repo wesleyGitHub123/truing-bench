@@ -15,7 +15,8 @@ was applied and the more specific normative rule was followed.
 | 1g Runout manual entry | Implemented (`runout_manual.c`): a real implementation; entries arrive through `SUBMIT_RUNOUT` and are consumed by `read_snapshot()` without blocking. |
 | 1b Host model preparation | Implemented (`../model_prep`, Python): `bike-wheel-calc` verified (commit 6fc380c, its 52 tests pass); per-spoke analytical Φ_u/Φ_v/Φ_t generation; artifact assembly with per-layout pseudoinverses, rank/conditioning, common-mode evaluation, fingerprints and load checks; host reference two-part solve; SPEC 14.3 host gate (29 tests). Golden fixture artifact and parity cases in `model_prep/golden/`. Two findings below need the owner's attention before mean-tension targeting can ever be enabled. |
 | 1c Firmware truing calculation | Implemented. Host side: `model_prep/truing_model_prep/export.py` writes the compact float32 binary artifact (SHA-256 content hash, per-spoke Fourier coefficients, Φ_t, per-layout masks / rank / conditioning / Φ†) and the C fixtures. Core: `truing/sha256` and `truing/artifact` (parse, the three SPEC 8.7 checks, R3 limits, expansion on the rim grid at load). Calculation: `lib/truing_calc/src/calc_artifact.c`, the REAL implementation behind the unchanged `truing_calc` contract (SPEC 8.3.1 residual, 8.7.1 layout-pure inversion, 8.4 two-part solve, 8.6 cost, 8.11 policy, Eq. 2 targets, per-side verification). Parity with the golden host cases on the host and on the DevKitC-1 (docs/BRINGUP_LOG.md); the orchestrator self-play now runs the real calculation against a wheel simulated through the same influence model. Not covered: loading an artifact from the `artifacts` partition or over the protocol (1e), and asymmetric Part 2 (refused by design, SPEC 8.4). |
-| 1e, 1f, 1h, 2+ | Not started. 1e (comms) and 1f (acoustic) depend only on 1a; 1h (integration) on all of the above. |
+| 1f Acoustic subsystem | Implemented. The four seams of SPEC 9.2: layer 1 as `truing_hal/audio_source_if` (fixed 48 kHz / 24-in-32 format enforced at open; recorded-buffer and synthetic sources on the host; `src/audio_i2s.c` on the target with a core-1 drain task, PSRAM ring, pre-trigger tail and overrun detection); layers 2 and 4 ported to C in `lib/truing_dsp` from the research repository (Hann + zero-padded FFT + parabolic refinement, scipy-semantics prominence peaks with the relative-depth gate, Hilbert-envelope window truncation via a Bluestein transform, RMS-envelope onset detection, the four tension models); layer 3 as the research repository's current rule, "lowest strong peak in the f1 band", output marked `presumed_fundamental` with every estimate `suspect` / PROVISIONAL_MODE_ID (SPEC 4.4.1); the composed subsystem `truing_hal/acoustic_real.c` behind the unchanged one-call contract with a pluck actuator contract (GPIO pulse on target, fake on host). Every DSP constant is chain-profile configuration (blob schema 2). Verified against the research pipeline on recorded campaign excerpts (acoustic_prep) on the host and on the DevKitC-1 (docs/BRINGUP_LOG.md). Not done: the WiFi-load capture stress test (no WiFi stack until 1e), any damping ritual, and a validated tension model or L_eff (research, SPEC 9.5). |
+| 1e, 1h, 2+ | Not started. 1e (comms) depends only on 1a; 1h (integration) on all of the above. |
 
 ## Repository layout
 
@@ -156,6 +157,82 @@ renamed or moved.
   solver against its own model (one cycle to convergence), not a test of
   truing physics. The default synthetic response is unchanged.
 
+- **Acoustic DSP constants live in the chain profile (Phase 1f).** SPEC 9.5
+  makes window and gate constants configuration; the chain profile now carries
+  all of them (capture and pre-trigger lengths, excitation pulse, the
+  measurement SNR gate, onset framing/thresholds/refractory, decay-floor
+  truncation, zero-pad factor, search band, prominence and depth gates,
+  candidate count, f2 ratio band, SNR annulus) and the tension-model profile
+  carries the two-mode length bounds. The blob schema is 2; schema-1 blobs in
+  NVS are rejected and the fixture provisioning build re-provisions them.
+- **The port reproduces scipy/numpy semantics exactly where they matter:**
+  `find_peaks` local maxima (plateau midpoint, strict rise) and prominence
+  (scan through equal samples to the first higher one); the band test on the
+  bin frequency before refinement; the depth gate on refined magnitudes;
+  `uniform_filter1d(mode="nearest")` window placement; an unpadded Hilbert
+  transform at the segment's own length (Bluestein chirp-z over power-of-two
+  FFTs) so the decay-floor decision is the reference's, not an approximation.
+  The one deliberate deviation: an all-zero capture reports no onset, where
+  `onset.py` would fire at threshold zero on an input it never sees.
+- **Bounded peak storage with a running depth gate.** A 2^18-point spectrum
+  holds thousands of 6 dB-prominent noise maxima before the 30 dB depth gate;
+  the reference collects them all and filters. The C port keeps a running
+  band maximum and prunes on every rise, which yields the same set with 128
+  slots; overflow (only possible with the depth gate disabled) is reported as
+  AMBIGUOUS_PEAK rather than analysed.
+- **Absolute onset floor in the fixture chain profile** (−55 dBFS rms). The
+  research configuration disables it because campaign files always contain
+  plucks; a device capture may not, and the relative rule then fires on noise
+  whose "peak" can clear the SNR gate against its own annulus median. The
+  fixture value sits 14 dB above the recorded noise floor and below every
+  recorded pluck's relative threshold; it is chain characterisation, a bench
+  result changes it. Reason-code extension `CAPTURE_OVERRUN` marks a capture
+  the front end dropped samples from (SPEC 9.4).
+- **Provenance follows the front end.** The subsystem's `source_impl` is REAL
+  only on the I2S source; on a recorded or synthetic source the estimate is
+  RECORDED / SYNTHETIC even though layers 2–4 are the real code, so a
+  self-play session is flagged non-real (SPEC 6.2).
+- **`sigma_n` is NaN on a single pluck.** The research propagates repeat
+  scatter (S4.4) across identical excitations; one measurement has none.
+- **Measurement SNR gate.** Below `measurement_min_snr_db` (fixture 12 dB, the
+  research report's warning threshold) the estimate is REJECTED / LOW_SNR
+  rather than annotated, because the solver must not consume a noise-derived
+  number. The research pipeline annotates instead; that difference is a
+  firmware safety rule, not a DSP change.
+
+## Phase 1f open item for the owner — the analysis is 25x slower on target than on the host
+
+Measured on the DevKitC-1 (docs/BRINGUP_LOG.md, 2026-09-03): one pluck takes
+**16.3 to 18.0 seconds** from raw samples to a tension estimate. The same
+excerpts take roughly 0.6 s each on the host. The numbers are identical to the
+last bit, so this is cost, not divergence.
+
+At that rate a 32-spoke measure pass plus a verify pass is about 19 minutes of
+pure DSP, which the operator-paced workflow tolerates but nobody should want.
+It has **not** been profiled per stage on target, so the following are ranked
+candidates, not findings:
+
+1. **The prominence scan.** `scipy.signal.find_peaks` computes prominence by
+   scanning outward from each peak until a higher sample, unbounded. On a
+   131,073-bin spectrum with thousands of in-band local maxima, and every read
+   going to PSRAM, this is the largest suspected term. A monotonic-stack
+   formulation gives identical values in O(n); scipy's own `wlen` bound would
+   be cheaper still but changes the numbers, so it is a research decision.
+2. **PSRAM residency.** The 262,144-point transform, its scratch and the
+   Hilbert envelope total 6.5 MB and cannot fit in internal RAM at this window
+   length and zero-pad factor. Every butterfly crosses the cache.
+3. **Software double transcendentals.** The real-FFT split step evaluates
+   `cos` and `sin` in double 131,073 times per call, and the Bluestein chirp
+   another 96,000; the S3 has no double-precision FPU. Caching these tables
+   costs about 1 MB of the 1.3 MB of PSRAM still free.
+4. **`truing_envelope_smooth`** is O(n x width), 5.8 M double additions per
+   pluck, where a running sum is O(n).
+
+Every one of these changes either preserves the golden values exactly or must
+be shown to. That is why none was attempted here: the bit-exact parity is the
+evidence Phase 1f exists to produce, and trading it for speed at the end of
+the phase would be the wrong order.
+
 ## Phase 1c results (host)
 
 | Check | Result |
@@ -250,6 +327,16 @@ a neighbour's error. A human operator would find those prompts pointless;
 skipping every sub-deadband turn regardless of local state would remove them
 without changing any applied adjustment. This is a rule change, so it is not
 made here.
+
+## Phase 1f results (host)
+
+| Check | Result |
+|---|---|
+| Native suites | 18 suites, all pass (`pio test -e native`) |
+| Python suites | acoustic_prep 2 pass; model_prep 32 pass, 1 skipped |
+| Golden parity, 3 recorded plucks | worst deviation 0.0000 Hz in f1, 0.000 dB in SNR, 0.004 dB in peak prominence |
+| Recorded noise floor | rejected, NO_ONSET_DETECTED, no tension |
+| Workflow on the real DSP | CONVERGED_GEOMETRIC_ONLY in 1 cycle, 64 acoustic calls, 64 estimates, 0 rejections, every stored tension suspect / PROVISIONAL_MODE_ID |
 
 ## Open items carried forward (do not invent)
 

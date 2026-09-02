@@ -6,16 +6,18 @@ implementation on identical inputs, with the fixtures copied into this
 repository rather than referenced across repositories.
 
 `make_golden.py` imports the research repository's own pure DSP modules
-(`lib/dsp`), cuts 1.2 s excerpts around individual plucks in the recorded
-tension-sweep campaign, stores them as the int32 I2S word stream the firmware
-front end delivers (24-bit sample in the upper bits), runs the reference
-pipeline on each excerpt, and writes:
+(`lib/dsp`), cuts 0.8 s excerpts around individual plucks in the recorded
+tension-sweep campaign (200 ms of pre-roll so the onset detector sees silence,
+600 ms of post-roll for the 40 ms gate and 500 ms window), stores them as the
+int32 I2S word stream the firmware front end delivers (24-bit sample in the
+upper bits), runs the reference pipeline on each excerpt, and writes:
 
 | Output | Purpose |
 |---|---|
 | `autonomous_truing_machine/test/fixtures/acoustic/*.pcm` | the excerpts (three plucks, one noise-floor segment) |
 | `golden/acoustic_golden.json` | every reference output and every parameter used, plus the research commit |
-| `autonomous_truing_machine/lib/truing_fixtures/include/truing_fixtures/acoustic_golden.h` | the same values as C initialisers for the native and on-target tests |
+| `.../lib/truing_fixtures/include/truing_fixtures/acoustic_golden.h` | the same values as C initialisers for the native and on-target tests |
+| `.../lib/truing_fixtures/src/fixture_acoustic_pcm.c` | the samples as C arrays, so no test does file I/O and the target has the same bytes |
 
 ```bash
 # from the repository root; the system Python 3.12 carries numpy, scipy and pyyaml
