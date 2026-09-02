@@ -35,10 +35,14 @@ typedef struct {
 
 /* Optional override: supply runout values per (rim index, cycle) instead of the wheel model. */
 typedef bool (*truing_auto_runout_fn)(void *user, uint8_t rim_index, uint8_t cycle_index, float *lateral_mm, float *radial_mm);
+/* Optional response override: the synthetic wheel's reaction to `turns` on `spoke` (e.g. a
+ * model-driven response using an influence artifact). Receives the wheel model to update. */
+typedef void (*truing_auto_response_fn)(void *user, truing_auto_wheel_model_t *wheel, uint8_t spoke, float turns_rev);
 
 typedef struct {
     truing_auto_wheel_model_t wheel;
     truing_auto_runout_fn     runout_fn;
+    truing_auto_response_fn   response_fn;
     void                     *user;
     uint32_t                  answers;
     uint32_t                  positions_confirmed;

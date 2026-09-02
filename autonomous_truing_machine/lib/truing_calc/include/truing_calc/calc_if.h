@@ -85,6 +85,35 @@ typedef struct {
 
 void truing_calc_synthetic_init(truing_calc_if_t *self, truing_calc_synthetic_ctx_t *ctx, uint32_t artifact_id);
 
+/* ---- REAL implementation on a loaded influence artifact (Phase 1c, SPEC 8) ---------- */
+#include "truing/artifact.h"
+
+typedef struct {
+    const truing_artifact_t           *artifact;      /* loaded and checked by truing_artifact_load() */
+    const truing_wheel_class_config_t *wheel;         /* side assignment for c_side and per-side stats */
+    uint32_t                           solves;
+    uint32_t                           verifies;
+} truing_calc_artifact_ctx_t;
+
+void truing_calc_artifact_init(truing_calc_if_t *self, truing_calc_artifact_ctx_t *ctx, const truing_artifact_t *artifact,
+                               const truing_wheel_class_config_t *wheel);
+
+/* Building blocks exposed for parity tests (SPEC 14.3.5). Row order: lateral, radial, tension. */
+typedef struct {
+    float    y_tilde[TRUING_MAX_FULL_ROWS];   /* full row order; NaN for rows not in the active set */
+    float    s_scale;                         /* LS estimate of the current tension scale, NaN when no tension rows */
+    uint16_t n_active_rows;
+} truing_calc_residual_t;
+
+/* Normalised residual over the active row set (SPEC 8.3.1). `u0`/`v0` are taken as zero (gauges tared). */
+bool truing_calc_residual(const truing_artifact_t *art, const truing_wheel_state_t *ws, const truing_row_mask_t *active,
+                          truing_calc_residual_t *out);
+/* d_ls = Phi-dagger(L) y_tilde_active (Eq. 4). */
+bool truing_calc_ls_invert(const truing_artifact_t *art, truing_layout_id_t layout, const truing_calc_residual_t *res,
+                           float d_ls[TRUING_MAX_SPOKES]);
+/* J(L) = ||y_tilde_active||^2 / n_active_rows (SPEC 8.6). */
+float truing_calc_cost(const truing_calc_residual_t *res);
+
 #ifdef __cplusplus
 }
 #endif

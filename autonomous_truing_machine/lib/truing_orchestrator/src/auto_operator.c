@@ -60,7 +60,9 @@ bool truing_auto_operator_answer(truing_auto_operator_t *a, const truing_orch_sn
         out->type = TRUING_INTENT_CONFIRM_ADJUSTMENT_DONE;
         if (w->target_index < TRUING_MAX_SPOKES) {
             a->turns_applied[w->target_index] += w->display_turns_rev;
-            if (a->wheel.enabled && w->target_index < TRUING_MAX_RIM_ANGLES) {
+            if (a->response_fn != NULL) {
+                a->response_fn(a->user, &a->wheel, w->target_index, w->display_turns_rev);
+            } else if (a->wheel.enabled && w->target_index < TRUING_MAX_RIM_ANGLES) {
                 /* Synthetic response: lateral at the spoke's rim index moves by +mm_per_turn * turns,
                  * the sense the synthetic calculation double corrects with turns = -k * lateral.
                  * Test physics only: no side dependence, no rim coupling. */
