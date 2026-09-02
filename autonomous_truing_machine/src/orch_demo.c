@@ -13,7 +13,11 @@
 #include "firmware_version.h"
 #include "truing_calc/calc_if.h"
 #include "truing_fixtures/fixtures.h"
+#include "esp_heap_caps.h"
 #include "truing_hal/acoustic_if.h"
+#include "truing_hal/acoustic_real.h"
+#include "truing_hal/audio_source_if.h"
+#include "truing_hal/pluck_if.h"
 #include "truing_hal/navigation_manual.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
@@ -31,7 +35,12 @@ static struct {
     truing_machine_profile_t machine;
     truing_clock_if_t clock;
     truing_acoustic_if_t acoustic;
-    truing_acoustic_synthetic_ctx_t actx;
+    truing_acoustic_real_ctx_t actx;      /* REAL layers 2-4 (Phase 1f) on a SYNTHETIC front end */
+    truing_audio_source_if_t audio;
+    truing_audio_synthetic_ctx_t audio_ctx;
+    truing_pluck_if_t pluck;
+    truing_pluck_fake_ctx_t pluck_ctx;
+    void *acoustic_scratch;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
     truing_navigation_if_t nav;
@@ -112,8 +121,8 @@ static void demo_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "== Stage 1 workflow self-play (manual navigation + manual runout answered by the auto-operator; "
-                  "SYNTHETIC acoustic; REAL truing calculation on the golden fixture artifact; the simulated wheel "
-                  "responds through the same influence model) ==");
+                  "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source; REAL truing calculation on the golden "
+                  "fixture artifact; the simulated wheel responds through the same influence model) ==");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -121,10 +130,19 @@ static void demo_task(void *arg)
     truing_fixture_machine_profile(&s.machine);
     s.clock.now_ms = boot_clock_now;
     s.clock.ctx = NULL;
-    truing_acoustic_synthetic_init(&s.acoustic, &s.actx, s.clock, 32u, TRUING_TENSION_MODEL_IDEAL_STRING, 1u);
-    s.actx.snr_db = 30.0f;
-    for (uint8_t i = 0; i < 32u; ++i) {
-        truing_acoustic_synthetic_set_spoke(&s.actx, i, 1000.0f, 480.0f);
+    /* Acoustic: the real subsystem (onset, spectrum, candidates, interim selection, model) on a
+     * synthetic pluck at 460 Hz with a faint noise floor; the fake actuator is "attached". */
+    truing_audio_synthetic_init(&s.audio, &s.audio_ctx, 460.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_pluck_fake_init(&s.pluck, &s.pluck_ctx, true);
+    const size_t scratch_bytes = truing_acoustic_real_scratch_bytes(&s.chain);
+    s.acoustic_scratch = heap_caps_malloc(scratch_bytes, MALLOC_CAP_SPIRAM);
+    const char *adetail = NULL;
+    if (s.acoustic_scratch == NULL ||
+        !truing_acoustic_real_init(&s.acoustic, &s.actx, s.clock, &s.chain, &s.tmodel, &s.audio, &s.pluck, s.acoustic_scratch,
+                                   scratch_bytes, &adetail)) {
+        ESP_LOGE(TAG, "acoustic subsystem init failed (%s)", adetail != NULL ? adetail : "scratch");
+        vTaskDelete(NULL);
+        return;
     }
     truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
     truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
@@ -272,9 +290,13 @@ static void demo_task(void *arg)
     }
     ESP_LOGI(TAG, "simulated wheel after the run: max|lateral| = %.4f mm (tolerance %.2f mm)", (double)final_max,
              (double)s.solver.tol_lateral_mm);
-    ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3). The calculation is real (artifact-backed); the "
-                  "acoustic measurement is synthetic and the wheel is a simulation of the artifact's own model, so this proves "
-                  "the workflow and the solver, not the truing of a physical wheel.",
+    ESP_LOGI(TAG, "acoustic: calls=%" PRIu32 " estimates=%" PRIu32 " rejections=%" PRIu32 " plucks_commanded=%" PRIu32
+                  " | last f1=%.3f Hz snr=%.1f dB analysis=%" PRIu32 " ms (source %s)",
+             s.actx.calls, s.actx.estimates, s.actx.rejections, s.pluck_ctx.fires, (double)s.actx.diag.f1_hz,
+             (double)s.actx.diag.snr_db, s.actx.diag.analysis_us / 1000u, s.audio.impl_name);
+    ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3). The calculation and the acoustic layers 2-4 are "
+                  "real; the audio front end is a synthetic pluck and the wheel is a simulation of the artifact's own model, so "
+                  "this proves the workflow, the solver and the DSP path, not the truing of a physical wheel.",
              truing_terminal_str(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY));
     vTaskDelete(NULL);
 }
