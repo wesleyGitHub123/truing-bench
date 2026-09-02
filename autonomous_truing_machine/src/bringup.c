@@ -37,7 +37,8 @@
 #include "truing/wheel_state.h"
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/acoustic_if.h"
-#include "truing_hal/navigation_if.h"
+#include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/wheel_drive_if.h"
 

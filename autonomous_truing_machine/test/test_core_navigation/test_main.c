@@ -7,7 +7,8 @@
 #include "truing/wheel_geometry.h"
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/clock_if.h"
-#include "truing_hal/navigation_if.h"
+#include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/wheel_drive_if.h"
 
 static truing_machine_profile_t g_machine;

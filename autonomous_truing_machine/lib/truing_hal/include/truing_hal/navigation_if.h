@@ -17,9 +17,11 @@
  *     IN_MOTION; the orchestrator polls until DONE or FAULT.
  * The orchestrator's POSITION state handles both by outcome alone.
  *
- * Coordinates: targets are WHEEL coordinates; stations are MACHINE coordinates
- * from the machine profile; ACTUATOR coordinates never appear here
- * (truing/wheel_geometry.h, truing_hal/wheel_drive_if.h).
+ * This header is the CONTRACT ONLY. It deliberately includes no wheel-drive or
+ * other actuator type: a consumer that includes only this header cannot reach
+ * the drive. Implementation contexts live in navigation_manual.h and
+ * navigation_synthetic.h (SPEC §10A.1: actuator coordinates never leave the
+ * navigation implementation).
  */
 #ifndef TRUING_HAL_NAVIGATION_IF_H
 #define TRUING_HAL_NAVIGATION_IF_H
@@ -30,8 +32,6 @@
 #include "truing/config.h"
 #include "truing/operator_intent.h"
 #include "truing/status.h"
-#include "truing_hal/clock_if.h"
-#include "truing_hal/wheel_drive_if.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -112,48 +112,6 @@ bool truing_nav_result_to_prompt(const truing_nav_result_t *r, truing_wait_promp
 
 const char *truing_nav_outcome_str(truing_nav_outcome_t o);
 const char *truing_nav_target_kind_str(truing_nav_target_kind_t k);
-
-/* ---- MANUAL implementation (Stage 1: the human is the actuator) ---------------- */
-typedef struct {
-    truing_clock_if_t               clock;
-    uint8_t                         n_spokes;
-    uint8_t                         n_rim_angles;
-    const truing_machine_profile_t *machine;
-    truing_nav_result_t             active;
-    truing_wheel_position_t         position;
-    uint32_t                        requests;
-    uint32_t                        confirmations;
-} truing_navigation_manual_ctx_t;
-
-void truing_navigation_manual_init(truing_navigation_if_t *self, truing_navigation_manual_ctx_t *ctx,
-                                   truing_clock_if_t clock, uint8_t n_spokes, uint8_t n_rim_angles,
-                                   const truing_machine_profile_t *machine);
-
-/* ---- SYNTHETIC automated implementation (tests / simulation, SPEC §14.5) ----------- */
-typedef struct {
-    truing_clock_if_t               clock;
-    uint8_t                         n_spokes;
-    uint8_t                         n_rim_angles;
-    const truing_machine_profile_t *machine;
-    truing_wheel_drive_if_t        *drive;                 /* optional actuator to command */
-    float                           steps_per_wheel_rev;   /* CALIBRATION knob (test-provided); required if drive != NULL */
-    uint8_t                         polls_per_move;        /* 0 = moves complete inside request() */
-    uint8_t                         polls_remaining;
-    float                           pending_delta_rad;
-    float                           pending_target_rotation_rad;   /* R' the implementation believes it reaches */
-    float                           true_rotation_rad;     /* what the wheel REALLY did (test oracle) */
-    float                           scripted_slip_rad;     /* applied to the next move, then cleared */
-    bool                            fault_next;            /* next move ends in FAULT */
-    truing_nav_result_t             active;
-    truing_wheel_position_t         position;
-    uint32_t                        requests;
-} truing_navigation_synthetic_ctx_t;
-
-void truing_navigation_synthetic_init(truing_navigation_if_t *self, truing_navigation_synthetic_ctx_t *ctx,
-                                      truing_clock_if_t clock, uint8_t n_spokes, uint8_t n_rim_angles,
-                                      const truing_machine_profile_t *machine, truing_wheel_drive_if_t *drive,
-                                      float steps_per_wheel_rev, uint8_t polls_per_move);
-float truing_navigation_synthetic_true_rotation(const truing_navigation_synthetic_ctx_t *ctx);
 
 #ifdef __cplusplus
 }

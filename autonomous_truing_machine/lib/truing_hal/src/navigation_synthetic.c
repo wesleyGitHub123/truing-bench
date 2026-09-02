@@ -13,7 +13,7 @@
 #include <string.h>
 
 #include "truing/wheel_geometry.h"
-#include "truing_hal/navigation_if.h"
+#include "truing_hal/navigation_synthetic.h"
 
 static void set_refused(truing_nav_result_t *out, truing_reason_t reason, const truing_nav_target_t *target)
 {
