@@ -86,3 +86,29 @@ stable at 370,051 bytes, minimum-ever free 360,603 bytes, SPIRAM free stable.
 `tools/serial_capture.py COM4 <seconds> <outfile>` resets the board through the
 CH343 auto-reset lines and records the console; raw captures are kept out of
 source control.
+
+## 2026-09-02 — Phase 1d orchestrator self-play on the DevKitC-1
+
+Firmware `0.1.0-phase1a` + orchestrator (image 316 KB, 36 KB static RAM). After
+the bring-up, `orch_demo` runs the complete Stage 1 workflow on core 0 with
+the **manual** navigation and **manual** runout implementations answered by the
+auto-operator (playing the human), synthetic acoustic estimates and the
+synthetic calculation double. A synthetic starting state with two spokes out of
+true (lateral +0.4 mm at rim index 3, −0.3 mm at index 10).
+
+| Observation | Value |
+|---|---|
+| Terminal result | `CONVERGED_GEOMETRIC_ONLY`, reason `TENSION_NOT_VERIFICATION_GRADE` (the honest Stage 1 ceiling, SPEC §8.6.3) |
+| Outer cycles run | 1 (both adjustments applied, verification re-measured as cycle 2) |
+| Orchestrator steps / state transitions | 660 / 660 |
+| Operator waits answered | 197 = 131 positioning confirmations (1 reference + 64 measure + 2 apply + 64 verify) + 64 runout entries + 2 adjustment confirmations |
+| Tension / runout records | 64 / 64 |
+| Adjustments displayed | spoke 3: −0.400 rev; spoke 10: +0.300 rev; synthetic wheel corrected to 0.000 mm at both |
+| Provenance (P6) | session 1, artifact 42 with fingerprint, tension-model profile 1, chain 1, machine 1, layout FULL, 96 active rows (64 valid, 32 suspect), wheel rotation 1.767 rad operator-confirmed, `contains_non_real_implementations = 1` |
+| Telemetry ring | 1248 events emitted, 0 dropped (drained every step); no intents rejected |
+| Wall time | 6.6 s, dominated by console logging at 115200 baud; no settle delays were needed |
+| Heap after the run | internal free 356,027 bytes, minimum-ever free 333,899 bytes |
+
+This proves the state machine, operator-wait correlation, navigation-by-outcome,
+admission, apply loop, verification and provenance on the target. It proves
+nothing about truing a wheel: every measurement and every solve was synthetic.

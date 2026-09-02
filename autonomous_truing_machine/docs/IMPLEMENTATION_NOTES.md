@@ -11,7 +11,9 @@ was applied and the more specific normative rule was followed.
 | Phase | Status |
 |---|---|
 | 1a Scaffolding | Implemented: data model, configuration, status/provenance, HAL contracts with stub/synthetic implementations, Wheel Navigation contract with manual and synthetic implementations, both PlatformIO environments, NVS persistence, on-device bring-up. See the commit history for the verification performed at each step. |
-| 1b–1h, 2+ | Not started. Next dependency-unlocked slices: 1d (orchestrator; depends only on 1a) and 1b (host model preparation; starts with verifying `bike-wheel-calc` runs, SPEC 8.10). |
+| 1d Orchestrator | Implemented (`lib/truing_orchestrator`): the SPEC 7 state machine with both loops, operator waits, wait-instance correlation, abort at safe points, admission with bounded re-measurement, safety bound and deadband, verification-grade convergence gating, stall/max-cycle aborts, current-state snapshot and current-cycle provenance. Consumes Wheel Navigation by outcome only and the truing calculation through the `truing_calc` contract (stub + synthetic double until 1c). Host-tested end to end with zero hardware; self-played on the DevKitC-1 (docs/BRINGUP_LOG.md). |
+| 1g Runout manual entry | Implemented (`runout_manual.c`): a real implementation; entries arrive through `SUBMIT_RUNOUT` and are consumed by `read_snapshot()` without blocking. |
+| 1b, 1c, 1e, 1f, 1h, 2+ | Not started. Next dependency-unlocked slices: 1b (host model preparation; starts with verifying `bike-wheel-calc` runs, SPEC 8.10; needs a Python environment, so free disk space first), 1e (comms: telemetry stream, command handling and the current-state/provenance queries over a transport; depends only on 1a) and 1f (acoustic subsystem; depends only on 1a). 1c waits for 1b's host gate. |
 
 ## Repository layout
 
@@ -23,7 +25,9 @@ Truing Repo/                      Git root (independent of the acoustic research
     │                             operator intent source, telemetry, clock) + stub/synthetic impls
     ├── lib/truing_fixtures/      SYNTHETIC fixture configurations for tests and bring-up (not defaults)
     ├── lib/truing_board/         board profiles (all pins, SPEC 4.3)
-    ├── src/                      ESP-IDF application: bring-up, NVS config store
+    ├── lib/truing_calc/          truing-calculation contract (SPEC 8) with stub and synthetic double; real impl is 1c
+    ├── lib/truing_orchestrator/  the state machine (SPEC 7) and the auto-operator test driver
+    ├── src/                      ESP-IDF application: bring-up, NVS config store, workflow self-play demo
     ├── test/                     PlatformIO native (Unity) test suites
     └── docs/                     this file, BUILD.md
 ```
@@ -80,6 +84,39 @@ renamed or moved.
   ESP-IDF builds run through a directory junction (docs/BUILD.md). The
   `platform` is pinned to `espressif32@6.10.0` because this PC also has a fork
   registered under the short name `espressif32`.
+- **Orchestrator execution model.** A cooperative `step()` machine: each call does
+  one bounded autonomous action and reports what it needs (idle, operator wait,
+  settle delay, navigation poll, terminal). Intents are validated and recorded
+  by `submit_intent()`; transitions happen only inside `step()`. A FreeRTOS task
+  on core 0 drives it on the target; tests drive it directly.
+- **VERIFY re-measurement is the next cycle's state.** `VERIFY` re-measures
+  through the same interfaces as the measurement phase (SPEC 5.1) and stamps the
+  records with the next cycle index; the following `MEASURE_WHEEL_STATE` finds
+  the cycle complete and passes through to admission. The SPEC 7.1 transitions
+  are preserved, nothing is measured twice, and no record is re-stamped. If no
+  adjustment was applied (every spoke within the deadband and tolerance), VERIFY
+  evaluates the current state without re-measuring.
+- **Progress baseline.** `J` of the state a plan corrects (from the solve) is the
+  first baseline; each verification's `J` becomes the next. `cycles_run` counts
+  outer cycles that reached `EVALUATE_CONVERGENCE`; `max_cycles` bounds it.
+- **Truing calculation contract.** The orchestrator never sees Φ, Φ† or weights:
+  `truing_calc_if` exposes model availability with artifact identity, policy
+  layout selection, R3 conditioning against artifact-recorded values, the solve,
+  optional target prediction and per-channel verification. The synthetic double
+  is scripted test data (turns proportional to lateral runout; displacement-only
+  cost) and is never a demonstration configuration.
+- **Geometry-only policy.** SPEC 8.11 sanctions "operator/config requests
+  geometry-only" but §11.2 lists no field for it, so it is an orchestrator
+  dependency flag (`geometry_only_policy`), not persisted configuration.
+- **Navigation fault while positioning for adjustment.** SPEC 10A.10 leaves the
+  terminal handling of an unrecoverable navigation fault open. Provisionally the
+  run terminates `ABORT_OPERATOR` carrying the navigation reason; a fault while
+  positioning for a *measurement* records that measurement as `unavailable` and
+  collection continues (SPEC 13.1). Recorded measurements are never touched.
+- **`CONFIRM_POSITIONED` after `ABORT`.** A terminal result clears the wait, so
+  a late confirmation for the abandoned wait is rejected (no active wait), not
+  accepted into a dead session. `truing_orch_reset_to_ready()` starts a new
+  session; it routes through INITIALIZE again if the wheel reference was lost.
 
 ## Specification reconciliations
 
