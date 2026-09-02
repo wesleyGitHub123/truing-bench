@@ -1,0 +1,19 @@
+{
+  "name": "truing_calc",
+  "version": "0.1.0",
+  "description": "Truing Calculation domain contract (SPEC §5.1, §8): the orchestrator consumes WheelState -> AdjustmentPlan / VerificationResult through this interface. Contains a stub (no artifact loaded) and a SYNTHETIC double for host-testing the workflow. The real firmware implementation is Phase 1c and depends on the Phase 1b artifact.",
+  "dependencies": {
+    "truing_core": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
