@@ -48,7 +48,20 @@ def main(argv=None) -> int:
     f.add_argument("--artifact", required=True)
     f.add_argument("--out", required=True)
     f.add_argument("--cases", type=int, default=4)
+    e = sub.add_parser("export-c-fixtures", help="write the compact binary artifact and parity cases as C headers")
+    e.add_argument("--artifact", required=True)
+    e.add_argument("--parity", required=True)
+    e.add_argument("--artifact-c", required=True, help="output .c path for the blob definition")
+    e.add_argument("--parity-h", required=True, help="output .h path for the parity cases")
+    e.add_argument("--name", default="fixture_sym32")
+    e.add_argument("--id", type=int, default=1)
     a = p.parse_args(argv)
+    if a.cmd == "export-c-fixtures":
+        from .export import write_c_fixtures
+        art = art_mod.load(a.artifact)
+        paths = write_c_fixtures(art, a.id, a.parity, a.artifact_c, a.parity_h, a.name)
+        print("wrote", *paths)
+        return 0
     if a.cmd == "parity-fixtures":
         from .parity import export_parity_fixtures
         wheel = fixtures.wheel_sym32()
