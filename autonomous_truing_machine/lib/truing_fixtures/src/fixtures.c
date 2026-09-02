@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "truing/artifact.h"
 #include "truing/limits.h"
 
 static void fill_fingerprint(truing_fingerprint_t *fp, uint8_t mul, uint8_t add)
@@ -42,7 +43,12 @@ void truing_fixture_wheel_class_sym32(truing_wheel_class_config_t *out)
     out->indexing_origin.side = TRUING_SIDE_B;
     out->indexing_origin.lead_trail = TRUING_LEADING;
     out->symmetry_angle_tolerance_rad = 0.01f;
-    fill_fingerprint(&out->expected_influence_fingerprint, 7u, 3u);
+    /* The sym32 fixture wheel IS the wheel the golden influence artifact was generated for: its
+     * expected fingerprint is the artifact's generating fingerprint (SPEC 11.4, sole compatibility
+     * authority), declared here INDEPENDENTLY of the blob rather than read from it. */
+    if (!truing_fingerprint_from_hex(fixture_sym32_artifact_fingerprint_hex, &out->expected_influence_fingerprint)) {
+        fill_fingerprint(&out->expected_influence_fingerprint, 7u, 3u);   /* unreachable with a well-formed hex */
+    }
     out->compatible_model_assumptions = k_assumptions_2p0;
 }
 

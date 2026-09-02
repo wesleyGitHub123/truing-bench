@@ -23,6 +23,13 @@ extern "C" {
 #endif
 
 /* Symmetric 32-spoke, 3-cross fixture wheel (Side A declared arbitrarily). */
+/* GENERATED golden influence artifact for the sym32 fixture wheel (model_prep export-c-fixtures):
+ * the compact binary blob, and its fingerprint / content hash as independent hex strings. */
+extern const uint8_t fixture_sym32_artifact_blob[];
+extern const size_t  fixture_sym32_artifact_blob_len;
+extern const char    fixture_sym32_artifact_fingerprint_hex[65];
+extern const char    fixture_sym32_artifact_content_hash_hex[65];
+
 void truing_fixture_wheel_class_sym32(truing_wheel_class_config_t *out);
 /* Asymmetric 36-spoke fixture wheel (rotor side flange inboard). */
 void truing_fixture_wheel_class_asym36(truing_wheel_class_config_t *out);
