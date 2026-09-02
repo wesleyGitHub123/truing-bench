@@ -1,0 +1,19 @@
+{
+  "name": "truing_hal",
+  "version": "0.1.0",
+  "description": "Hardware-facing interface contracts (acoustic, runout, position, operator intent, telemetry, clock) plus their non-hardware stub/synthetic implementations (SPEC §5, §9.1, §10.1, §12.2, §12.4, §14.5). Interfaces are C vtables; implementations here are framework-free so the workflow can run with zero hardware attached.",
+  "dependencies": {
+    "truing_core": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
