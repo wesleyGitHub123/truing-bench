@@ -28,9 +28,12 @@
 extern "C" {
 #endif
 
-#define TRUING_RUNOUT_CAP_SNAPSHOT (1u << 0)
-#define TRUING_RUNOUT_CAP_STREAM   (1u << 1)
-#define TRUING_RUNOUT_CAP_TARE     (1u << 2)
+#define TRUING_RUNOUT_CAP_SNAPSHOT     (1u << 0)
+#define TRUING_RUNOUT_CAP_STREAM       (1u << 1)
+#define TRUING_RUNOUT_CAP_TARE         (1u << 2)
+/* The snapshot is supplied by the operator through SUBMIT_RUNOUT (SPEC §10.2): the
+ * orchestrator must wait for the entry before calling read_snapshot(). */
+#define TRUING_RUNOUT_CAP_MANUAL_ENTRY (1u << 3)
 
 typedef struct {
     float    lateral_mm;
@@ -90,6 +93,26 @@ void truing_runout_synthetic_init(truing_runout_if_t *self, truing_runout_synthe
                                   truing_clock_if_t clock, uint8_t n_rim_angles);
 void truing_runout_synthetic_set_index(truing_runout_synthetic_ctx_t *ctx, uint8_t rim_index, float lateral_mm, float radial_mm);
 void truing_runout_synthetic_set_failure(truing_runout_synthetic_ctx_t *ctx, uint8_t rim_index, truing_status_t status, truing_reason_t reason);
+
+/* ---- Manual entry: the Stage 1 primary implementation (SPEC §10.2) -------------- */
+/* A REAL implementation, not a stub: the operator reads the dial gauges and enters the
+ * values through the typed SUBMIT_RUNOUT intent. read_snapshot() never blocks: it returns
+ * the entry submitted for the requested rim index, or `unavailable` if none was submitted. */
+typedef struct {
+    truing_clock_if_t clock;
+    bool              pending;
+    uint8_t           pending_rim_index;
+    float             pending_lateral_mm;
+    float             pending_radial_mm;
+    bool              tared;
+    uint32_t          submissions;
+    uint32_t          snapshot_calls;
+} truing_runout_manual_ctx_t;
+
+void truing_runout_manual_init(truing_runout_if_t *self, truing_runout_manual_ctx_t *ctx, truing_clock_if_t clock);
+/* Record the operator's SUBMIT_RUNOUT for `rim_index`; consumed by the next read_snapshot() for that index.
+ * Works on any runout interface that reports TRUING_RUNOUT_CAP_MANUAL_ENTRY; returns false otherwise. */
+bool truing_runout_manual_submit(truing_runout_if_t *self, uint8_t rim_index, float lateral_mm, float radial_mm);
 
 #ifdef __cplusplus
 }
