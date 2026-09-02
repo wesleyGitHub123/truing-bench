@@ -35,13 +35,17 @@ typedef struct {
     truing_cpx_t     *bins;         /* n_fft/2 + 1 entries */
     float            *windowed;     /* n_fft floats (zero-padded input) */
     float            *log_mag;      /* n_fft/2 + 1 floats */
+    float            *hann;         /* max_window floats: the window, cached for `hann_n` */
+    uint32_t          hann_n;       /* length the window was built for; 0 = none */
+    uint32_t          max_window;
     uint32_t          n_fft_capacity;
 } truing_spectrum_workspace_t;
 
 uint32_t truing_spectrum_n_fft(uint32_t n_samples, float zero_pad_factor);
-size_t   truing_spectrum_workspace_bytes(uint32_t n_fft_capacity);
+size_t   truing_spectrum_workspace_bytes(uint32_t n_fft_capacity, uint32_t max_window);
 /* Carve the workspace out of one caller-owned block of at least workspace_bytes. */
-bool     truing_spectrum_workspace_init(truing_spectrum_workspace_t *ws, uint32_t n_fft_capacity, void *block, size_t block_bytes);
+bool     truing_spectrum_workspace_init(truing_spectrum_workspace_t *ws, uint32_t n_fft_capacity, uint32_t max_window,
+                                        void *block, size_t block_bytes);
 
 /* Hann-window, zero-pad and transform x[0..n). False if n < 4 or the transform exceeds the workspace. */
 bool truing_spectrum_compute(truing_spectrum_workspace_t *ws, const float *x, uint32_t n, float sample_rate_hz,

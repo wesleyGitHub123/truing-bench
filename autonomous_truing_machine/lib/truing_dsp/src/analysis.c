@@ -48,7 +48,7 @@ size_t truing_dsp_workspace_bytes(uint32_t max_window, float zero_pad_factor)
     if (n_fft == 0u) {
         return 0u;
     }
-    return align8(truing_spectrum_workspace_bytes(n_fft)) + align8(truing_envelope_workspace_bytes(max_window)) +
+    return align8(truing_spectrum_workspace_bytes(n_fft, max_window)) + align8(truing_envelope_workspace_bytes(max_window)) +
            2u * align8((size_t)max_window * sizeof(float));
 }
 
@@ -64,8 +64,8 @@ bool truing_dsp_workspace_init(truing_dsp_workspace_t *ws, uint32_t max_window, 
     memset(ws, 0, sizeof(*ws));
     const uint32_t n_fft = truing_spectrum_n_fft(max_window, zero_pad_factor);
     uint8_t *p = (uint8_t *)block;
-    const size_t sb = align8(truing_spectrum_workspace_bytes(n_fft));
-    if (!truing_spectrum_workspace_init(&ws->spectrum, n_fft, p, sb)) {
+    const size_t sb = align8(truing_spectrum_workspace_bytes(n_fft, max_window));
+    if (!truing_spectrum_workspace_init(&ws->spectrum, n_fft, max_window, p, sb)) {
         return false;
     }
     p += sb;

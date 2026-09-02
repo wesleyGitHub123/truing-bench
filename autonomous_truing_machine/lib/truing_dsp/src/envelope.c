@@ -44,30 +44,45 @@ bool truing_dsp_dft(truing_envelope_workspace_t *ws, const truing_cpx_t *x, uint
         return false;
     }
     const uint32_t m = ws->m;
-    /* chirp w_k = exp(-i*pi*k^2/n); k^2 reduced mod 2n keeps the double argument small. */
-    const double sgn = inverse ? 1.0 : -1.0;
-    for (uint32_t k = 0; k < n; ++k) {
-        const uint64_t k2 = ((uint64_t)k * (uint64_t)k) % (2ull * (uint64_t)n);
-        const double ang = sgn * 3.14159265358979323846 * (double)k2 / (double)n;
-        ws->chirp[k].re = (float)cos(ang);
-        ws->chirp[k].im = (float)sin(ang);
+    /* The chirp and the transformed kernel depend only on n, so they are built once per length and
+     * reused. The kernel lives in `b`, which the previous formulation rebuilt and re-transformed on
+     * every call: caching it removes one of the three transforms per call at no memory cost.
+     *
+     * Only the FORWARD chirp is cached. The inverse transform is obtained from the identity
+     * IDFT(x) = conj(DFT(conj(x))), which is exact in exact arithmetic and lets the one cached
+     * kernel serve both directions. In floating point the intermediate roundings differ from a
+     * directly-conjugated chirp, so this is mathematically rather than bitwise equivalent; the
+     * recorded-pluck fixtures hold the end-to-end result. */
+    if (ws->cached_n != n) {
+        for (uint32_t k = 0; k < n; ++k) {
+            const uint64_t k2 = ((uint64_t)k * (uint64_t)k) % (2ull * (uint64_t)n);
+            const double ang = -3.14159265358979323846 * (double)k2 / (double)n;
+            ws->chirp[k].re = (float)cos(ang);
+            ws->chirp[k].im = (float)sin(ang);
+        }
+        memset(ws->b, 0, (size_t)m * sizeof(truing_cpx_t));
+        for (uint32_t k = 0; k < n; ++k) {
+            /* b_k = conj(w_k), b_{m-k} = conj(w_k) */
+            ws->b[k].re = ws->chirp[k].re;
+            ws->b[k].im = -ws->chirp[k].im;
+            if (k > 0u) {
+                ws->b[m - k].re = ws->chirp[k].re;
+                ws->b[m - k].im = -ws->chirp[k].im;
+            }
+        }
+        truing_fft_complex(&ws->plan, ws->b, false);
+        ws->cached_n = n;
     }
     memset(ws->a, 0, (size_t)m * sizeof(truing_cpx_t));
-    memset(ws->b, 0, (size_t)m * sizeof(truing_cpx_t));
     for (uint32_t k = 0; k < n; ++k) {
-        /* a_k = x_k * w_k ; b_k = conj(w_k), b_{m-k} = conj(w_k) */
+        /* a_k = x_k * w_k, with x conjugated when an inverse transform was asked for */
         const truing_cpx_t w = ws->chirp[k];
-        ws->a[k].re = x[k].re * w.re - x[k].im * w.im;
-        ws->a[k].im = x[k].re * w.im + x[k].im * w.re;
-        ws->b[k].re = w.re;
-        ws->b[k].im = -w.im;
-        if (k > 0u) {
-            ws->b[m - k].re = w.re;
-            ws->b[m - k].im = -w.im;
-        }
+        const float xr = x[k].re;
+        const float xi = inverse ? -x[k].im : x[k].im;
+        ws->a[k].re = xr * w.re - xi * w.im;
+        ws->a[k].im = xr * w.im + xi * w.re;
     }
     truing_fft_complex(&ws->plan, ws->a, false);
-    truing_fft_complex(&ws->plan, ws->b, false);
     for (uint32_t k = 0; k < m; ++k) {
         const float re = ws->a[k].re * ws->b[k].re - ws->a[k].im * ws->b[k].im;
         const float im = ws->a[k].re * ws->b[k].im + ws->a[k].im * ws->b[k].re;
@@ -79,8 +94,10 @@ bool truing_dsp_dft(truing_envelope_workspace_t *ws, const truing_cpx_t *x, uint
     for (uint32_t k = 0; k < n; ++k) {
         const truing_cpx_t w = ws->chirp[k];
         const float re = ws->a[k].re * inv_m, im = ws->a[k].im * inv_m;
-        out[k].re = re * w.re - im * w.im;
-        out[k].im = re * w.im + im * w.re;
+        const float orr = re * w.re - im * w.im;
+        const float oii = re * w.im + im * w.re;
+        out[k].re = orr;
+        out[k].im = inverse ? -oii : oii;   /* undo the input conjugation */
     }
     return true;
 }

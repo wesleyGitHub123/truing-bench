@@ -23,30 +23,34 @@ static size_t align8(size_t v)
     return (v + 7u) & ~(size_t)7u;
 }
 
-size_t truing_spectrum_workspace_bytes(uint32_t n_fft_capacity)
+size_t truing_spectrum_workspace_bytes(uint32_t n_fft_capacity, uint32_t max_window)
 {
     const size_t n = n_fft_capacity;
-    return align8((n / 4u) * sizeof(truing_cpx_t)) +           /* twiddle */
+    return align8(truing_fft_half_twiddle_bytes((uint32_t)(n / 2u))) +   /* half-angle twiddle */
            align8((n / 2u) * sizeof(truing_cpx_t)) +           /* scratch */
            align8((n / 2u + 1u) * sizeof(truing_cpx_t)) +      /* bins */
            align8(n * sizeof(float)) +                         /* windowed */
-           align8((n / 2u + 1u) * sizeof(float));              /* log_mag */
+           align8((n / 2u + 1u) * sizeof(float)) +             /* log_mag */
+           align8((size_t)max_window * sizeof(float));         /* hann */
 }
 
-bool truing_spectrum_workspace_init(truing_spectrum_workspace_t *ws, uint32_t n_fft_capacity, void *block, size_t block_bytes)
+bool truing_spectrum_workspace_init(truing_spectrum_workspace_t *ws, uint32_t n_fft_capacity, uint32_t max_window,
+                                    void *block, size_t block_bytes)
 {
     if (ws == NULL || block == NULL || n_fft_capacity < 8u || (n_fft_capacity & (n_fft_capacity - 1u)) != 0u ||
-        block_bytes < truing_spectrum_workspace_bytes(n_fft_capacity)) {
+        max_window == 0u || block_bytes < truing_spectrum_workspace_bytes(n_fft_capacity, max_window)) {
         return false;
     }
     memset(ws, 0, sizeof(*ws));
     uint8_t *p = (uint8_t *)block;
     const size_t n = n_fft_capacity;
-    ws->twiddle = (truing_cpx_t *)p;  p += align8((n / 4u) * sizeof(truing_cpx_t));
+    ws->twiddle = (truing_cpx_t *)p;  p += align8(truing_fft_half_twiddle_bytes((uint32_t)(n / 2u)));
     ws->scratch = (truing_cpx_t *)p;  p += align8((n / 2u) * sizeof(truing_cpx_t));
     ws->bins = (truing_cpx_t *)p;     p += align8((n / 2u + 1u) * sizeof(truing_cpx_t));
     ws->windowed = (float *)p;        p += align8(n * sizeof(float));
-    ws->log_mag = (float *)p;
+    ws->log_mag = (float *)p;         p += align8((n / 2u + 1u) * sizeof(float));
+    ws->hann = (float *)p;
+    ws->max_window = max_window;
     ws->n_fft_capacity = n_fft_capacity;
     ws->plan.n = 0u;
     return true;
@@ -62,14 +66,24 @@ bool truing_spectrum_compute(truing_spectrum_workspace_t *ws, const float *x, ui
     if (n_fft == 0u || n_fft > ws->n_fft_capacity || n_fft < n) {
         return false;
     }
-    /* Periodic Hann (fftbins convention), computed in double as numpy does, applied in float. */
+    /* Periodic Hann (fftbins convention), computed in double as numpy does, applied in float. The
+     * window depends only on its length, so it is built once and reused: on a target without a
+     * double-precision FPU the cosines cost far more than the transform they feed. */
+    if (n > ws->max_window) {
+        return false;
+    }
+    if (ws->hann_n != n) {
+        for (uint32_t k = 0; k < n; ++k) {
+            ws->hann[k] = (float)(0.5 - 0.5 * cos(2.0 * 3.14159265358979323846 * (double)k / (double)n));
+        }
+        ws->hann_n = n;
+    }
     for (uint32_t k = 0; k < n; ++k) {
-        const double w = 0.5 - 0.5 * cos(2.0 * 3.14159265358979323846 * (double)k / (double)n);
-        ws->windowed[k] = x[k] * (float)w;
+        ws->windowed[k] = x[k] * ws->hann[k];
     }
     memset(ws->windowed + n, 0, (size_t)(n_fft - n) * sizeof(float));
     if (ws->plan.n != n_fft / 2u) {
-        if (!truing_fft_plan_init(&ws->plan, n_fft / 2u, ws->twiddle)) {
+        if (!truing_fft_plan_init_half(&ws->plan, n_fft / 2u, ws->twiddle)) {
             return false;
         }
     }

@@ -66,10 +66,10 @@ static void test_complex_fft_matches_naive_dft(void)
 static void test_real_fft_matches_naive_dft(void)
 {
     const uint32_t n = 128u;   /* real length; complex plan of 64 */
-    truing_cpx_t tw[32], scratch[64], out[65], full[128], ref[128];
+    truing_cpx_t tw[64], scratch[64], out[65], full[128], ref[128];
     float x[128];
     truing_fft_plan_t plan;
-    TEST_ASSERT_TRUE(truing_fft_plan_init(&plan, n / 2u, tw));
+    TEST_ASSERT_TRUE(truing_fft_plan_init_half(&plan, n / 2u, tw));   /* real transform needs the half-angle table */
     uint32_t s = 99u;
     for (uint32_t i = 0; i < n; ++i) {
         x[i] = lcg(&s);
@@ -241,11 +241,11 @@ static void test_spectrum_of_a_pure_tone_refines_to_the_true_frequency(void)
     for (uint32_t i = 0; i < n; ++i) x[i] = 0.3f * sinf(2.0f * 3.14159265f * 440.25f * (float)i / 48000.0f);
     const uint32_t n_fft = truing_spectrum_n_fft(n, 8.0f);
     TEST_ASSERT_EQUAL_UINT32(65536u, n_fft);
-    const size_t bytes = truing_spectrum_workspace_bytes(n_fft);
+    const size_t bytes = truing_spectrum_workspace_bytes(n_fft, n);
     void *block = malloc(bytes);
     TEST_ASSERT_NOT_NULL(block);
     truing_spectrum_workspace_t ws;
-    TEST_ASSERT_TRUE(truing_spectrum_workspace_init(&ws, n_fft, block, bytes));
+    TEST_ASSERT_TRUE(truing_spectrum_workspace_init(&ws, n_fft, n, block, bytes));
     truing_spectrum_t s;
     TEST_ASSERT_TRUE(truing_spectrum_compute(&ws, x, n, 48000.0f, 8.0f, &s));
     uint32_t k;

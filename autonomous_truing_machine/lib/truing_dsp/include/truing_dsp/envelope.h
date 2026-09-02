@@ -22,11 +22,12 @@ typedef struct {
     truing_fft_plan_t plan;      /* complex length M = next_pow2(2*max_n - 1) */
     truing_cpx_t     *twiddle;   /* M/2 */
     truing_cpx_t     *a;         /* M */
-    truing_cpx_t     *b;         /* M */
-    truing_cpx_t     *chirp;     /* max_n */
+    truing_cpx_t     *b;         /* M: the TRANSFORMED chirp kernel, cached for `cached_n` */
+    truing_cpx_t     *chirp;     /* max_n: the forward chirp, cached for `cached_n` */
     truing_cpx_t     *spectrum;  /* max_n: the length-n DFT */
     uint32_t          max_n;
     uint32_t          m;
+    uint32_t          cached_n;  /* length the chirp and kernel were built for; 0 = none */
 } truing_envelope_workspace_t;
 
 size_t truing_envelope_workspace_bytes(uint32_t max_n);
