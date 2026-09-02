@@ -90,7 +90,7 @@ typedef struct {
 } truing_wheel_class_config_t;
 
 /* ---- §11.2 Solver configuration ------------------------------------------------- */
-typedef struct {
+typedef struct truing_solver_config {
     float    tol_lateral_mm;               /* normalization AND acceptance */
     float    tol_radial_mm;
     float    tol_tension_n;                /* NORMALIZATION scale only (SPEC §8.6) */

@@ -14,6 +14,7 @@ static const char *const k_wait_kind_str[TRUING_WAIT_KIND__COUNT] = {
 static const char *const k_verdict_str[] = {
     "ACCEPT", "REJECT_STATE", "REJECT_NO_ACTIVE_WAIT", "REJECT_STALE_INTENT",
     "REJECT_WRONG_INTENT_FOR_WAIT", "REJECT_PARAMETER", "REJECT_DEBUG_DISABLED", "REJECT_UNKNOWN",
+    "REJECT_SESSION_ADMISSION",
 };
 
 const char *truing_intent_type_str(truing_intent_type_t t)

@@ -106,6 +106,8 @@ typedef enum {
     TRUING_INTENT_REJECT_PARAMETER,         /* consult truing_set_parameter_admissible() */
     TRUING_INTENT_REJECT_DEBUG_DISABLED,
     TRUING_INTENT_REJECT_UNKNOWN,
+    TRUING_INTENT_REJECT_SESSION_ADMISSION, /* admissible in this state, but a precondition failed
+                                               (e.g. START_TRUING with an incomplete profile, SPEC §11.3.1) */
 } truing_intent_verdict_t;
 
 void truing_wait_correlator_init(truing_wait_correlator_t *c);

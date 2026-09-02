@@ -89,6 +89,12 @@ typedef enum {
 truing_param_class_t truing_param_class(truing_param_id_t id);
 bool truing_param_is_classified(truing_param_id_t id);
 truing_set_param_verdict_t truing_set_parameter_admissible(truing_state_t state, truing_param_id_t id);
+
+/* Apply a session-mutable or session-fixed value to a solver configuration copy.
+ * Returns false for artifact-bound or unknown ids and for values that do not fit the
+ * field (e.g. negative counts). The caller re-validates with truing_solver_config_check(). */
+struct truing_solver_config;
+bool truing_param_apply(struct truing_solver_config *cfg, truing_param_id_t id, float value);
 /* Reason code to report for a verdict (NONE when none is defined by SPEC §13.2). */
 truing_reason_t truing_set_param_verdict_reason(truing_set_param_verdict_t v);
 

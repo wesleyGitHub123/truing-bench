@@ -1,5 +1,10 @@
 #include "truing/params.h"
 
+#include <math.h>
+#include <stddef.h>
+
+#include "truing/config.h"
+
 typedef struct {
     const char          *name;
     truing_param_class_t cls;
@@ -99,6 +104,80 @@ truing_set_param_verdict_t truing_set_parameter_admissible(truing_state_t state,
     case TRUING_STATE_CLASS_INACTIVE:
     default:
         return TRUING_SET_PARAM_REJECT_STATE_INACTIVE;
+    }
+}
+
+static bool fits_u8(float v)
+{
+    return isfinite(v) && v >= 0.0f && v <= 255.0f && v == floorf(v);
+}
+
+static bool fits_u16(float v)
+{
+    return isfinite(v) && v >= 0.0f && v <= 65535.0f && v == floorf(v);
+}
+
+static bool fits_u32(float v)
+{
+    return isfinite(v) && v >= 0.0f && v <= 4294967040.0f && v == floorf(v);
+}
+
+bool truing_param_apply(struct truing_solver_config *cfg, truing_param_id_t id, float value)
+{
+    if (cfg == NULL) {
+        return false;
+    }
+    const truing_param_class_t cls = truing_param_class(id);
+    if (cls != TRUING_PARAM_CLASS_SESSION_MUTABLE && cls != TRUING_PARAM_CLASS_SESSION_FIXED) {
+        return false;   /* artifact-bound and unknown ids are never applied (SPEC §12.3.1) */
+    }
+    switch (id) {
+    case TRUING_PARAM_MAX_CYCLES:
+        if (!fits_u8(value)) return false;
+        cfg->max_cycles = (uint8_t)value;
+        return true;
+    case TRUING_PARAM_MEASUREMENT_RETRY_COUNT:
+        if (!fits_u8(value)) return false;
+        cfg->measurement_retry_count = (uint8_t)value;
+        return true;
+    case TRUING_PARAM_EXCITATION_SETTLE_MS:
+        if (!fits_u16(value)) return false;
+        cfg->excitation_settle_ms = (uint16_t)value;
+        return true;
+    case TRUING_PARAM_MIN_RELATIVE_IMPROVEMENT:
+        if (!isfinite(value)) return false;
+        cfg->min_relative_improvement = value;
+        return true;
+    case TRUING_PARAM_CONSECUTIVE_NON_IMPROVING_CYCLES:
+        if (!fits_u8(value)) return false;
+        cfg->consecutive_non_improving_cycles = (uint8_t)value;
+        return true;
+    case TRUING_PARAM_PARTIAL_STATE_REMEASURE_ATTEMPTS:
+        if (!fits_u8(value)) return false;
+        cfg->partial_state_remeasure_attempts = (uint8_t)value;
+        return true;
+    case TRUING_PARAM_TENSION_MODEL_PROFILE_ID:
+        if (!fits_u32(value)) return false;
+        cfg->tension_model_profile_id = (uint32_t)value;
+        return true;
+    case TRUING_PARAM_TARGET_TENSION:
+        if (!isfinite(value)) return false;
+        cfg->target_tension_n = value;
+        return true;
+    case TRUING_PARAM_ADJUSTMENT_DEADBAND:
+        if (!isfinite(value)) return false;
+        cfg->adjustment_deadband_rev = value;
+        return true;
+    case TRUING_PARAM_LATERAL_DEADBAND:
+        if (!isfinite(value)) return false;
+        cfg->lateral_deadband_mm = value;
+        return true;
+    case TRUING_PARAM_MAX_ADJUSTMENT_REVOLUTIONS:
+        if (!isfinite(value)) return false;
+        cfg->max_adjustment_revolutions = value;
+        return true;
+    default:
+        return false;
     }
 }
 
