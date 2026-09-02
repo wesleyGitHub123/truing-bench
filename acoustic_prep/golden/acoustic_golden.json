@@ -1,0 +1,305 @@
+{
+  "acoustic_repo_commit": "4f9d35d08a46fde8fb6d165aa7c8b926ec0fd13c",
+  "sample_rate_hz": 48000,
+  "pcm_format": "int32 LE, sample24 << 8 (I2S 24-in-32)",
+  "float_scale": "sample24 / 2^23",
+  "dsp_params": {
+    "gate_start_ms": 40.0,
+    "window_ms": 500.0,
+    "decay_floor_db": 30.0,
+    "decay_smoothing_ms": 5.0,
+    "next_onset_margin_ms": 20.0,
+    "min_window_ms": 60.0,
+    "zero_pad_factor": 8.0,
+    "search_band_hz": [
+      300.0,
+      3000.0
+    ],
+    "prominence_db": 6.0,
+    "max_peak_depth_db": 30.0,
+    "max_peaks": 8,
+    "f1_band_hz": [
+      350.0,
+      600.0
+    ],
+    "f2_ratio_range": [
+      1.9,
+      2.3
+    ],
+    "n_subwindows": 5,
+    "modulation_band_hz": [
+      2.0,
+      200.0
+    ],
+    "snr_noise_offset_hz": [
+      100.0,
+      300.0
+    ]
+  },
+  "onset_params": {
+    "frame_ms": 10.0,
+    "hop_ms": 5.0,
+    "threshold_rel": 0.15,
+    "threshold_abs": 0.0017782794100389228,
+    "refractory_s": 2.5
+  },
+  "pre_ms": 200.0,
+  "post_ms": 600.0,
+  "model_constants": {
+    "gauge_mm": 2.0,
+    "L_eff_m": 0.1935,
+    "nominal_span_m": 0.1935,
+    "density_kg_m3": 7850.0,
+    "youngs_modulus_pa": 200000000000.0
+  },
+  "tolerances": {
+    "f1_hz_abs": 0.05,
+    "f2_hz_abs": 0.1,
+    "snr_db_abs": 0.2,
+    "magnitude_db_abs": 0.2,
+    "prominence_db_abs": 0.2,
+    "note": "float32 FFT of 2^18 points vs float64; judged in the C tests"
+  },
+  "cases": [
+    {
+      "name": "ts00_e2",
+      "source_file": "TS00_S01_free_medium.wav",
+      "campaign": "tension_sweep",
+      "event_index_in_file": 2,
+      "excerpt_start_sample_in_file": 612720,
+      "n_samples": 38400,
+      "pcm_sha256": "1b6c1aa9ec9acfc7c83a118ef3d767d317573bde0ce85cbb3d624b12e2db2794",
+      "onset_sample": 9600,
+      "onset_threshold": 0.0031900321410484314,
+      "n_onsets_in_excerpt": 1,
+      "window_start_sample": 11520,
+      "window_len_ms": 500.0,
+      "window_n_samples": 24000,
+      "window_truncated_by": "window_ms",
+      "n_fft": 262144,
+      "f1_hz": 423.88583781015325,
+      "f1_magnitude_db": 10.85048198297181,
+      "f1_prominence_db": 16.915228491162598,
+      "f1_bin_index": 2315,
+      "f2_hz": null,
+      "snr_f1_db": 45.89972307294346,
+      "n_peaks_in_band": 4,
+      "n_strong_peaks": 12,
+      "candidates": [
+        {
+          "freq_hz": 432.79669597858435,
+          "prominence_db": 88.98369941056214,
+          "magnitude_db": 30.911295303790613,
+          "bin_index": 2364
+        },
+        {
+          "freq_hz": 608.2152978744542,
+          "prominence_db": 110.72273071108738,
+          "magnitude_db": 31.382056532216705,
+          "bin_index": 3322
+        },
+        {
+          "freq_hz": 1251.0356871128029,
+          "prominence_db": 21.0247467736648,
+          "magnitude_db": 9.844695875701596,
+          "bin_index": 6832
+        },
+        {
+          "freq_hz": 1259.9275930827228,
+          "prominence_db": 72.93784273532599,
+          "magnitude_db": 13.629451018112755,
+          "bin_index": 6881
+        },
+        {
+          "freq_hz": 1321.5010407987318,
+          "prominence_db": 34.17822755314363,
+          "magnitude_db": 5.5309512160660566,
+          "bin_index": 7217
+        },
+        {
+          "freq_hz": 1329.7386255501503,
+          "prominence_db": 91.41613677166764,
+          "magnitude_db": 14.627011195572054,
+          "bin_index": 7262
+        },
+        {
+          "freq_hz": 1837.1812752645699,
+          "prominence_db": 85.22912548930523,
+          "magnitude_db": 8.803780701239589,
+          "bin_index": 10033
+        },
+        {
+          "freq_hz": 2034.4779227866945,
+          "prominence_db": 79.32192984019463,
+          "magnitude_db": 6.442058048715205,
+          "bin_index": 11111
+        }
+      ],
+      "models": {
+        "mu_kg_per_m": 0.024661502330679878,
+        "ei_n_m2": 0.15707963267948968,
+        "L_eff_m": 0.1935,
+        "m0_tension_n": 663.6502666176259,
+        "m1_stiffness_correction_n": 41.4054666590547,
+        "m1_tension_n": 622.2447999585712,
+        "m2_rejected": "f2_null"
+      }
+    },
+    {
+      "name": "ts03_e2",
+      "source_file": "TS03_S01_free_medium.wav",
+      "campaign": "tension_sweep",
+      "event_index_in_file": 2,
+      "excerpt_start_sample_in_file": 599760,
+      "n_samples": 38400,
+      "pcm_sha256": "665321e52e880542b87cd3a15216cb57e9eb3f09124e63009564eed104c98b98",
+      "onset_sample": 9600,
+      "onset_threshold": 0.005754453487205358,
+      "n_onsets_in_excerpt": 1,
+      "window_start_sample": 11520,
+      "window_len_ms": 500.0,
+      "window_n_samples": 24000,
+      "window_truncated_by": "window_ms",
+      "n_fft": 262144,
+      "f1_hz": 379.80023683730457,
+      "f1_magnitude_db": 37.95159286170665,
+      "f1_prominence_db": 110.35258374675159,
+      "f1_bin_index": 2074,
+      "f2_hz": null,
+      "snr_f1_db": 75.61119271676898,
+      "n_peaks_in_band": 2,
+      "n_strong_peaks": 5,
+      "candidates": [
+        {
+          "freq_hz": 379.80023683730457,
+          "prominence_db": 110.35258374675159,
+          "magnitude_db": 37.95159286170665,
+          "bin_index": 2074
+        },
+        {
+          "freq_hz": 444.7116411935999,
+          "prominence_db": 73.68587725828695,
+          "magnitude_db": 29.05979997957286,
+          "bin_index": 2429
+        },
+        {
+          "freq_hz": 1003.3652767913187,
+          "prominence_db": 101.80502970863125,
+          "magnitude_db": 28.574443621146393,
+          "bin_index": 5480
+        },
+        {
+          "freq_hz": 1447.484096857583,
+          "prominence_db": 80.07911941499381,
+          "magnitude_db": 9.859939174216564,
+          "bin_index": 7905
+        },
+        {
+          "freq_hz": 1692.8086184170047,
+          "prominence_db": 81.99332187675685,
+          "magnitude_db": 9.873535667117133,
+          "bin_index": 9245
+        }
+      ],
+      "models": {
+        "mu_kg_per_m": 0.024661502330679878,
+        "ei_n_m2": 0.15707963267948968,
+        "L_eff_m": 0.1935,
+        "m0_tension_n": 532.7849174208179,
+        "m1_stiffness_correction_n": 41.4054666590547,
+        "m1_tension_n": 491.3794507617632,
+        "m2_rejected": "f2_null"
+      }
+    },
+    {
+      "name": "d3_e1",
+      "source_file": "D3_partner_free.wav",
+      "campaign": "tension_sweep",
+      "event_index_in_file": 1,
+      "excerpt_start_sample_in_file": 487200,
+      "n_samples": 38400,
+      "pcm_sha256": "d1a0c40cb265dc69d32ebb905f3cd323868c5fe42d418d58a1cc0328deeb6ba6",
+      "onset_sample": 9600,
+      "onset_threshold": 0.00230865936885563,
+      "n_onsets_in_excerpt": 1,
+      "window_start_sample": 11520,
+      "window_len_ms": 500.0,
+      "window_n_samples": 24000,
+      "window_truncated_by": "window_ms",
+      "n_fft": 262144,
+      "f1_hz": 432.03943779135625,
+      "f1_magnitude_db": 21.342222434056243,
+      "f1_prominence_db": 90.78553444209444,
+      "f1_bin_index": 2360,
+      "f2_hz": 864.0870235879576,
+      "snr_f1_db": 57.3758422062279,
+      "n_peaks_in_band": 3,
+      "n_strong_peaks": 7,
+      "candidates": [
+        {
+          "freq_hz": 432.03943779135625,
+          "prominence_db": 90.78553444209444,
+          "magnitude_db": 21.342222434056243,
+          "bin_index": 2360
+        },
+        {
+          "freq_hz": 441.7049550031952,
+          "prominence_db": 23.859272477283206,
+          "magnitude_db": 10.223541643742319,
+          "bin_index": 2412
+        },
+        {
+          "freq_hz": 588.7065577116441,
+          "prominence_db": 47.52676201942486,
+          "magnitude_db": 13.116002915146117,
+          "bin_index": 3215
+        },
+        {
+          "freq_hz": 608.5112219003195,
+          "prominence_db": 99.68813617389074,
+          "magnitude_db": 26.440711838652593,
+          "bin_index": 3323
+        },
+        {
+          "freq_hz": 864.0870235879576,
+          "prominence_db": 72.99325172332793,
+          "magnitude_db": 2.1762330566984884,
+          "bin_index": 4719
+        },
+        {
+          "freq_hz": 1250.592687035238,
+          "prominence_db": 83.17789421537005,
+          "magnitude_db": 11.027524749008451,
+          "bin_index": 6830
+        },
+        {
+          "freq_hz": 1259.737874999213,
+          "prominence_db": 39.932601476125384,
+          "magnitude_db": 9.1391511768752,
+          "bin_index": 6880
+        }
+      ],
+      "models": {
+        "mu_kg_per_m": 0.024661502330679878,
+        "ei_n_m2": 0.15707963267948968,
+        "L_eff_m": 0.1935,
+        "m0_tension_n": 689.4269306934166,
+        "m1_stiffness_correction_n": 41.4054666590547,
+        "m1_tension_n": 648.0214640343619,
+        "m2_rejected": "l_eff_out_of_bounds",
+        "m2_l_eff_ratio_unrejected": 9.886445686205096
+      }
+    }
+  ],
+  "noise": {
+    "name": "noise",
+    "source_file": "noise_floor.wav",
+    "campaign": "tension_sweep",
+    "excerpt_start_sample_in_file": 48000,
+    "n_samples": 12000,
+    "pcm_sha256": "46285917891fcbbc09b8b5467c7563da58c7484c4eb8f948181041215e2efd4e",
+    "n_onsets_in_excerpt_reference": 0,
+    "note": "Recorded noise floor. The relative onset threshold always fires on SOMETHING in a file-local detector; the firmware applies the chain profile's absolute floor as well and must report NO_ONSET_DETECTED or LOW_SNR, never a tension.",
+    "rms_dbfs": -70.7651500232487
+  }
+}
