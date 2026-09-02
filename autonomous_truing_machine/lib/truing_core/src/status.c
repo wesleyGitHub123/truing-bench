@@ -31,6 +31,7 @@ static const char *const k_reason_str[TRUING_REASON__COUNT] = {
     "TENSION_NOT_VERIFICATION_GRADE",
     "CANCELLED",
     "WHEEL_REFERENCE_LOST",
+    "CAPTURE_OVERRUN",
 };
 
 static const char *const k_terminal_str[TRUING_TERMINAL__COUNT] = {

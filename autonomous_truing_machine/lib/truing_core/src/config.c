@@ -279,6 +279,44 @@ truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, c
     }
     CHECK(check_pos(p->window_ms, "window_ms", field));
     CHECK(check_nonneg(p->gate_start_ms, "gate_start_ms", field));
+    /* Phase 1f DSP constants (SPEC 9.5): present, finite and mutually consistent. */
+    CHECK(check_pos(p->capture_ms, "capture_ms", field));
+    CHECK(check_nonneg(p->pre_trigger_ms, "pre_trigger_ms", field));
+    CHECK(check_nonneg(p->excitation_pulse_ms, "excitation_pulse_ms", field));
+    CHECK(check_nonneg(p->measurement_min_snr_db, "measurement_min_snr_db", field));
+    CHECK(check_pos(p->onset_frame_ms, "onset_frame_ms", field));
+    CHECK(check_pos(p->onset_hop_ms, "onset_hop_ms", field));
+    CHECK(check_pos(p->onset_threshold_rel, "onset_threshold_rel", field));
+    CHECK(check_nonneg(p->onset_threshold_abs, "onset_threshold_abs", field));
+    CHECK(check_pos(p->onset_refractory_s, "onset_refractory_s", field));
+    CHECK(check_pos(p->decay_floor_db, "decay_floor_db", field));
+    CHECK(check_nonneg(p->decay_smoothing_ms, "decay_smoothing_ms", field));
+    CHECK(check_nonneg(p->next_onset_margin_ms, "next_onset_margin_ms", field));
+    CHECK(check_pos(p->min_window_ms, "min_window_ms", field));
+    CHECK(check_pos(p->zero_pad_factor, "zero_pad_factor", field));
+    CHECK(check_pos(p->search_band_lo_hz, "search_band_lo_hz", field));
+    CHECK(check_pos(p->search_band_hi_hz, "search_band_hi_hz", field));
+    CHECK(check_pos(p->prominence_db, "prominence_db", field));
+    CHECK(check_nonneg(p->max_peak_depth_db, "max_peak_depth_db", field));
+    CHECK(check_pos(p->f2_ratio_lo, "f2_ratio_lo", field));
+    CHECK(check_pos(p->f2_ratio_hi, "f2_ratio_hi", field));
+    CHECK(check_nonneg(p->snr_noise_offset_lo_hz, "snr_noise_offset_lo_hz", field));
+    CHECK(check_pos(p->snr_noise_offset_hi_hz, "snr_noise_offset_hi_hz", field));
+    if (p->search_band_lo_hz >= p->search_band_hi_hz || p->search_band_hi_hz > (float)TRUING_AUDIO_SAMPLE_RATE_HZ * 0.5f ||
+        p->f1_band_lo_hz < p->search_band_lo_hz || p->f1_band_hi_hz > p->search_band_hi_hz) {
+        set_field(field, "search_band");
+        return TRUING_CFG_ERR_BAND;
+    }
+    if (p->f2_ratio_lo >= p->f2_ratio_hi || p->snr_noise_offset_lo_hz >= p->snr_noise_offset_hi_hz) {
+        set_field(field, "f2_ratio/snr_noise_offset");
+        return TRUING_CFG_ERR_BAND;
+    }
+    if (p->zero_pad_factor < 1.0f || p->max_peaks == 0u || p->max_peaks > TRUING_MAX_CANDIDATE_PEAKS ||
+        p->onset_threshold_rel > 1.0f || p->min_window_ms > p->window_ms ||
+        p->capture_ms < p->gate_start_ms + p->window_ms) {
+        set_field(field, "zero_pad_factor/max_peaks/onset_threshold_rel/min_window_ms/capture_ms");
+        return TRUING_CFG_ERR_OUT_OF_RANGE;
+    }
     return TRUING_CFG_OK;
 }
 
@@ -379,6 +417,14 @@ truing_cfg_check_t truing_tension_model_profile_check(const truing_tension_model
         CHECK(check_pos(p->empirical_n.value, "empirical_n", field));
     }
     CHECK(check_assumptions(&p->assumptions, field));
+    if (p->model_name == TRUING_TENSION_MODEL_HIGHER_MODE) {
+        CHECK(check_pos(p->l_eff_bounds_lo, "l_eff_bounds_lo", field));
+        CHECK(check_pos(p->l_eff_bounds_hi, "l_eff_bounds_hi", field));
+        if (p->l_eff_bounds_lo >= p->l_eff_bounds_hi) {
+            set_field(field, "l_eff_bounds");
+            return TRUING_CFG_ERR_OUT_OF_RANGE;
+        }
+    }
     return TRUING_CFG_OK;
 }
 

@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 #define TRUING_BLOB_MAGIC          0x46435254u   /* "TRCF" as little-endian u32 */
-#define TRUING_BLOB_SCHEMA_VERSION 1u
+#define TRUING_BLOB_SCHEMA_VERSION 2u   /* 2: Phase 1f chain-profile DSP constants and tension-profile L_eff bounds */
 #define TRUING_BLOB_HEADER_BYTES   14u
 /* Upper bound on any encoded blob (largest payload is the wheel class, < 128 bytes). */
 #define TRUING_BLOB_MAX_BYTES      256u

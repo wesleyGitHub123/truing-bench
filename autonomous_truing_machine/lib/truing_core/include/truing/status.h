@@ -60,6 +60,9 @@ typedef enum {
      *             logical position (slip, fault, or no reference established) (SPEC §10A). */
     TRUING_REASON_CANCELLED,
     TRUING_REASON_WHEEL_REFERENCE_LOST,
+    /* CAPTURE_OVERRUN — the audio front end dropped samples during a capture; the spectrum of a
+     *             discontinuous record is corrupt, so the measurement is rejected (SPEC §9.4). */
+    TRUING_REASON_CAPTURE_OVERRUN,
     TRUING_REASON__COUNT
 } truing_reason_t;
 

@@ -423,6 +423,30 @@ size_t truing_blob_encode_chain_profile(const truing_chain_profile_t *p, uint8_t
     put_f32(&w, p->f1_band_hi_hz);
     put_f32(&w, p->window_ms);
     put_f32(&w, p->gate_start_ms);
+    /* schema 2: Phase 1f DSP constants */
+    put_f32(&w, p->capture_ms);
+    put_f32(&w, p->pre_trigger_ms);
+    put_f32(&w, p->excitation_pulse_ms);
+    put_f32(&w, p->measurement_min_snr_db);
+    put_f32(&w, p->onset_frame_ms);
+    put_f32(&w, p->onset_hop_ms);
+    put_f32(&w, p->onset_threshold_rel);
+    put_f32(&w, p->onset_threshold_abs);
+    put_f32(&w, p->onset_refractory_s);
+    put_f32(&w, p->decay_floor_db);
+    put_f32(&w, p->decay_smoothing_ms);
+    put_f32(&w, p->next_onset_margin_ms);
+    put_f32(&w, p->min_window_ms);
+    put_f32(&w, p->zero_pad_factor);
+    put_f32(&w, p->search_band_lo_hz);
+    put_f32(&w, p->search_band_hi_hz);
+    put_f32(&w, p->prominence_db);
+    put_f32(&w, p->max_peak_depth_db);
+    put_u8(&w, p->max_peaks);
+    put_f32(&w, p->f2_ratio_lo);
+    put_f32(&w, p->f2_ratio_hi);
+    put_f32(&w, p->snr_noise_offset_lo_hz);
+    put_f32(&w, p->snr_noise_offset_hi_hz);
     return writer_finish(&w, TRUING_BLOB_KIND_CHAIN_PROFILE);
 }
 
@@ -449,6 +473,29 @@ truing_blob_result_t truing_blob_decode_chain_profile(const uint8_t *buf, size_t
     c.f1_band_hi_hz = get_f32(&r);
     c.window_ms = get_f32(&r);
     c.gate_start_ms = get_f32(&r);
+    c.capture_ms = get_f32(&r);
+    c.pre_trigger_ms = get_f32(&r);
+    c.excitation_pulse_ms = get_f32(&r);
+    c.measurement_min_snr_db = get_f32(&r);
+    c.onset_frame_ms = get_f32(&r);
+    c.onset_hop_ms = get_f32(&r);
+    c.onset_threshold_rel = get_f32(&r);
+    c.onset_threshold_abs = get_f32(&r);
+    c.onset_refractory_s = get_f32(&r);
+    c.decay_floor_db = get_f32(&r);
+    c.decay_smoothing_ms = get_f32(&r);
+    c.next_onset_margin_ms = get_f32(&r);
+    c.min_window_ms = get_f32(&r);
+    c.zero_pad_factor = get_f32(&r);
+    c.search_band_lo_hz = get_f32(&r);
+    c.search_band_hi_hz = get_f32(&r);
+    c.prominence_db = get_f32(&r);
+    c.max_peak_depth_db = get_f32(&r);
+    c.max_peaks = get_u8(&r);
+    c.f2_ratio_lo = get_f32(&r);
+    c.f2_ratio_hi = get_f32(&r);
+    c.snr_noise_offset_lo_hz = get_f32(&r);
+    c.snr_noise_offset_hi_hz = get_f32(&r);
     res = reader_finish(&r);
     if (res == TRUING_BLOB_OK) {
         *out = c;
@@ -473,6 +520,8 @@ size_t truing_blob_encode_tension_model_profile(const truing_tension_model_profi
     put_established(&w, &p->empirical_a);
     put_established(&w, &p->empirical_n);
     put_assumptions(&w, &p->assumptions);
+    put_f32(&w, p->l_eff_bounds_lo);   /* schema 2 */
+    put_f32(&w, p->l_eff_bounds_hi);
     return writer_finish(&w, TRUING_BLOB_KIND_TENSION_MODEL_PROFILE);
 }
 
@@ -499,6 +548,8 @@ truing_blob_result_t truing_blob_decode_tension_model_profile(const uint8_t *buf
     get_established(&r, &c.empirical_a);
     get_established(&r, &c.empirical_n);
     get_assumptions(&r, &c.assumptions);
+    c.l_eff_bounds_lo = get_f32(&r);   /* schema 2 */
+    c.l_eff_bounds_hi = get_f32(&r);
     res = reader_finish(&r);
     if (res == TRUING_BLOB_OK) {
         *out = c;

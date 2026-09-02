@@ -130,6 +130,34 @@ void truing_fixture_chain_profile_inmp441(truing_chain_profile_t *out)
     out->f1_band_hi_hz = 600.0f;
     out->window_ms = 500.0f;
     out->gate_start_ms = 40.0f;
+    /* Phase 1f: the research repository's config/dsp.yaml values (its commit is recorded in
+     * acoustic_prep/golden/acoustic_golden.json). Fixture content, PROVISIONAL by that file's own
+     * statement; bench results change them, theory does not. */
+    out->capture_ms = 1000.0f;
+    out->pre_trigger_ms = 200.0f;
+    out->excitation_pulse_ms = 20.0f;
+    out->measurement_min_snr_db = 12.0f;     /* research report.snr_warn_db */
+    out->onset_frame_ms = 10.0f;
+    out->onset_hop_ms = 5.0f;
+    out->onset_threshold_rel = 0.15f;
+    out->onset_threshold_abs = 0.0017783f;   /* -55 dBFS rms: 14 dB above this chain's recorded noise floor and
+                                              * below every recorded pluck's relative threshold (dsp.yaml leaves
+                                              * it null; a campaign file always holds plucks) */
+    out->onset_refractory_s = 2.5f;
+    out->decay_floor_db = 30.0f;
+    out->decay_smoothing_ms = 5.0f;
+    out->next_onset_margin_ms = 20.0f;
+    out->min_window_ms = 60.0f;
+    out->zero_pad_factor = 8.0f;
+    out->search_band_lo_hz = 300.0f;
+    out->search_band_hi_hz = 3000.0f;
+    out->prominence_db = 6.0f;
+    out->max_peak_depth_db = 30.0f;
+    out->max_peaks = 8u;
+    out->f2_ratio_lo = 1.9f;
+    out->f2_ratio_hi = 2.3f;
+    out->snr_noise_offset_lo_hz = 100.0f;
+    out->snr_noise_offset_hi_hz = 300.0f;
 }
 
 static void profile_base(truing_tension_model_profile_t *out, float gauge_mm)
@@ -155,6 +183,8 @@ static void profile_base(truing_tension_model_profile_t *out, float gauge_mm)
     out->empirical_n.provenance = TRUING_PROVENANCE_UNESTABLISHED;
     out->assumptions = k_assumptions_2p0;
     out->assumptions.spoke_diameter_mm = gauge_mm;
+    out->l_eff_bounds_lo = 0.5f;   /* research config/models.yaml m2.l_eff_bounds */
+    out->l_eff_bounds_hi = 1.5f;
 }
 
 void truing_fixture_tension_model_profile_complete(truing_tension_model_profile_t *out)

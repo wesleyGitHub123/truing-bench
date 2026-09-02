@@ -139,6 +139,31 @@ typedef struct {
     float    f1_band_hi_hz;
     float    window_ms;
     float    gate_start_ms;
+    /* Phase 1f: every remaining DSP constant of the research pipeline (SPEC 9.5 "configuration,
+     * never literals"; reference meaning in the research repo's config/dsp.yaml). */
+    float    capture_ms;                   /* audio captured per measurement after the excitation trigger */
+    float    pre_trigger_ms;               /* audio kept before the trigger so the onset detector sees silence */
+    float    excitation_pulse_ms;          /* pluck actuator pulse (0 = no actuator commanded) */
+    float    measurement_min_snr_db;       /* below this the estimate is REJECTED / LOW_SNR */
+    float    onset_frame_ms;
+    float    onset_hop_ms;
+    float    onset_threshold_rel;
+    float    onset_threshold_abs;          /* RMS, full scale 1.0; 0 disables */
+    float    onset_refractory_s;
+    float    decay_floor_db;
+    float    decay_smoothing_ms;
+    float    next_onset_margin_ms;
+    float    min_window_ms;
+    float    zero_pad_factor;
+    float    search_band_lo_hz;
+    float    search_band_hi_hz;
+    float    prominence_db;
+    float    max_peak_depth_db;            /* 0 disables the relative-depth gate */
+    uint8_t  max_peaks;
+    float    f2_ratio_lo;
+    float    f2_ratio_hi;
+    float    snr_noise_offset_lo_hz;
+    float    snr_noise_offset_hi_hz;
 } truing_chain_profile_t;
 
 /* ---- §11.3.1 Tension model profile ---------------------------------------------- */
@@ -173,6 +198,10 @@ typedef struct {
     truing_established_param_t empirical_a;
     truing_established_param_t empirical_n;
     truing_model_assumptions_t assumptions;
+    /* HIGHER_MODE only: the recovered L_eff must lie within [lo, hi] x nominal_free_span
+     * (research repo config/models.yaml m2.l_eff_bounds); a model parameter, not a literal. */
+    float l_eff_bounds_lo;
+    float l_eff_bounds_hi;
 } truing_tension_model_profile_t;
 
 /* ---- §11.6 Machine profile: physical station geometry (SPEC §10A) ----------------- */
