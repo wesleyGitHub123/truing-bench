@@ -112,3 +112,65 @@ true (lateral +0.4 mm at rim index 3, −0.3 mm at index 10).
 This proves the state machine, operator-wait correlation, navigation-by-outcome,
 admission, apply loop, verification and provenance on the target. It proves
 nothing about truing a wheel: every measurement and every solve was synthetic.
+
+## 2026-09-03 — Phase 1c influence artifact and real truing calculation on the DevKitC-1
+
+Firmware `0.1.0-phase1c` (image 369 KB flash, 100 KB static RAM; the expanded
+artifact accounts for 57 KB of that). Bring-up: **39 checks passed, 0 failed**
+(the 29 of Phase 1a plus the 10 below). Same capture method as before.
+
+### Artifact load and checks (SPEC 8.7, 8.11 R3, 11.4)
+
+| Observation | Value |
+|---|---|
+| Golden artifact `fixture_sym32` (id 1, fingerprint `25b68917ad02f8b4…`) | loaded from flash: integrity (SHA-256 content hash), compatibility (configured expected fingerprint), shape all pass |
+| Compact → expanded | 30,085 B in flash → 56,720 B in internal RAM, 86.6 ms including SHA-256 and the Fourier expansion of 32 × 32 lateral and radial columns |
+| Recorded conditioning | FULL rank 32, cond 47.8; TENSION_ABSENT rank 32, cond 47.8; both ≤ max_condition_number |
+| Common mode | `n_mt_identified = 0` with `T_target` present (the Phase 1b finding travels with the artifact) |
+| One flipped payload bit (PSRAM copy) | rejected: ARTIFACT_INVALID / content_hash |
+| Different configured expected fingerprint | rejected: incompatible |
+| N_rad + 1 in the solver configuration | rejected as a shape mismatch, nothing reshaped |
+
+### Parity with the host reference and solve cost (SPEC 14.3.5)
+
+| Observation | Value |
+|---|---|
+| d_ls, 4 cases × FULL + TENSION_ABSENT | worst relative deviation 7.4e-6 against the numpy float64 reference (stated tolerance 1e-5) |
+| J (row-count-normalised cost) | worst relative deviation 2.6e-7 |
+| Residual + inversion, FULL (32 × 96) | 626 µs per solve |
+| Residual + inversion, TENSION_ABSENT (32 × 64) | 411 µs per solve |
+| Full contract solve (admission + residual + inversion + plan) | 466 µs |
+| Exact linear state (u = Φ_u d, v = Φ_v d) | plan recovers −d to 1.8e-7 rev |
+| Policy | unidentified n_mt → TENSION_ABSENT with MEAN_TENSION_MODEL_UNAVAILABLE recorded |
+
+The per-cycle calculation is therefore negligible against the operator-paced
+workflow; nothing in Phase 1c needs PSRAM or the second core.
+
+### Workflow self-play on the real calculation
+
+`orch_demo` now runs the same manual-navigation / manual-runout self-play as
+Phase 1d but with the artifact-backed calculation, and the simulated wheel
+answers each adjustment through the artifact's own influence model
+(u += Φ_u d, v += Φ_v d). Starting state: the model's response to +0.30 rev on
+spoke 3, −0.25 rev on spoke 10 and +0.15 rev on spoke 21.
+
+| Observation | Value |
+|---|---|
+| Starting error | max lateral 0.221 mm (tolerance 0.10 mm) |
+| Terminal result | `CONVERGED_GEOMETRIC_ONLY`, reason `MEAN_TENSION_MODEL_UNAVAILABLE` (layout TENSION_ABSENT by policy, since the artifact's common mode is unidentified) |
+| Outer cycles run | 1; verification re-measured as cycle 2 |
+| Plan | spoke 3 −0.300 rev, spoke 10 +0.250 rev, spoke 21 −0.150 rev: the exact inverse of the perturbation |
+| Adjustments the operator was asked to apply | 15 = the 3 above plus 12 of −0.000 rev at spokes whose local lateral runout was outside tolerance (the deadband rule skips only when both the turn is below the deadband and the local runout is within tolerance) |
+| Final simulated wheel | max lateral 0.0000 mm; lateral at rim indices 3 and 10 exactly 0 |
+| Steps / transitions / waits answered | 725 / 725 / 223 (144 positioning, 64 runout entries, 15 adjustment confirmations) |
+| Provenance | session 1, artifact 1 with the golden fingerprint, layout TENSION_ABSENT, 64 active rows (64 valid, 0 suspect), `contains_non_real_implementations = 1` |
+| Telemetry ring | 1,365 events, 0 dropped; no intents rejected |
+| Wall time | 7.3 s, console-bound |
+| Heap after the run | internal free 292,723 bytes, minimum-ever 270,363 bytes; SPIRAM untouched by the solve |
+
+The calculation is real and artifact-backed; the acoustic estimate is still
+synthetic and the wheel is a simulation of the artifact's own linear model, so
+this run proves the solver and the workflow around it, not the truing of a
+physical wheel. The twelve −0.000 rev prompts are worth an owner's look: they
+are what the SPEC deadband rule prescribes when a neighbour's error puts a rim
+index out of tolerance, and a human operator would find them pointless.

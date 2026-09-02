@@ -14,7 +14,8 @@ was applied and the more specific normative rule was followed.
 | 1d Orchestrator | Implemented (`lib/truing_orchestrator`): the SPEC 7 state machine with both loops, operator waits, wait-instance correlation, abort at safe points, admission with bounded re-measurement, safety bound and deadband, verification-grade convergence gating, stall/max-cycle aborts, current-state snapshot and current-cycle provenance. Consumes Wheel Navigation by outcome only and the truing calculation through the `truing_calc` contract (stub + synthetic double until 1c). Host-tested end to end with zero hardware; self-played on the DevKitC-1 (docs/BRINGUP_LOG.md). |
 | 1g Runout manual entry | Implemented (`runout_manual.c`): a real implementation; entries arrive through `SUBMIT_RUNOUT` and are consumed by `read_snapshot()` without blocking. |
 | 1b Host model preparation | Implemented (`../model_prep`, Python): `bike-wheel-calc` verified (commit 6fc380c, its 52 tests pass); per-spoke analytical Φ_u/Φ_v/Φ_t generation; artifact assembly with per-layout pseudoinverses, rank/conditioning, common-mode evaluation, fingerprints and load checks; host reference two-part solve; SPEC 14.3 host gate (29 tests). Golden fixture artifact and parity cases in `model_prep/golden/`. Two findings below need the owner's attention before mean-tension targeting can ever be enabled. |
-| 1c, 1e, 1f, 1h, 2+ | Not started. 1c (firmware truing calculation) is now unlocked by the 1b host gate: compact artifact export for flash, load with the three checks, matrix-vector solve on the active row set, cost, and parity against `model_prep/golden/parity_sym32.json`. 1e (comms) and 1f (acoustic) depend only on 1a. |
+| 1c Firmware truing calculation | Implemented. Host side: `model_prep/truing_model_prep/export.py` writes the compact float32 binary artifact (SHA-256 content hash, per-spoke Fourier coefficients, Φ_t, per-layout masks / rank / conditioning / Φ†) and the C fixtures. Core: `truing/sha256` and `truing/artifact` (parse, the three SPEC 8.7 checks, R3 limits, expansion on the rim grid at load). Calculation: `lib/truing_calc/src/calc_artifact.c`, the REAL implementation behind the unchanged `truing_calc` contract (SPEC 8.3.1 residual, 8.7.1 layout-pure inversion, 8.4 two-part solve, 8.6 cost, 8.11 policy, Eq. 2 targets, per-side verification). Parity with the golden host cases on the host and on the DevKitC-1 (docs/BRINGUP_LOG.md); the orchestrator self-play now runs the real calculation against a wheel simulated through the same influence model. Not covered: loading an artifact from the `artifacts` partition or over the protocol (1e), and asymmetric Part 2 (refused by design, SPEC 8.4). |
+| 1e, 1f, 1h, 2+ | Not started. 1e (comms) and 1f (acoustic) depend only on 1a; 1h (integration) on all of the above. |
 
 ## Repository layout
 
@@ -119,6 +120,53 @@ renamed or moved.
   accepted into a dead session. `truing_orch_reset_to_ready()` starts a new
   session; it routes through INITIALIZE again if the wheel reference was lost.
 
+- **Compact artifact binary (Phase 1c).** Little-endian, float32 matrices, a
+  120-byte header (magic `TRIA`, schema 1, numeric artifact id, 31-char name,
+  generating fingerprint, SHA-256 content hash over the payload, dimensions,
+  flags, payload length) followed by weights/tolerances, c per side, the
+  common-mode diagnostics, `T_target_assumed`, `n_mt` (only when identified),
+  per-spoke Fourier coefficients, Φ_t, the class map and, per layout, mask /
+  rank / null dimension / condition number / Φ†. Sizes for sym32: 30 KB in
+  flash, ~51 KB expanded in RAM. Documented in `export.py`; the loader in
+  `truing/artifact.c` is the other half of the same contract and any change
+  must bump the schema version on both sides.
+- **Weights and tolerances are artifact-bound on the target too.** The loader
+  rejects an artifact whose recorded `tol_*`, `trust_*` or `c_side_*` differ
+  from the active configuration (float32 equality), because every Φ† was
+  computed with them baked in (SPEC 8.7.1). This is a shape check, reported
+  as ARTIFACT_INVALID; the configuration is never edited to match.
+- **The sym32 fixture wheel's expected fingerprint is the golden artifact's
+  generating fingerprint**, declared as a separate hex string emitted by the
+  exporter next to the blob and parsed independently of it. The two are
+  compared at load, never derived from each other, so the SPEC 11.4 "sole
+  authority" is still the configuration and a regenerated artifact with a
+  different fingerprint is refused until the configuration is updated.
+- **Float32 parity tolerance.** The parity document states 1e-5 relative;
+  the host build measures a worst deviation of 9.8e-6 on d_ls over 4 cases ×
+  2 layouts, i.e. it meets the stated figure with no margin. The C tests
+  assert 1e-4 relative (1e-6 rev absolute floor) so a different `libm`
+  (`cosf`/`sinf` in the expansion) or FMA contraction cannot make the gate
+  flap, and the measured figure is printed and recorded instead.
+- **The expanded artifact lives in static internal RAM** (`artifact_store.c`),
+  so the per-cycle solve is matrix-vector work with no heap use, and the
+  corruption checks in the bring-up use PSRAM scratch copies.
+- **Auto-operator response callback.** The self-play's simulated wheel can
+  answer an adjustment through the loaded influence model (u += Φ_u d,
+  v += Φ_v d), which makes the on-target self-play a consistency check of the
+  solver against its own model (one cycle to convergence), not a test of
+  truing physics. The default synthetic response is unchanged.
+
+## Phase 1c results (host)
+
+| Check | Result |
+|---|---|
+| Native suites | 16 suites, 107 cases, all pass (`pio test -e native`) |
+| Python suites | 32 pass, 1 skipped (`model_prep`, includes the binary export round trip) |
+| Parity, d_ls per layout | worst relative deviation 9.8e-6 over 4 cases × FULL + TENSION_ABSENT |
+| Parity, contract solve | plan turns equal the host `d_adj` under TENSION_ABSENT; FULL refused with MEAN_TENSION_MODEL_UNAVAILABLE exactly as the host recorded |
+| Exact linear state | plan = −d_applied to 1e-4 rev; predicted lateral targets 0 to 1e-4 mm |
+| Workflow on the real calculation | CONVERGED_GEOMETRIC_ONLY in 1 cycle, 22 adjustments, final max lateral 0.057 mm from a 0.274 mm start (the deadband keeps small turns unapplied) |
+
 ## Specification reconciliations
 
 - **v1.1 Wheel Navigation clarification (SPEC 10A, 11.6).** The read-only
@@ -190,6 +238,18 @@ generating parameters and fingerprinted (SPEC 8.7). The Rayleigh-Ritz mode
 count of the bike-wheel-calc solution (36) and the dense fit sample counts
 (256, ≥ 4× the floor) are generator parameters, recorded and fingerprinted. The
 fixture rim section is bike-wheel-calc's own example section, labelled as such.
+
+## Phase 1c observation for the owner — `adjustment_deadband` semantics
+
+SPEC 11.2 says adjustments below `adjustment_deadband` are skipped "when the
+wheel state at that spoke is already within tolerance", and `plan.c` does
+exactly that. On the target self-play (docs/BRINGUP_LOG.md, 2026-09-03) this
+produced twelve APPLY_ADJUSTMENT prompts of −0.000 rev at spokes whose own
+turn was numerically zero but whose rim index was out of tolerance because of
+a neighbour's error. A human operator would find those prompts pointless;
+skipping every sub-deadband turn regardless of local state would remove them
+without changing any applied adjustment. This is a rule change, so it is not
+made here.
 
 ## Open items carried forward (do not invent)
 

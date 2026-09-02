@@ -66,7 +66,13 @@ python -m venv .venv
 .venv\Scripts\python -m pytest -q                            # the SPEC 14.3 host gate
 .venv\Scripts\python -m truing_model_prep.cli generate-fixture --out golden/fixture_sym32_artifact.json
 .venv\Scripts\python -m truing_model_prep.cli parity-fixtures --artifact golden/fixture_sym32_artifact.json --out golden/parity_sym32.json
+# Phase 1c: regenerate the compiled-in golden artifact blob and the parity cases for the firmware tests
+.venv\Scripts\python -m truing_model_prep.cli export-c-fixtures --artifact golden/fixture_sym32_artifact.json --parity golden/parity_sym32.json --artifact-c ../autonomous_truing_machine/lib/truing_fixtures/src/fixture_sym32_artifact.c --parity-h ../autonomous_truing_machine/lib/truing_fixtures/include/truing_fixtures/fixture_sym32_parity.h --id 1
 ```
+
+The two generated files are committed; regenerate them only when the golden
+artifact or parity cases change, and commit the regeneration together with
+the golden JSON that produced it.
 
 `bike-wheel-calc` is fetched from GitHub at the pinned commit; the install
 needs network access once. `git clone` of that repository into a very long path
