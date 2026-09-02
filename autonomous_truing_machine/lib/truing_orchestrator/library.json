@@ -1,0 +1,21 @@
+{
+  "name": "truing_orchestrator",
+  "version": "0.1.0",
+  "description": "Orchestrator (SPEC §5.1, §7): the state machine, outer cycle loop and inner per-spoke apply loop, operator-wait states, abort handling, current-state snapshot and current-cycle provenance. Framework-free (P3): it sequences the subsystem contracts and holds no measurement logic. Includes the auto-operator test driver that answers waits so the workflow can run with zero hardware (SPEC §14.5).",
+  "dependencies": {
+    "truing_core": "*",
+    "truing_hal": "*",
+    "truing_calc": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
