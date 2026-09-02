@@ -1,0 +1,4 @@
+numpy==2.5.2
+scipy==1.18.1
+pytest==9.1.1
+bikewheelcalc @ git+https://github.com/dashdotrobot/bike-wheel-calc.git@6fc380c3576307d825d24fdffbbcbc192a720300
