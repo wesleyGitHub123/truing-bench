@@ -1,0 +1,341 @@
+#include "truing_hal/acoustic_real.h"
+
+#include <math.h>
+#include <string.h>
+
+#include "truing_dsp/tension_model.h"
+#include "truing_hal/records.h"
+
+static size_t align8(size_t v)
+{
+    return (v + 7u) & ~(size_t)7u;
+}
+
+static uint32_t capture_words(const truing_chain_profile_t *c)
+{
+    const float fs = (float)c->sample_rate_hz;
+    return (uint32_t)((c->pre_trigger_ms + c->capture_ms) * 1e-3f * fs + 0.5f);
+}
+
+static uint32_t max_window_samples(const truing_chain_profile_t *c)
+{
+    return (uint32_t)(c->window_ms * 1e-3f * (float)c->sample_rate_hz + 0.5f) + 1u;
+}
+
+static uint32_t onset_frames(const truing_chain_profile_t *c, uint32_t n)
+{
+    const float fs = (float)c->sample_rate_hz;
+    uint32_t frame = (uint32_t)(c->onset_frame_ms * 1e-3f * fs + 0.5f), hop = (uint32_t)(c->onset_hop_ms * 1e-3f * fs + 0.5f);
+    if (frame == 0u) frame = 1u;
+    if (hop == 0u) hop = 1u;
+    return n >= frame ? 1u + (n - frame) / hop : 0u;
+}
+
+size_t truing_acoustic_real_scratch_bytes(const truing_chain_profile_t *chain)
+{
+    if (chain == NULL) {
+        return 0u;
+    }
+    const uint32_t n = capture_words(chain);
+    const size_t dsp = truing_dsp_workspace_bytes(max_window_samples(chain), chain->zero_pad_factor);
+    if (dsp == 0u) {
+        return 0u;
+    }
+    return align8((size_t)n * sizeof(int32_t)) + align8((size_t)n * sizeof(float)) +
+           align8((size_t)(onset_frames(chain, n) + 1u) * sizeof(float)) + align8(dsp);
+}
+
+/* ---- the measurement ------------------------------------------------------------------ */
+static void fill_rejected(truing_tension_estimate_t *out, truing_reason_t reason, uint8_t cycle_index, uint32_t now,
+                          truing_source_impl_t src, const truing_tension_model_profile_t *profile)
+{
+    truing_hal_fill_unavailable_estimate(out, reason, cycle_index, now, src);
+    out->meta.status = TRUING_STATUS_REJECTED;
+    out->frequency.meta.status = TRUING_STATUS_REJECTED;
+    out->frequency.meta.reason_code = reason;
+    if (profile != NULL) {
+        out->model_name = profile->model_name;
+        out->model_version = profile->model_version;
+    }
+}
+
+static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, uint32_t n_words, uint8_t cycle_index,
+                    truing_tension_estimate_t *out)
+{
+    const uint32_t now = truing_clock_now_ms(&c->clock);
+    const truing_source_impl_t src = self->source_impl;
+    truing_acoustic_real_diag_t *d = &c->diag;
+    /* Layer 1 output -> float, the research reference's scale. */
+    for (uint32_t i = 0; i < n_words; ++i) {
+        c->samples[i] = truing_audio_word_to_float(c->words[i]);
+    }
+    /* Onset (S3.1). */
+    truing_onset_result_t on;
+    if (!truing_onset_detect(c->samples, n_words, &c->params, c->onset_env, c->onset_env_cap, &on) || on.n_onsets == 0u) {
+        d->onsets = on.n_onsets;
+        d->onset_threshold = on.threshold;
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_NO_ONSET_DETECTED, cycle_index, now, src, c->profile);
+        return;
+    }
+    d->onsets = on.n_onsets;
+    d->onset_sample = on.onset_sample[0];
+    d->onset_threshold = on.threshold;
+    if (c->cancel_requested) {
+        c->cancel_requested = false;
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, src);
+        return;
+    }
+    /* Window (S3.2): the first onset in the capture is the excitation; a second one bounds it. */
+    const int64_t next = on.n_onsets > 1u ? (int64_t)on.onset_sample[1] : -1;
+    truing_dsp_window_t w;
+    if (!truing_dsp_select_window(&c->dsp, c->samples, n_words, (int64_t)on.onset_sample[0], next, &c->params, &w)) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, c->profile);   /* too little signal survives gating */
+        return;
+    }
+    d->window = w;
+    /* Layers 2 + interim 3. */
+    truing_dsp_event_t ev;
+    if (!truing_dsp_analyze_window(&c->dsp, c->samples, &w, &c->params, &ev)) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, c->profile);
+        return;
+    }
+    d->n_fft = ev.n_fft;
+    d->n_strong_peaks = ev.n_strong_peaks;
+    d->n_peaks_in_band = ev.n_peaks_in_band;
+    d->f1_hz = ev.f1_found ? ev.f1.freq_hz : NAN;
+    d->f2_hz = ev.f2_found ? ev.f2.freq_hz : NAN;
+    d->snr_db = ev.snr_db;
+    if (ev.peaks_overflow) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_AMBIGUOUS_PEAK, cycle_index, now, src, c->profile);
+        return;
+    }
+    if (ev.n_strong_peaks == 0u) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_LOW_SNR, cycle_index, now, src, c->profile);
+        return;
+    }
+    if (!ev.f1_found) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_FREQ_OUT_OF_RANGE, cycle_index, now, src, c->profile);
+        return;
+    }
+    if (!isfinite(ev.snr_db) || ev.snr_db < c->chain->measurement_min_snr_db) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_LOW_SNR, cycle_index, now, src, c->profile);
+        return;
+    }
+    /* The frequency measurement record (SPEC 6.3): a SELECTION with provisional identity. */
+    memset(out, 0, sizeof(*out));
+    truing_frequency_measurement_t *f = &out->frequency;
+    f->meta.status = TRUING_STATUS_SUSPECT;
+    f->meta.reason_code = TRUING_REASON_PROVISIONAL_MODE_ID;
+    f->meta.cycle_index = cycle_index;
+    f->meta.timestamp_ms = now;
+    f->meta.source_impl = src;
+    f->selected_frequency_hz = ev.f1.freq_hz;
+    f->mode_identity = TRUING_MODE_ID_PRESUMED_FUNDAMENTAL;
+    f->n_candidates = ev.n_candidates;
+    for (uint8_t i = 0; i < ev.n_candidates && i < TRUING_MAX_CANDIDATE_PEAKS; ++i) {
+        f->candidates[i].frequency_hz = ev.candidates[i].freq_hz;
+        f->candidates[i].magnitude_db = ev.candidates[i].magnitude_db;
+        f->candidates[i].prominence_db = ev.candidates[i].prominence_db;
+    }
+    f->snr_db = ev.snr_db;
+    f->selection_rule_version = TRUING_DSP_SELECTION_RULE_VERSION;
+    /* Layer 4: the session-fixed model. */
+    out->meta = f->meta;
+    out->model_name = c->profile != NULL ? c->profile->model_name : TRUING_TENSION_MODEL_UNSET;
+    out->model_version = c->profile != NULL ? c->profile->model_version : 0u;
+    out->sigma_n = NAN;   /* repeat-scatter propagation needs repeated plucks (research S4.4); one pluck has none */
+    const truing_tension_result_t t = truing_tension_model_apply(c->profile, ev.f1.freq_hz, ev.f2_found ? ev.f2.freq_hz : NAN);
+    d->l_eff_m = t.l_eff_m;
+    if (!t.ok) {
+        c->rejections++;
+        out->tension_n = NAN;
+        if (t.reason == TRUING_REASON_CALIBRATION_MISSING) {
+            out->meta.status = TRUING_STATUS_UNAVAILABLE;
+            f->meta.status = TRUING_STATUS_UNAVAILABLE;
+        } else {
+            out->meta.status = TRUING_STATUS_REJECTED;
+            f->meta.status = TRUING_STATUS_REJECTED;
+        }
+        out->meta.reason_code = t.reason;
+        f->meta.reason_code = t.reason;
+        return;
+    }
+    out->tension_n = t.tension_n;
+    out->meta.status = TRUING_STATUS_SUSPECT;
+    out->meta.reason_code = TRUING_REASON_PROVISIONAL_MODE_ID;   /* SPEC 4.4.1: never valid while layer 3 is interim */
+    c->estimates++;
+}
+
+static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
+                         uint8_t cycle_index, truing_tension_estimate_t *out)
+{
+    (void)spoke_id;
+    (void)wheel_geometry;   /* a damping ritual targeting a neighbour would resolve it here (SPEC 9.1); none is implemented */
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    if (out == NULL) {
+        return;
+    }
+    if (c == NULL || !c->source_open) {
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_NOT_IMPLEMENTED, cycle_index, 0u, self->source_impl);
+        return;
+    }
+    c->calls++;
+    memset(&c->diag, 0, sizeof(c->diag));
+    c->diag.f1_hz = NAN;
+    c->diag.f2_hz = NAN;
+    c->diag.snr_db = NAN;
+    c->diag.l_eff_m = NAN;
+    const uint32_t now = truing_clock_now_ms(&c->clock);
+    if (!c->profile_ok) {
+        /* SPEC 11.3.1: defensive behaviour when invoked despite admission being bypassed. */
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CALIBRATION_MISSING, cycle_index, now, self->source_impl);
+        return;
+    }
+    if (c->cancel_requested) {
+        c->cancel_requested = false;
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, self->source_impl);
+        return;
+    }
+    /* Excitation: commanded when an actuator is attached; otherwise the capture records whatever
+     * excitation arrives (a hand pluck at the station), and NO_ONSET_DETECTED says when none did. */
+    if (c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck) && c->chain->excitation_pulse_ms > 0.0f) {
+        c->diag.pluck_commanded = c->pluck->fire(c->pluck, c->chain->excitation_pulse_ms);
+    }
+    const uint32_t t0 = truing_clock_now_ms(&c->clock);
+    uint32_t got = 0u;
+    const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
+    c->diag.capture_result = r;
+    c->diag.n_captured = got;
+    c->diag.capture_us = (truing_clock_now_ms(&c->clock) - t0) * 1000u;
+    if (r == TRUING_AUDIO_ERR_CANCELLED || (c->cancel_requested)) {
+        c->cancel_requested = false;
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, self->source_impl);
+        return;
+    }
+    if (r == TRUING_AUDIO_ERR_OVERRUN) {
+        /* SPEC 9.4: a dropped-sample discontinuity corrupts the spectrum; the capture is discarded. */
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_CAPTURE_OVERRUN, cycle_index, now, self->source_impl, c->profile);
+        return;
+    }
+    if (r != TRUING_AUDIO_OK || got == 0u) {
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_SENSOR_TIMEOUT, cycle_index, now, self->source_impl);
+        return;
+    }
+    const uint32_t t1 = truing_clock_now_ms(&c->clock);
+    analyze(self, c, got, cycle_index, out);
+    c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
+}
+
+static void real_cancel(truing_acoustic_if_t *self)
+{
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    if (c != NULL) {
+        c->cancel_requested = true;
+    }
+}
+
+void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_t *words, uint32_t n_words,
+                                        uint8_t cycle_index, truing_tension_estimate_t *out)
+{
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    if (out == NULL) {
+        return;
+    }
+    if (c == NULL || words == NULL) {
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_NOT_IMPLEMENTED, cycle_index, 0u, self->source_impl);
+        return;
+    }
+    c->calls++;
+    memset(&c->diag, 0, sizeof(c->diag));
+    c->diag.f1_hz = NAN;
+    c->diag.f2_hz = NAN;
+    c->diag.snr_db = NAN;
+    c->diag.l_eff_m = NAN;
+    if (!c->profile_ok) {
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CALIBRATION_MISSING, cycle_index, truing_clock_now_ms(&c->clock), self->source_impl);
+        return;
+    }
+    const uint32_t n = n_words < c->n_capture ? n_words : c->n_capture;
+    memcpy(c->words, words, (size_t)n * sizeof(int32_t));
+    c->diag.n_captured = n;
+    c->diag.capture_result = TRUING_AUDIO_OK;
+    const uint32_t t1 = truing_clock_now_ms(&c->clock);
+    analyze(self, c, n, cycle_index, out);
+    c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
+}
+
+bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *ctx, truing_clock_if_t clock,
+                               const truing_chain_profile_t *chain, const truing_tension_model_profile_t *profile,
+                               truing_audio_source_if_t *source, truing_pluck_if_t *pluck, void *scratch, size_t scratch_bytes,
+                               const char **detail)
+{
+    if (detail != NULL) *detail = "";
+    if (self == NULL || ctx == NULL) {
+        return false;
+    }
+    memset(ctx, 0, sizeof(*ctx));
+    self->impl_name = "acoustic_real";
+    self->source_impl = TRUING_SOURCE_REAL;
+    self->measure_spoke_tension = real_measure;
+    self->request_cancel = real_cancel;
+    self->ctx = ctx;
+    ctx->clock = clock;
+    ctx->chain = chain;
+    ctx->profile = profile;
+    ctx->source = source;
+    ctx->pluck = pluck;
+    const char *field = NULL;
+    if (chain == NULL || truing_chain_profile_check(chain, &field) != TRUING_CFG_OK) {
+        if (detail != NULL) *detail = "chain profile invalid";
+        return false;
+    }
+    if (!truing_dsp_params_from_chain(chain, &ctx->params)) {
+        if (detail != NULL) *detail = "chain profile not usable as DSP parameters";
+        return false;
+    }
+    if (source == NULL || source->open == NULL || source->capture == NULL) {
+        if (detail != NULL) *detail = "no audio source";
+        return false;
+    }
+    truing_audio_format_t fmt;
+    memset(&fmt, 0, sizeof(fmt));
+    if (source->format != NULL) source->format(source, &fmt);
+    if (!truing_audio_format_matches_system(&fmt) || source->open(source) != TRUING_AUDIO_OK) {
+        if (detail != NULL) *detail = "audio source cannot deliver 48 kHz / 24-bit in 32-bit slots (refused, not resampled)";
+        return false;
+    }
+    /* The subsystem's provenance follows its front end: a recorded or synthetic source makes the
+     * whole estimate non-real even though layers 2-4 are the real code (SPEC 6.2). */
+    self->source_impl = source->source_impl == TRUING_SOURCE_REAL ? TRUING_SOURCE_REAL : source->source_impl;
+    const size_t need = truing_acoustic_real_scratch_bytes(chain);
+    if (scratch == NULL || need == 0u || scratch_bytes < need) {
+        if (detail != NULL) *detail = "scratch too small";
+        source->close(source);
+        return false;
+    }
+    const uint32_t n = capture_words(chain);
+    uint8_t *p = (uint8_t *)scratch;
+    ctx->words = (int32_t *)p;    p += align8((size_t)n * sizeof(int32_t));
+    ctx->samples = (float *)p;    p += align8((size_t)n * sizeof(float));
+    ctx->onset_env_cap = onset_frames(chain, n) + 1u;
+    ctx->onset_env = (float *)p;  p += align8((size_t)ctx->onset_env_cap * sizeof(float));
+    const size_t dsp_bytes = truing_dsp_workspace_bytes(max_window_samples(chain), chain->zero_pad_factor);
+    if (!truing_dsp_workspace_init(&ctx->dsp, max_window_samples(chain), chain->zero_pad_factor, p, dsp_bytes)) {
+        if (detail != NULL) *detail = "dsp workspace";
+        source->close(source);
+        return false;
+    }
+    ctx->n_capture = n;
+    ctx->source_open = true;
+    uint32_t missing = 0u;
+    ctx->profile_ok = profile != NULL && truing_tension_model_profile_check(profile, &missing, &field) == TRUING_CFG_OK;
+    return true;
+}
