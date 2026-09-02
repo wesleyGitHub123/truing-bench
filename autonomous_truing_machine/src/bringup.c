@@ -25,6 +25,7 @@
 #include "nvs.h"
 
 #include "board/board_profile.h"
+#include "bringup_artifact.h"
 #include "config_store_nvs.h"
 #include "firmware_version.h"
 #include "truing/config.h"
@@ -502,14 +503,15 @@ void truing_bringup_run(truing_bringup_report_t *report)
     section_memory(&t, &r);
     r.i2s_probe_ok = section_i2s_probe(&t);
     r.core_selftest_ok = section_core_selftest(&t);
+    truing_bringup_artifact_section(&t.pass, &t.fail, &r.artifact_ok);
     section_config_store(&t, &r);
 
     r.checks_passed = t.pass;
     r.checks_failed = t.fail;
-    ESP_LOGI(TAG, "BRINGUP SUMMARY: passed=%d failed=%d | flash=%s psram=%s i2s_probe=%s nvs=%s core_selftest=%s config=%s",
+    ESP_LOGI(TAG, "BRINGUP SUMMARY: passed=%d failed=%d | flash=%s psram=%s i2s_probe=%s nvs=%s core_selftest=%s artifact=%s config=%s",
              r.checks_passed, r.checks_failed, r.flash_ok ? "ok" : "FAIL", r.psram_ok ? "ok" : "FAIL",
              r.i2s_probe_ok ? "ok" : "FAIL", r.nvs_ok ? "ok" : "FAIL", r.core_selftest_ok ? "ok" : "FAIL",
-             r.config_provisioned ? "provisioned" : "not-provisioned");
+             r.artifact_ok ? "ok" : "FAIL", r.config_provisioned ? "provisioned" : "not-provisioned");
     ESP_LOGI(TAG, "=========================================================");
     if (report != NULL) {
         *report = r;

@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "artifact_store.h"
 #include "firmware_version.h"
 #include "truing_calc/calc_if.h"
 #include "truing_fixtures/fixtures.h"
@@ -36,13 +37,23 @@ static struct {
     truing_navigation_if_t nav;
     truing_navigation_manual_ctx_t nctx;
     truing_calc_if_t calc;
-    truing_calc_synthetic_ctx_t cctx;
+    truing_calc_artifact_ctx_t cctx;      /* REAL calculation on the loaded artifact (Phase 1c) */
     truing_telemetry_if_t sink;
     truing_telemetry_ring_ctx_t ring;
     truing_auto_operator_t op;
     truing_orchestrator_t orch;
     uint32_t dropped_events;
 } s;
+
+/* The simulated wheel answers an adjustment through the SAME influence model the solver uses. */
+static void model_response(void *user, truing_auto_wheel_model_t *wheel, uint8_t spoke, float turns_rev)
+{
+    const truing_artifact_t *art = (const truing_artifact_t *)user;
+    for (uint8_t k = 0; k < art->n_rim_angles; ++k) {
+        wheel->lateral_mm[k] += art->phi_u[k][spoke] * turns_rev;
+        wheel->radial_mm[k] += art->phi_v[k][spoke] * turns_rev;
+    }
+}
 
 static uint32_t boot_clock_now(void *ctx)
 {
@@ -101,7 +112,8 @@ static void demo_task(void *arg)
 {
     (void)arg;
     ESP_LOGI(TAG, "== Stage 1 workflow self-play (manual navigation + manual runout answered by the auto-operator; "
-                  "SYNTHETIC acoustic + calculation double) ==");
+                  "SYNTHETIC acoustic; REAL truing calculation on the golden fixture artifact; the simulated wheel "
+                  "responds through the same influence model) ==");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -116,15 +128,43 @@ static void demo_task(void *arg)
     }
     truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
     truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
-    truing_calc_synthetic_init(&s.calc, &s.cctx, 42u);
+    truing_artifact_store_status_t ast;
+    const truing_artifact_t *art = truing_artifact_store_load_fixture(&s.wheel, &s.solver, &ast);
+    if (art == NULL) {
+        ESP_LOGE(TAG, "no usable artifact (%s: %s): the session cannot start (SPEC 7.5 ABORT_NO_MODEL)",
+                 truing_artifact_result_str(ast.result), ast.detail != NULL ? ast.detail : "");
+        vTaskDelete(NULL);
+        return;
+    }
+    truing_calc_artifact_init(&s.calc, &s.cctx, art, &s.wheel);
     truing_telemetry_ring_init(&s.sink, &s.ring);
     truing_auto_operator_init(&s.op);
-    float lateral[TRUING_MAX_RIM_ANGLES], radial[TRUING_MAX_RIM_ANGLES];
-    memset(lateral, 0, sizeof(lateral));
-    memset(radial, 0, sizeof(radial));
-    lateral[3] = 0.4f;     /* two spokes out of true: synthetic starting state */
-    lateral[10] = -0.3f;
-    truing_auto_operator_set_wheel(&s.op, 32u, lateral, radial, 1.0f);
+    /* Starting state: the model's own response to three mis-set spokes (+0.30 rev on 3, -0.25 rev on 10,
+     * +0.15 rev on 21), clearly outside the lateral tolerance and inside the 1.0 rev safety bound, so the
+     * simulated wheel and the calculation share one linear world (Eq. 2). */
+    float d0[TRUING_MAX_SPOKES], lateral[TRUING_MAX_RIM_ANGLES], radial[TRUING_MAX_RIM_ANGLES];
+    memset(d0, 0, sizeof(d0));
+    d0[3] = 0.30f;
+    d0[10] = -0.25f;
+    d0[21] = 0.15f;
+    for (uint8_t k = 0; k < 32u; ++k) {
+        float uu = 0.0f, vv = 0.0f;
+        for (uint8_t i = 0; i < 32u; ++i) {
+            uu += art->phi_u[k][i] * d0[i];
+            vv += art->phi_v[k][i] * d0[i];
+        }
+        lateral[k] = uu;
+        radial[k] = vv;
+    }
+    truing_auto_operator_set_wheel(&s.op, 32u, lateral, radial, 0.0f);
+    s.op.response_fn = model_response;
+    s.op.user = (void *)art;
+    float start_max = 0.0f;
+    for (uint8_t k = 0; k < 32u; ++k) {
+        if (fabsf(lateral[k]) > start_max) start_max = fabsf(lateral[k]);
+    }
+    ESP_LOGI(TAG, "starting state from the model: max|lateral| = %.3f mm (tolerance %.2f mm)", (double)start_max,
+             (double)s.solver.tol_lateral_mm);
 
     truing_orch_deps_t deps;
     memset(&deps, 0, sizeof(deps));
@@ -226,8 +266,15 @@ static void demo_task(void *arg)
     ESP_LOGI(TAG, "telemetry ring: emitted=%" PRIu32 " dropped=%" PRIu32 " | orchestrator transitions=%" PRIu32
                   " intents_rejected=%" PRIu32,
              s.ring.emitted, s.ring.dropped, s.orch.transitions, s.orch.intents_rejected);
-    ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3); this run used synthetic implementations and proves "
-                  "the workflow, not the truing.",
+    float final_max = 0.0f;
+    for (uint8_t k = 0; k < 32u; ++k) {
+        if (fabsf(s.op.wheel.lateral_mm[k]) > final_max) final_max = fabsf(s.op.wheel.lateral_mm[k]);
+    }
+    ESP_LOGI(TAG, "simulated wheel after the run: max|lateral| = %.4f mm (tolerance %.2f mm)", (double)final_max,
+             (double)s.solver.tol_lateral_mm);
+    ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3). The calculation is real (artifact-backed); the "
+                  "acoustic measurement is synthetic and the wheel is a simulation of the artifact's own model, so this proves "
+                  "the workflow and the solver, not the truing of a physical wheel.",
              truing_terminal_str(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY));
     vTaskDelete(NULL);
 }

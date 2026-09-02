@@ -17,6 +17,7 @@ typedef struct {
     bool nvs_ok;
     bool core_selftest_ok;
     bool config_provisioned;    /* every configuration kind present and valid in NVS */
+    bool artifact_ok;          /* Phase 1c: golden artifact loads and the calculation matches the host reference */
 } truing_bringup_report_t;
 
 void truing_bringup_run(truing_bringup_report_t *report);
