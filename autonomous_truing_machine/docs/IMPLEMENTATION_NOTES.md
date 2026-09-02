@@ -13,7 +13,8 @@ was applied and the more specific normative rule was followed.
 | 1a Scaffolding | Implemented: data model, configuration, status/provenance, HAL contracts with stub/synthetic implementations, Wheel Navigation contract with manual and synthetic implementations, both PlatformIO environments, NVS persistence, on-device bring-up. See the commit history for the verification performed at each step. |
 | 1d Orchestrator | Implemented (`lib/truing_orchestrator`): the SPEC 7 state machine with both loops, operator waits, wait-instance correlation, abort at safe points, admission with bounded re-measurement, safety bound and deadband, verification-grade convergence gating, stall/max-cycle aborts, current-state snapshot and current-cycle provenance. Consumes Wheel Navigation by outcome only and the truing calculation through the `truing_calc` contract (stub + synthetic double until 1c). Host-tested end to end with zero hardware; self-played on the DevKitC-1 (docs/BRINGUP_LOG.md). |
 | 1g Runout manual entry | Implemented (`runout_manual.c`): a real implementation; entries arrive through `SUBMIT_RUNOUT` and are consumed by `read_snapshot()` without blocking. |
-| 1b, 1c, 1e, 1f, 1h, 2+ | Not started. Next dependency-unlocked slices: 1b (host model preparation; starts with verifying `bike-wheel-calc` runs, SPEC 8.10; needs a Python environment, so free disk space first), 1e (comms: telemetry stream, command handling and the current-state/provenance queries over a transport; depends only on 1a) and 1f (acoustic subsystem; depends only on 1a). 1c waits for 1b's host gate. |
+| 1b Host model preparation | Implemented (`../model_prep`, Python): `bike-wheel-calc` verified (commit 6fc380c, its 52 tests pass); per-spoke analytical Φ_u/Φ_v/Φ_t generation; artifact assembly with per-layout pseudoinverses, rank/conditioning, common-mode evaluation, fingerprints and load checks; host reference two-part solve; SPEC 14.3 host gate (29 tests). Golden fixture artifact and parity cases in `model_prep/golden/`. Two findings below need the owner's attention before mean-tension targeting can ever be enabled. |
+| 1c, 1e, 1f, 1h, 2+ | Not started. 1c (firmware truing calculation) is now unlocked by the 1b host gate: compact artifact export for flash, load with the three checks, matrix-vector solve on the active row set, cost, and parity against `model_prep/golden/parity_sym32.json`. 1e (comms) and 1f (acoustic) depend only on 1a. |
 
 ## Repository layout
 
@@ -137,6 +138,58 @@ renamed or moved.
 - **SPEC 8.9 `n_rim_angles = n_spokes`** is enforced as a cross-configuration
   rule (`truing_config_check_pair`), not inside `WheelState`, which accepts any
   supported grid so the data model does not encode the Stage 1 policy.
+
+## Model-preparation findings (Phase 1b) — need the owner's decision
+
+Measured on the SYNTHETIC sym32 fixture (bike-wheel-calc example rim section,
+2.0 mm spokes, 45 mm flanges at 35 mm offset, 3-cross, 1000 N, N_lat 6, N_rad 13,
+32 rim angles); numbers will differ for the real wheel but the structure will not.
+
+1. **Equal tightening is not displacement-invisible in the analytical model.**
+   Tightening every spoke by 1/√32 turn produces zero lateral response (5e-16 mm)
+   but a UNIFORM radial contraction of the rim of 0.025 mm (non-uniform remainder
+   2e-4 mm). Consequently the tolerance-normalised displacement block has full
+   rank (32) for BOTH layouts (σ_min 1.07, effective condition 47.9,
+   `expected_null_dim = 0`), and condition (i) of SPEC 8.4 Part 1 fails with
+   residual 2.027, of which the uniform radial part is 2.027 and the remainder
+   0.017. The artifact records all of this and sets `identified = false`; the
+   runtime therefore refuses mean-tension targeting and truing runs under
+   `TENSION_ABSENT` (SPEC 8.4 fallback), which is the conservative behaviour the
+   specification mandates. **The open question:** whether condition (i) is meant
+   to hold for *runout* (non-uniform displacement, i.e. after removing the n = 0
+   radial mode, which a tare at the reference location would absorb) or for raw
+   displacement including a uniform radius change. The specification's
+   "structurally rank-deficient TENSION_ABSENT" expectation is not borne out by
+   the model under the raw reading. This is a solver-semantics decision (SPEC
+   consistency guardrail §1) and was NOT decided here; the raw reading is
+   implemented and the decomposition is recorded so either choice can be made
+   without regenerating anything but the flag.
+2. **Condition (ii) deviation of 0.38 %.** The tension response to equal
+   tightening is uniform to within 0.75 % between the two symmetric class pairs
+   (B-lead/A-trail: 110.9 N per turn; A-lead/B-trail: 111.8 N per turn); within
+   each pair it is exactly equal. The fixture's `n_mt_tension_tolerance` (1e-3)
+   is tighter than that. Whether the project tolerance should admit this
+   lead/trail effect is a configuration decision; the gate asserts the recorded
+   rule and the pair structure, not a pass.
+3. **Single-solve sensitivity to gauge noise.** With 0.01 mm noise on every
+   lateral and radial reading, one `TENSION_ABSENT` solve on this wheel recovers
+   a 0.2-turn-scale disturbance with ~36 % error (norm bound 0.80 turn). This is
+   the reason the outer cycle loop and the non-decrease abort exist (SPEC 8.1,
+   7.5); it is not a defect, but it sets expectations for Stage 1 dial
+   readings.
+4. **FULL-layout inversion and the tension scale.** Because the tension residual
+   is `T − s·T_norm` with `s` the current scale, the mean of the tension
+   disturbance is removed before the inversion; `d_ls` equals `d_applied` plus
+   exactly the pseudoinverse image of that removed mean (identity holds to
+   1e-15; ~1e-5 relative at trust_tension = 1e-5). The gate asserts both.
+
+Reconciliations made for 1b: the nipple thread pitch (spoke shortening per
+revolution) is required to express Φ per revolution and is not named in the
+SPEC 11.1 field list; it is treated as spoke geometry, recorded in the
+generating parameters and fingerprinted (SPEC 8.7). The Rayleigh-Ritz mode
+count of the bike-wheel-calc solution (36) and the dense fit sample counts
+(256, ≥ 4× the floor) are generator parameters, recorded and fingerprinted. The
+fixture rim section is bike-wheel-calc's own example section, labelled as such.
 
 ## Open items carried forward (do not invent)
 

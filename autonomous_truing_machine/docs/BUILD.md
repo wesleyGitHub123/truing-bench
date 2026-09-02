@@ -57,6 +57,22 @@ pio device monitor -p COM4 -b 115200
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_provision -t upload
 ```
 
+## Host model preparation (Phase 1b, `../model_prep`)
+
+```bash
+cd model_prep
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt     # numpy, scipy, pytest, bike-wheel-calc @ 6fc380c
+.venv\Scripts\python -m pytest -q                            # the SPEC 14.3 host gate
+.venv\Scripts\python -m truing_model_prep.cli generate-fixture --out golden/fixture_sym32_artifact.json
+.venv\Scripts\python -m truing_model_prep.cli parity-fixtures --artifact golden/fixture_sym32_artifact.json --out golden/parity_sym32.json
+```
+
+`bike-wheel-calc` is fetched from GitHub at the pinned commit; the install
+needs network access once. `git clone` of that repository into a very long path
+fails on Windows with "Filename too long"; clone with `-c core.longpaths=true`
+or into a short path if you want its examples.
+
 ## Notes
 
 - The first ESP-IDF build downloads the framework and toolchains (about 1.5 GB)
