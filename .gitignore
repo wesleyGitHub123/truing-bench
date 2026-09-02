@@ -1,0 +1,15 @@
+# --- PlatformIO build output and IDE-generated files (autonomous_truing_machine/) ---
+autonomous_truing_machine/.pio/
+autonomous_truing_machine/.vscode/.browse.c_cpp.db*
+autonomous_truing_machine/.vscode/c_cpp_properties.json
+autonomous_truing_machine/.vscode/launch.json
+autonomous_truing_machine/.vscode/ipch/
+# Per-environment sdkconfig is generated from sdkconfig.defaults
+autonomous_truing_machine/sdkconfig.*
+!autonomous_truing_machine/sdkconfig.defaults
+autonomous_truing_machine/dependencies.lock
+autonomous_truing_machine/managed_components/
+# --- OS / editor noise ---
+Thumbs.db
+.DS_Store
+*.swp
