@@ -1,0 +1,11 @@
+{
+  "name": "truing_board",
+  "version": "0.1.0",
+  "description": "Board profiles (SPEC §4.3): ALL pin assignments and board-specific facts live in one header per board, selected by -DBOARD_PROFILE_*. No pin numbers inline in driver code, ever.",
+  "build": {
+    "flags": [
+      "-Wall",
+      "-Wextra"
+    ]
+  }
+}

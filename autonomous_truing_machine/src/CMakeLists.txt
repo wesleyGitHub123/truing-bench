@@ -5,5 +5,5 @@ FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.c)
 idf_component_register(
     SRCS ${app_sources}
     INCLUDE_DIRS "."
-    REQUIRES nvs_flash esp_psram esp_hw_support esp_system spi_flash esp_timer log
+    REQUIRES nvs_flash esp_psram esp_hw_support esp_system spi_flash esp_timer log esp_driver_i2s
 )
