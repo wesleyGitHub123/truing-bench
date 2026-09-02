@@ -1,0 +1,19 @@
+{
+  "name": "truing_dsp",
+  "version": "0.1.0",
+  "description": "Acoustic layers 2-4 ported from the research repository (SPEC 4.4.1, 9.2): Hann-windowed zero-padded FFT spectrum with parabolic refinement, prominence-based peak candidates, the INTERIM layer-3 selection rule (lowest strong peak in the f1 band, output marked presumed_fundamental), onset detection and window gating, and the four candidate tension models behind one interface. Framework-free float32 C11; every constant arrives as a parameter, never a literal.",
+  "dependencies": {
+    "truing_core": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
