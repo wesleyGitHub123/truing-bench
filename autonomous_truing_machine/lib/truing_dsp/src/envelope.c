@@ -121,6 +121,32 @@ bool truing_envelope_analytic(truing_envelope_workspace_t *ws, const float *x, u
     return true;
 }
 
+/* scipy uniform_filter1d, origin 0: window [i - size//2, i - size//2 + size - 1], mode nearest. */
+static int64_t clamp_index(int64_t j, uint32_t n)
+{
+    return j < 0 ? 0 : (j >= (int64_t)n ? (int64_t)n - 1 : j);
+}
+
+void truing_envelope_smooth_reference(const float *env, uint32_t n, uint32_t width, float *out)
+{
+    if (env == NULL || out == NULL || n == 0u) {
+        return;
+    }
+    if (width <= 1u) {
+        memcpy(out, env, (size_t)n * sizeof(float));
+        return;
+    }
+    const int64_t left = (int64_t)(width / 2u);
+    const int64_t right = (int64_t)width - 1 - left;
+    for (uint32_t i = 0; i < n; ++i) {
+        double acc = 0.0;
+        for (int64_t j = (int64_t)i - left; j <= (int64_t)i + right; ++j) {
+            acc += env[clamp_index(j, n)];
+        }
+        out[i] = (float)(acc / (double)width);
+    }
+}
+
 void truing_envelope_smooth(const float *env, uint32_t n, uint32_t width, float *out)
 {
     if (env == NULL || out == NULL || n == 0u) {
@@ -130,15 +156,20 @@ void truing_envelope_smooth(const float *env, uint32_t n, uint32_t width, float 
         memcpy(out, env, (size_t)n * sizeof(float));
         return;
     }
-    /* scipy uniform_filter1d, origin 0: window [i - size//2, i - size//2 + size - 1], mode nearest. */
+    /* Same window as the reference, accumulated once and slid: each step adds the entering sample
+     * and subtracts the leaving one, so the cost is O(n) instead of O(n*width). The running sum
+     * differs from independent per-window summation only in floating-point association; the unit
+     * test holds this to the reference on both synthetic and recorded envelopes. */
     const int64_t left = (int64_t)(width / 2u);
     const int64_t right = (int64_t)width - 1 - left;
-    for (uint32_t i = 0; i < n; ++i) {
-        double acc = 0.0;
-        for (int64_t j = (int64_t)i - left; j <= (int64_t)i + right; ++j) {
-            const int64_t jj = j < 0 ? 0 : (j >= (int64_t)n ? (int64_t)n - 1 : j);
-            acc += env[jj];
-        }
-        out[i] = (float)(acc / (double)width);
+    double acc = 0.0;
+    for (int64_t j = -left; j <= right; ++j) {
+        acc += env[clamp_index(j, n)];
+    }
+    const double inv = 1.0 / (double)width;
+    out[0] = (float)(acc * inv);
+    for (uint32_t i = 1; i < n; ++i) {
+        acc += (double)env[clamp_index((int64_t)i + right, n)] - (double)env[clamp_index((int64_t)i - left - 1, n)];
+        out[i] = (float)(acc * inv);
     }
 }

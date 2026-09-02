@@ -36,8 +36,13 @@ bool   truing_envelope_workspace_init(truing_envelope_workspace_t *ws, uint32_t 
 bool truing_dsp_dft(truing_envelope_workspace_t *ws, const truing_cpx_t *x, uint32_t n, bool inverse, truing_cpx_t *out);
 /* |hilbert(x)| for real x[0..n), n <= max_n. `env` may not alias x. */
 bool truing_envelope_analytic(truing_envelope_workspace_t *ws, const float *x, uint32_t n, float *env);
-/* scipy.ndimage.uniform_filter1d(env, size=width, mode="nearest"); width <= 1 copies. `out` may not alias. */
+/* scipy.ndimage.uniform_filter1d(env, size=width, mode="nearest"); width <= 1 copies. `out` may not alias.
+ * O(n) through a running window sum. */
 void truing_envelope_smooth(const float *env, uint32_t n, uint32_t width, float *out);
+/* The original O(n*width) formulation, summing each window independently. Kept as the correctness
+ * oracle for truing_envelope_smooth: it is what was verified against scipy, and the unit test holds
+ * the fast path to it. Not used in the measurement path. */
+void truing_envelope_smooth_reference(const float *env, uint32_t n, uint32_t width, float *out);
 
 #ifdef __cplusplus
 }

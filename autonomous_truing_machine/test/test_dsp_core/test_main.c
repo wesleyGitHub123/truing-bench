@@ -123,6 +123,29 @@ static void test_uniform_smoothing_matches_scipy_nearest(void)
     TEST_ASSERT_EQUAL_FLOAT(3.0f, out[2]);
 }
 
+/* The O(n) running-sum smoother must agree with the O(n*width) reference it replaced, on an
+ * envelope shaped like a real beating ring-down rather than only on the 8-element scipy vector. */
+static void test_running_sum_smoothing_matches_the_reference(void)
+{
+    static float env[24000], ref[24000], fast[24000];
+    uint32_t s = 3u;
+    for (uint32_t i = 0; i < 24000u; ++i) {
+        const float t = (float)i / 48000.0f;
+        env[i] = 0.3f * expf(-t / 0.25f) * fabsf(sinf(2.0f * 3.14159265f * 170.0f * t)) + 1e-5f + 1e-5f * lcg(&s);
+    }
+    for (uint32_t width = 2u; width <= 241u; width += 239u) {
+        truing_envelope_smooth_reference(env, 24000u, width, ref);
+        truing_envelope_smooth(env, 24000u, width, fast);
+        float worst_rel = 0.0f;
+        for (uint32_t i = 0; i < 24000u; ++i) {
+            const float d = fabsf(ref[i] - fast[i]);
+            const float rel = ref[i] > 1e-12f ? d / ref[i] : d;
+            if (rel > worst_rel) worst_rel = rel;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(worst_rel < 1e-6f, "running sum drifted from the reference");
+    }
+}
+
 static void test_parabolic_interpolation_recovers_a_vertex(void)
 {
     /* y = -(k - 5.3)^2 + 2 sampled at integers: vertex at 5.3, value 2 */
@@ -318,6 +341,7 @@ int main(void)
     RUN_TEST(test_real_fft_matches_naive_dft);
     RUN_TEST(test_bluestein_dft_and_hilbert_envelope_match_scipy);
     RUN_TEST(test_uniform_smoothing_matches_scipy_nearest);
+    RUN_TEST(test_running_sum_smoothing_matches_the_reference);
     RUN_TEST(test_parabolic_interpolation_recovers_a_vertex);
     RUN_TEST(test_peak_prominence_matches_scipy_find_peaks);
     RUN_TEST(test_onset_detection_fires_once_per_burst);
