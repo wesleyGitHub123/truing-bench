@@ -1,0 +1,8 @@
+# Partition table — 16 MB flash (both SPEC §4.1 targets carry 16 MB).
+# SPEC §11.5: configuration/profiles in NVS; influence-matrix artifact and
+# tension-model profile in flash ("artifacts" data partition, mounted by later phases).
+# Name,      Type, SubType, Offset,   Size,     Flags
+nvs,         data, nvs,     0x9000,   0x6000,
+phy_init,    data, phy,     0xf000,   0x1000,
+factory,     app,  factory, 0x10000,  0x400000,
+artifacts,   data, spiffs,  0x410000, 0x200000,

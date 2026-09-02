@@ -1,0 +1,33 @@
+# Shared ESP-IDF defaults for both SPEC §4.1 targets (ESP32-S3, 16 MB flash, 8 MB octal PSRAM).
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# PSRAM (SPEC §4.1: verify on the actual board; §9.4.1: DMA buffers stay internal).
+# IGNORE_NOTFOUND keeps the firmware booting so the bring-up report can state
+# plainly whether PSRAM initialised, instead of failing silently in the bootloader.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+# SPEC §9.4.1 invariant 3: reserve internal DMA-capable memory.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+
+# RTOS / system
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Console: UART0 (DevKitC-1 UART bridge) with USB-Serial/JTAG mirror so the same
+# image logs on the Nano's native USB. Which port is the *debug* channel is a
+# board-profile concern (SPEC §12.1).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
