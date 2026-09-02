@@ -14,6 +14,10 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 # plainly whether PSRAM initialised, instead of failing silently in the bootloader.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
+# 80 MHz, not 120: the 120 MHz setting was measured on this board and is nearly twice as SLOW
+# (the 131,072-point transform went from 1,094 to 2,092 ms, and a pluck from 3.7 to 6.6 s),
+# because the octal PSRAM drops to a slower access mode when its clock is not matched by the
+# flash clock. Do not raise it without re-measuring.
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 CONFIG_SPIRAM_USE_MALLOC=y

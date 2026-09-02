@@ -224,5 +224,43 @@ ts00 pluck while the ideal-string model on the fixture profile gives 664 N;
 the fixture's `L_eff` is the crossing distance, which is synthetic content,
 and the effective-length question of SPEC §4.4.1 remains open. And the
 analysis takes **16 to 18 seconds per pluck** against roughly 0.6 s on the
-host, which is recorded as the phase's open performance item in
-docs/IMPLEMENTATION_NOTES.md.
+host — addressed in the optimisation pass below.
+
+## 2026-09-03 — Phase 1f DSP optimisation on the DevKitC-1
+
+Firmware `0.1.0-phase1f` rebuilt after the optimisation pass. Bring-up still
+**52 checks passed, 0 failed**, and the recorded plucks still reproduce the
+Python reference exactly: worst deviation **0.0000 Hz in f1, 0.000 dB in SNR**
+across all three. The acoustic scratch fell from 6,542,832 to 6,114,544 bytes.
+
+### Per-stage, one pluck, measured in isolation on the golden window
+
+| Stage | Before | After |
+|---|---|---|
+| Onset | 92,601 us | 61,126 us |
+| Hilbert envelope | 5,988,901 us | 2,085,399 us |
+| Smoothing | 4,176,555 us | 38,010 us |
+| Transform | 5,809,260 us | 1,411,656 us |
+| Peak finding | 125,760 us | 54,786 us |
+| SNR | 26,927 us | 15,114 us |
+| **Total** | **16,220,004 us** | **3,666,091 us** |
+
+End to end through the subsystem: 17,955 ms then 3,739 ms per pluck. The first
+pluck of a session costs 7,327 ms because it builds the cached tables.
+
+### The measurements that drove it
+
+| Micro-benchmark | Before | After |
+|---|---|---|
+| 131,073 double cos+sin | 3,476,432 us | 2,316,407 us |
+| Complex transform, 131,072 pt | 1,381,746 us | 1,093,923 us |
+| Complex transform, 65,536 pt | 677,998 us | 493,508 us |
+
+Double-precision trigonometry costs 26.5 us per cos+sin pair on this part,
+which is what made three constant-length loops the dominant expense. The
+micro-benchmarks improved only from the platform settings; the stage timings
+improved because the loops no longer run.
+
+A negative result worth keeping: **PSRAM at 120 MHz is 1.8x slower than at
+80 MHz** on this board (131,072-point transform 1,094 to 2,092 us; a pluck 3.7
+to 6.6 s). The setting is pinned at 80 MHz.

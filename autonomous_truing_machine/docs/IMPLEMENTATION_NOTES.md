@@ -200,38 +200,91 @@ renamed or moved.
   number. The research pipeline annotates instead; that difference is a
   firmware safety rule, not a DSP change.
 
-## Phase 1f open item for the owner — the analysis is 25x slower on target than on the host
+## Phase 1f performance — 16.2 s to 3.7 s per pluck, and where the floor now is
 
-Measured on the DevKitC-1 (docs/BRINGUP_LOG.md, 2026-09-03): one pluck takes
-**16.3 to 18.0 seconds** from raw samples to a tension estimate. The same
-excerpts take roughly 0.6 s each on the host. The numbers are identical to the
-last bit, so this is cost, not divergence.
+The correctness-first implementation took 16.2 s per pluck on target against
+about 0.6 s on the host, with identical numbers. It was profiled per stage on
+the DevKitC-1 and then optimised; the profiler is still in the build
+(`src/bringup_acoustic.c`) as the regression evidence.
 
-At that rate a 32-spoke measure pass plus a verify pass is about 19 minutes of
-pure DSP, which the operator-paced workflow tolerates but nobody should want.
-It has **not** been profiled per stage on target, so the following are ranked
-candidates, not findings:
+**What the profile actually said**, against the four candidates guessed when
+the phase closed: two were right, one was badly wrong, and the largest cost
+was not on the list in the right place.
 
-1. **The prominence scan.** `scipy.signal.find_peaks` computes prominence by
-   scanning outward from each peak until a higher sample, unbounded. On a
-   131,073-bin spectrum with thousands of in-band local maxima, and every read
-   going to PSRAM, this is the largest suspected term. A monotonic-stack
-   formulation gives identical values in O(n); scipy's own `wlen` bound would
-   be cheaper still but changes the numbers, so it is a research decision.
-2. **PSRAM residency.** The 262,144-point transform, its scratch and the
-   Hilbert envelope total 6.5 MB and cannot fit in internal RAM at this window
-   length and zero-pad factor. Every butterfly crosses the cache.
-3. **Software double transcendentals.** The real-FFT split step evaluates
-   `cos` and `sin` in double 131,073 times per call, and the Bluestein chirp
-   another 96,000; the S3 has no double-precision FPU. Caching these tables
-   costs about 1 MB of the 1.3 MB of PSRAM still free.
-4. **`truing_envelope_smooth`** is O(n x width), 5.8 M double additions per
-   pluck, where a running sum is O(n).
+| Stage | Before | After | What changed |
+|---|---|---|---|
+| Onset | 93 ms | 61 ms | platform settings only |
+| Hilbert envelope | 5,991 ms | 2,085 ms | cached chirp and kernel; inverse by conjugation |
+| Smoothing | 4,177 ms | 38 ms | running window sum instead of O(n x width) |
+| Transform | 5,810 ms | 1,412 ms | half-angle twiddle table; magnitude folded into the split |
+| Peak finding | 126 ms | 55 ms | platform settings only |
+| SNR | 27 ms | 15 ms | platform settings only |
+| **Total** | **16,220 ms** | **3,666 ms** | **4.4x** |
 
-Every one of these changes either preserves the golden values exactly or must
-be shown to. That is why none was attempted here: the bit-exact parity is the
-evidence Phase 1f exists to produce, and trading it for speed at the end of
-the phase would be the wrong order.
+The guess that the unbounded prominence scan dominated was **wrong**: it is
+126 ms, under 1% of the total. It was left exactly as it is, which also keeps
+`scipy.signal.find_peaks` semantics intact.
+
+The real dominant cost was **software double-precision trigonometry**, at a
+measured 26.5 us per cos+sin pair, because the ESP32-S3 has no double FPU and
+three loops evaluated transcendentals on every call at constant length. That
+alone was about 5.4 s.
+
+**The platform defaults were worth 1.6x on their own** and had nothing to do
+with the DSP: the CPU ran at 160 MHz, the compiler at -Og, and the data cache
+was 32 KB with 32-byte lines. Those are now set in `sdkconfig.defaults`.
+
+### Numerical deviations
+
+None observable. All three recorded plucks still reproduce the Python
+reference exactly — 0.0000 Hz in f1, 0.000 dB in SNR — and every native suite
+passes. Two changes are equivalent mathematically rather than bitwise, and are
+therefore held to the fixtures rather than by construction:
+
+- the running-sum smoother, which differs from independent per-window
+  summation in floating-point association (held to the retained
+  `truing_envelope_smooth_reference` within 1e-6 relative);
+- the inverse Bluestein transform, now obtained from
+  `IDFT(x) = conj(DFT(conj(x)))` so that one cached kernel serves both
+  directions; the intermediate roundings differ from a conjugated chirp.
+
+Everything else is bit-identical by construction, including the half-angle
+twiddle table (halving the step and doubling the index round identically for
+power-of-two lengths) and folding the magnitude reduction into the split.
+
+### The floor, and what would move it
+
+84% of the remaining 3,666 ms is transform butterflies against PSRAM: four
+65,536-point transforms in the Hilbert (1,974 ms) and one 131,072-point
+transform in the spectrum (1,094 ms). At 262,144 points on a 24,000-sample
+window the working set cannot fit in internal RAM, so every butterfly crosses
+the cache. Arithmetic tidying no longer helps — the loop micro-optimisations
+in the last commit bought 46 ms.
+
+Measured and rejected: **PSRAM at 120 MHz is 1.8x slower**, not faster
+(the 131,072-point transform goes from 1,094 to 2,092 ms and a pluck from 3.7
+to 6.6 s), because the octal PSRAM drops to a slower access mode when its
+clock is not matched by the flash clock. The setting is pinned at 80 MHz with
+that note.
+
+Two options remain, and **both are the owner's call because both change the
+correctness oracle**:
+
+1. **A cache-blocked or radix-4 transform.** Four to six passes over memory
+   instead of sixteen. Estimated 3.7 s to roughly 2.2 s. It changes
+   floating-point association, so the golden values would have to be
+   re-validated rather than preserved by construction.
+2. **`zero_pad_factor` 8 to 4.** Halves the spectrum transform, estimated 3.7 s
+   to roughly 3.1 s. It changes the bin grid and therefore the golden values.
+   It is a research parameter that lives in the acoustic repository's
+   `config/dsp.yaml`, so it is not a firmware decision.
+
+At 3.7 s a 32-spoke measure pass plus a verify pass is under four minutes of
+DSP, down from seventeen.
+
+One wrinkle worth knowing: the **first** pluck of a session costs 7.3 s
+because it builds the cached window, chirp, kernel and twiddle tables. That is
+once per workspace, not per pluck.
 
 ## Phase 1c results (host)
 
