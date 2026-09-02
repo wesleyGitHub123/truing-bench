@@ -28,7 +28,6 @@ size_t truing_spectrum_workspace_bytes(uint32_t n_fft_capacity, uint32_t max_win
     const size_t n = n_fft_capacity;
     return align8(truing_fft_half_twiddle_bytes((uint32_t)(n / 2u))) +   /* half-angle twiddle */
            align8((n / 2u) * sizeof(truing_cpx_t)) +           /* scratch */
-           align8((n / 2u + 1u) * sizeof(truing_cpx_t)) +      /* bins */
            align8(n * sizeof(float)) +                         /* windowed */
            align8((n / 2u + 1u) * sizeof(float)) +             /* log_mag */
            align8((size_t)max_window * sizeof(float));         /* hann */
@@ -46,7 +45,6 @@ bool truing_spectrum_workspace_init(truing_spectrum_workspace_t *ws, uint32_t n_
     const size_t n = n_fft_capacity;
     ws->twiddle = (truing_cpx_t *)p;  p += align8(truing_fft_half_twiddle_bytes((uint32_t)(n / 2u)));
     ws->scratch = (truing_cpx_t *)p;  p += align8((n / 2u) * sizeof(truing_cpx_t));
-    ws->bins = (truing_cpx_t *)p;     p += align8((n / 2u + 1u) * sizeof(truing_cpx_t));
     ws->windowed = (float *)p;        p += align8(n * sizeof(float));
     ws->log_mag = (float *)p;         p += align8((n / 2u + 1u) * sizeof(float));
     ws->hann = (float *)p;
@@ -87,12 +85,8 @@ bool truing_spectrum_compute(truing_spectrum_workspace_t *ws, const float *x, ui
             return false;
         }
     }
-    truing_fft_real(&ws->plan, ws->windowed, ws->scratch, ws->bins);
+    truing_fft_real_log_magnitude(&ws->plan, ws->windowed, ws->scratch, ws->log_mag, MAG_EPS);
     const uint32_t n_bins = n_fft / 2u + 1u;
-    for (uint32_t k = 0; k < n_bins; ++k) {
-        const float mag = sqrtf(ws->bins[k].re * ws->bins[k].re + ws->bins[k].im * ws->bins[k].im);
-        ws->log_mag[k] = 20.0f * log10f(mag > MAG_EPS ? mag : MAG_EPS);
-    }
     out->log_mag_db = ws->log_mag;
     out->n_bins = n_bins;
     out->n_fft = n_fft;

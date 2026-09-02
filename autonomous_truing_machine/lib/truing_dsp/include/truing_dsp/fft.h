@@ -46,6 +46,12 @@ void truing_fft_complex(const truing_fft_plan_t *plan, truing_cpx_t *x, bool inv
  * `out`, which needs n+1 entries; `x` (2n floats) is read through `scratch` (n complex).
  * Requires a HALF-ANGLE plan: the split factors come from its table. */
 void truing_fft_real(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch, truing_cpx_t *out);
+/* As truing_fft_real, but reduces each bin to 20*log10(max(|X[k]|, mag_eps)) as it is produced.
+ * The caller that only wants a log-magnitude spectrum then needs no complex bin array at all,
+ * which removes both that megabyte of storage and the round trip through it. Bit-identical to
+ * calling truing_fft_real and taking the magnitudes afterwards. `log_mag_out` needs n+1 floats. */
+void truing_fft_real_log_magnitude(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch,
+                                   float *log_mag_out, float mag_eps);
 
 uint32_t truing_dsp_next_pow2(uint32_t n);
 

@@ -71,6 +71,8 @@ static uint32_t bit_reverse(uint32_t v, uint32_t bits)
 void truing_fft_complex(const truing_fft_plan_t *plan, truing_cpx_t *x, bool inverse)
 {
     const uint32_t n = plan->n;
+    const truing_cpx_t *tw = plan->twiddle;
+    const uint32_t stride = plan->tw_stride;
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t j = bit_reverse(i, plan->log2n);
         if (j > i) {
@@ -79,29 +81,37 @@ void truing_fft_complex(const truing_fft_plan_t *plan, truing_cpx_t *x, bool inv
             x[j] = t;
         }
     }
+    /* The direction is folded into a +-1 multiplier on the twiddle's imaginary part, which is exact,
+     * and the table index is advanced rather than recomputed: both keep the arithmetic identical
+     * while taking the branch and two integer multiplies out of the inner loop. */
+    const float sgn = inverse ? -1.0f : 1.0f;
     for (uint32_t len = 2u; len <= n; len <<= 1) {
         const uint32_t half = len >> 1;
-        const uint32_t tstep = n / len;
+        const uint32_t tstep = (n / len) * stride;
         for (uint32_t start = 0u; start < n; start += len) {
+            truing_cpx_t *a = x + start;
+            truing_cpx_t *b = a + half;
+            uint32_t ti = 0u;
             for (uint32_t k = 0u; k < half; ++k) {
-                truing_cpx_t w = plan->twiddle[k * tstep * plan->tw_stride];
-                if (inverse) {
-                    w.im = -w.im;
-                }
-                truing_cpx_t *a = &x[start + k];
-                truing_cpx_t *b = &x[start + k + half];
-                const float tr = b->re * w.re - b->im * w.im;
-                const float ti = b->re * w.im + b->im * w.re;
+                const float wr = tw[ti].re;
+                const float wi = sgn * tw[ti].im;
+                ti += tstep;
+                const float br = b->re, bi = b->im;
+                const float tr = br * wr - bi * wi;
+                const float tim = br * wi + bi * wr;
                 b->re = a->re - tr;
-                b->im = a->im - ti;
+                b->im = a->im - tim;
                 a->re += tr;
-                a->im += ti;
+                a->im += tim;
+                ++a;
+                ++b;
             }
         }
     }
 }
 
-void truing_fft_real(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch, truing_cpx_t *out)
+static void fft_real_core(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch,
+                          truing_cpx_t *out, float *log_mag_out, float mag_eps)
 {
     const uint32_t n = half_plan->n;         /* complex length; real length is 2n */
     for (uint32_t k = 0; k < n; ++k) {
@@ -127,7 +137,25 @@ void truing_fft_real(const truing_fft_plan_t *half_plan, const float *x, truing_
             wr = (float)cos(step * (double)k);
             wi = (float)sin(step * (double)k);
         }
-        out[k].re = er + (or_ * wr - oi * wi);
-        out[k].im = ei + (or_ * wi + oi * wr);
+        const float xr = er + (or_ * wr - oi * wi);
+        const float xi = ei + (or_ * wi + oi * wr);
+        if (out != NULL) {
+            out[k].re = xr;
+            out[k].im = xi;
+        } else {
+            const float mag = sqrtf(xr * xr + xi * xi);
+            log_mag_out[k] = 20.0f * log10f(mag > mag_eps ? mag : mag_eps);
+        }
     }
+}
+
+void truing_fft_real(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch, truing_cpx_t *out)
+{
+    fft_real_core(half_plan, x, scratch, out, NULL, 0.0f);
+}
+
+void truing_fft_real_log_magnitude(const truing_fft_plan_t *half_plan, const float *x, truing_cpx_t *scratch,
+                                   float *log_mag_out, float mag_eps)
+{
+    fft_real_core(half_plan, x, scratch, NULL, log_mag_out, mag_eps);
 }

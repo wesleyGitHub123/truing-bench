@@ -30,9 +30,8 @@ typedef struct {
 /* Scratch a spectrum of up to `max_window` samples at `zero_pad_factor` needs. */
 typedef struct {
     truing_fft_plan_t plan;         /* complex length n_fft/2 */
-    truing_cpx_t     *twiddle;      /* n_fft/4 entries */
+    truing_cpx_t     *twiddle;      /* n_fft/2 entries: the half-angle table (see fft.h) */
     truing_cpx_t     *scratch;      /* n_fft/2 entries */
-    truing_cpx_t     *bins;         /* n_fft/2 + 1 entries */
     float            *windowed;     /* n_fft floats (zero-padded input) */
     float            *log_mag;      /* n_fft/2 + 1 floats */
     float            *hann;         /* max_window floats: the window, cached for `hann_n` */
