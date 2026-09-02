@@ -173,6 +173,70 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
             ESP_LOGW(TAG, "  the tensiometer read 1332.8 N for the ts00 pluck; the fixture profile's L_eff = crossing distance is "
                           "SYNTHETIC content and yields %.0f N: the effective-length question of SPEC 4.4.1 is open, not answered here",
                      (double)acoustic_golden_cases[0].m0_tension_n);
+            /* ---- stage profile: where the per-pluck time actually goes on this silicon ----
+             * Calls the DSP primitives directly on the golden window so each stage is timed in
+             * isolation. Kept in the build: it is the regression evidence for any optimisation. */
+            {
+                const acoustic_golden_case_t *g = &acoustic_golden_cases[0];
+                for (uint32_t i = 0; i < g->n_samples; ++i) {
+                    actx.samples[i] = truing_audio_word_to_float(g->pcm[i]);
+                }
+                const uint32_t wstart = (uint32_t)g->window_start_sample;
+                const uint32_t wlen = (uint32_t)g->window_n_samples;
+                const uint32_t smooth_w = (uint32_t)(actx.params.decay_smoothing_ms * 1e-3f * actx.params.sample_rate_hz + 0.5f);
+                truing_onset_result_t on;
+                int64_t t = esp_timer_get_time();
+                truing_onset_detect(actx.samples, g->n_samples, &actx.params, actx.onset_env, actx.onset_env_cap, &on);
+                const uint32_t us_onset = (uint32_t)(esp_timer_get_time() - t);
+                t = esp_timer_get_time();
+                truing_envelope_analytic(&actx.dsp.envelope, actx.samples + wstart, wlen, actx.dsp.env);
+                const uint32_t us_hilbert = (uint32_t)(esp_timer_get_time() - t);
+                t = esp_timer_get_time();
+                truing_envelope_smooth(actx.dsp.env, wlen, smooth_w, actx.dsp.env_smooth);
+                const uint32_t us_smooth = (uint32_t)(esp_timer_get_time() - t);
+                truing_spectrum_t spec;
+                t = esp_timer_get_time();
+                truing_spectrum_compute(&actx.dsp.spectrum, actx.samples + wstart, wlen, actx.params.sample_rate_hz,
+                                        actx.params.zero_pad_factor, &spec);
+                const uint32_t us_fft = (uint32_t)(esp_timer_get_time() - t);
+                static truing_peak_t s_peaks[TRUING_DSP_MAX_STRONG_PEAKS];
+                bool ovf = false;
+                t = esp_timer_get_time();
+                const uint32_t np = truing_peaks_find(&spec, actx.params.search_band_lo_hz, actx.params.search_band_hi_hz,
+                                                      actx.params.prominence_db, actx.params.max_peak_depth_db, s_peaks,
+                                                      TRUING_DSP_MAX_STRONG_PEAKS, &ovf);
+                const uint32_t us_peaks = (uint32_t)(esp_timer_get_time() - t);
+                t = esp_timer_get_time();
+                const float snr = truing_peaks_snr_db(&spec, g->f1_hz, g->f1_magnitude_db, actx.params.snr_noise_offset_lo_hz,
+                                                      actx.params.snr_noise_offset_hi_hz, actx.dsp.spectrum.windowed, spec.n_fft);
+                const uint32_t us_snr = (uint32_t)(esp_timer_get_time() - t);
+                ESP_LOGI(TAG, "stage profile (ts00_e2, window %" PRIu32 " samples -> %" PRIu32 " bins, %" PRIu32 " strong peaks, snr %.1f dB):",
+                         wlen, spec.n_bins, np, (double)snr);
+                ESP_LOGI(TAG, "  onset %" PRIu32 " us | hilbert %" PRIu32 " us | smooth %" PRIu32 " us | fft %" PRIu32 " us | peaks %" PRIu32
+                              " us | snr %" PRIu32 " us | total %" PRIu32 " us",
+                         us_onset, us_hilbert, us_smooth, us_fft, us_peaks, us_snr,
+                         us_onset + us_hilbert + us_smooth + us_fft + us_peaks + us_snr);
+                /* Decompose the two transforms: software double trigonometry vs. the butterflies
+                 * themselves, so the optimisation targets are measured rather than assumed. */
+                volatile double acc = 0.0;
+                const double dstep = -3.14159265358979323846 / 131072.0;
+                t = esp_timer_get_time();
+                for (uint32_t k = 0; k <= 131072u; ++k) {
+                    acc += cos(dstep * (double)k) + sin(dstep * (double)k);
+                }
+                const uint32_t us_trig131k = (uint32_t)(esp_timer_get_time() - t);
+                t = esp_timer_get_time();
+                truing_fft_complex(&actx.dsp.spectrum.plan, actx.dsp.spectrum.scratch, false);
+                const uint32_t us_cfft131k = (uint32_t)(esp_timer_get_time() - t);
+                t = esp_timer_get_time();
+                truing_fft_complex(&actx.dsp.envelope.plan, actx.dsp.envelope.a, false);
+                const uint32_t us_cfft65k = (uint32_t)(esp_timer_get_time() - t);
+                ESP_LOGI(TAG, "  micro: 131073 double cos+sin %" PRIu32 " us | complex FFT 131072 pt %" PRIu32 " us | complex FFT 65536 pt %" PRIu32 " us",
+                         us_trig131k, us_cfft131k, us_cfft65k);
+                ESP_LOGI(TAG, "  => real FFT 262144 pt = window + cfft(%" PRIu32 ") + split(trig %" PRIu32 " + arith) + log-magnitude; "
+                              "Hilbert = 2 x [chirp trig + 3 x cfft(%" PRIu32 ")]",
+                         us_cfft131k, us_trig131k, us_cfft65k);
+            }
             /* the recorded noise floor must never become a tension */
             truing_tension_estimate_t e;
             truing_acoustic_real_analyze_words(&a, ACOUSTIC_GOLDEN_NOISE_PCM, ACOUSTIC_GOLDEN_NOISE_N_SAMPLES, 1u, &e);
