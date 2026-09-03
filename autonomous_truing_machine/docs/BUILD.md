@@ -82,6 +82,42 @@ Debug output stays on the serial monitor, which on the DevKitC-1 is a separate
 physical port from the UI transport (SPEC 12.1 — a property of this development
 board, not an architectural guarantee).
 
+## Changing sdkconfig.defaults
+
+Editing a value in `sdkconfig.defaults` does **not** change an environment that
+has been built before. ESP-IDF's kconfig treats an existing `sdkconfig.<env>` as
+authoritative for every symbol already in it and applies the defaults file only
+to symbols it does not yet carry. PlatformIO does notice that the defaults file
+is newer and reconfigures, which makes the change look as though it landed, but
+the generated value still wins. Measured on this toolchain: with
+`CONFIG_ESP_TASK_WDT_TIMEOUT_S=17` in the defaults and a full reconfigure, the
+generated file still read `20`.
+
+Because the generated files are gitignored, each machine's copies are whatever
+it last happened to produce, and two boards can be built from what looks like one
+configuration and not be. That is exactly what happened during the dual-board
+comparison: the Nano built with a 5 s task watchdog while the DevKit had 20 s.
+
+So after editing `sdkconfig.defaults`, delete the generated files:
+
+```powershell
+Remove-Item sdkconfig.s3_devkit, sdkconfig.nano_esp32
+```
+
+`tools/check_sdkconfig.py` runs before every ESP-IDF build and fails it if a
+generated file contradicts the defaults, naming the symbol and both values. It
+is a guard, not a substitute: it reports the drift, and deleting the generated
+file is still the fix. A symbol the generated file does not mention at all is not
+reported, since kconfig legitimately drops symbols whose dependencies are unmet.
+
+There is no per-environment defaults mechanism to reach for instead. PlatformIO
+passes only `-DSDKCONFIG=<path>` to ESP-IDF and never sets `SDKCONFIG_DEFAULTS`,
+so both environments read the one shared `sdkconfig.defaults`. A board manifest
+may set `build.esp-idf.sdkconfig_path`, but that relocates the *generated* file,
+not the defaults. Per-board configuration differences would therefore need a
+custom pre-script, which the project does not currently need (see
+`docs/IMPLEMENTATION_NOTES.md` on the console/USB question).
+
 ## Host model preparation (Phase 1b, `../model_prep`)
 
 ```bash
@@ -137,6 +173,8 @@ of flash, which the 4 MB factory partition absorbs comfortably.
   environment failed once and succeeded on retry; if a build stops with
   "Missing the `pip` binary", simply run the build again.
 - `sdkconfig.<env>` files are generated from `sdkconfig.defaults` and are not
-  committed. Change `sdkconfig.defaults`, not the generated file.
+  committed. Change `sdkconfig.defaults`, not the generated file — **and then
+  delete the generated file**, because changing the defaults is not enough on
+  its own. See below.
 - `.pio/` (build output) is inside the OneDrive-synced tree; it is ignored by
   Git but OneDrive will still sync it.
