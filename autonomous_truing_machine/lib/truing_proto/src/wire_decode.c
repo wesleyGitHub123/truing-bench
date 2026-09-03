@@ -80,6 +80,19 @@ static bool num_float(const truing_json_value_t *v, float *out)
     return true;
 }
 
+/* Abandons a partially-decoded command, keeping only `seq`. The client needs that
+ * back to tell WHICH of its frames was refused, and everything else would be a
+ * half-filled command that no caller should see. */
+static truing_wire_error_t reject(truing_wire_command_t *out, truing_wire_error_t e)
+{
+    const bool has_seq = out->has_seq;
+    const uint32_t seq = out->seq;
+    memset(out, 0, sizeof(*out));
+    out->has_seq = has_seq;
+    out->seq = seq;
+    return e;
+}
+
 /* Reads a required number field. */
 static truing_wire_error_t need_float(const truing_json_doc_t *d, const char *key, float *out)
 {
@@ -187,26 +200,22 @@ truing_wire_error_t truing_wire_decode_command(const char *json, size_t len, tru
         truing_json_value_t p;
         const truing_json_type_t pt = truing_json_get(&doc, "param", &p);
         if (pt == TRUING_JSON_ABSENT) {
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_MISSING_FIELD;
+            return reject(out, TRUING_WIRE_ERR_MISSING_FIELD);
         }
         if (pt != TRUING_JSON_STRING) {
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_FIELD_TYPE;
+            return reject(out, TRUING_WIRE_ERR_FIELD_TYPE);
         }
         const truing_param_id_t id = param_from_json(&p);
         if (id == TRUING_PARAM_UNSET) {
             /* Includes host-only model-preparation values, which SPEC §12.3.1 puts
              * outside the command surface entirely: they have no id here, so they are
              * unaddressable rather than refused. */
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_UNKNOWN_PARAMETER;
+            return reject(out, TRUING_WIRE_ERR_UNKNOWN_PARAMETER);
         }
         float value = 0.0f;
         const truing_wire_error_t e = need_float(&doc, "value", &value);
         if (e != TRUING_WIRE_OK) {
-            memset(out, 0, sizeof(*out));
-            return e;
+            return reject(out, e);
         }
         out->intent.payload.set_parameter.id = id;
         out->intent.payload.set_parameter.value = value;
@@ -220,8 +229,7 @@ truing_wire_error_t truing_wire_decode_command(const char *json, size_t len, tru
             e = need_float(&doc, "radial_mm", &radial);
         }
         if (e != TRUING_WIRE_OK) {
-            memset(out, 0, sizeof(*out));
-            return e;
+            return reject(out, e);
         }
         out->intent.payload.runout.lateral_mm = lateral;
         out->intent.payload.runout.radial_mm = radial;
@@ -231,29 +239,24 @@ truing_wire_error_t truing_wire_decode_command(const char *json, size_t len, tru
         truing_json_value_t c;
         const truing_json_type_t ct = truing_json_get(&doc, "code", &c);
         if (ct == TRUING_JSON_ABSENT) {
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_MISSING_FIELD;
+            return reject(out, TRUING_WIRE_ERR_MISSING_FIELD);
         }
         if (ct != TRUING_JSON_NUMBER) {
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_FIELD_TYPE;
+            return reject(out, TRUING_WIRE_ERR_FIELD_TYPE);
         }
         uint32_t code = 0u;
         if (!num_u32(&c, &code) || code > 0xFFFFu) {
-            memset(out, 0, sizeof(*out));
-            return TRUING_WIRE_ERR_FIELD_RANGE;
+            return reject(out, TRUING_WIRE_ERR_FIELD_RANGE);
         }
         int32_t arg = 0;
         truing_json_value_t a;
         const truing_json_type_t at = truing_json_get(&doc, "arg", &a);
         if (at != TRUING_JSON_ABSENT) {
             if (at != TRUING_JSON_NUMBER) {
-                memset(out, 0, sizeof(*out));
-                return TRUING_WIRE_ERR_FIELD_TYPE;
+                return reject(out, TRUING_WIRE_ERR_FIELD_TYPE);
             }
             if (!num_i32(&a, &arg)) {
-                memset(out, 0, sizeof(*out));
-                return TRUING_WIRE_ERR_FIELD_RANGE;
+                return reject(out, TRUING_WIRE_ERR_FIELD_RANGE);
             }
         }
         out->intent.payload.debug.code = (uint16_t)code;
