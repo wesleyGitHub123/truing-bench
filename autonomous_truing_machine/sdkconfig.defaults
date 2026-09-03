@@ -34,7 +34,19 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
+# SPEC §12.1 transport: the UI is a web application talking to a JSON/websocket
+# endpoint, and esp_http_server compiles its websocket API out unless asked.
+CONFIG_HTTPD_WS_SUPPORT=y
+
 # RTOS / system
+# The task watchdog default of 5 s is shorter than one acoustic analysis. A pluck takes
+# ~3.7 s of solid computation and the first of a session ~7.3 s while it builds the cached
+# tables (docs/BRINGUP_LOG.md), all of it inside a single orchestrator step on core 0, so
+# the idle task cannot run for that whole stretch and the watchdog fires on work that is
+# behaving exactly as designed. Widened to cover it rather than silenced.
+# The structural fix is SPEC §4.5's core split: capture is already pinned to core 1, but
+# layers 2-4 still run inline on the control core. Moving them is Phase 2 work.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=20
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

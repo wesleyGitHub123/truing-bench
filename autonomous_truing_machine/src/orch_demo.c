@@ -11,6 +11,8 @@
 
 #include "artifact_store.h"
 #include "firmware_version.h"
+#include "net_transport.h"
+#include "truing_proto/session.h"
 #include "truing_calc/calc_if.h"
 #include "truing_fixtures/fixtures.h"
 #include "esp_heap_caps.h"
@@ -52,6 +54,10 @@ static struct {
     truing_auto_operator_t op;
     truing_orchestrator_t orch;
     uint32_t dropped_events;
+    /* SPEC §12: the wire session runs on THIS task, which is the orchestrator's own —
+     * see truing_proto/session.h for why that placement is the whole design. */
+    truing_wire_session_t session;
+    bool wire_up;
 } s;
 
 /* The simulated wheel answers an adjustment through the SAME influence model the solver uses. */
@@ -71,10 +77,30 @@ static uint32_t boot_clock_now(void *ctx)
 }
 
 /* Drain the best-effort ring (SPEC §12.2) into the log; dropped events are counted, never chased. */
+/* Collects whatever the web UI has sent and answers it. Runs here rather than on the
+ * server task because handle() reaches into the orchestrator (SPEC §12.4: the transport
+ * is a driver; the state machine has one owner). */
+static void service_wire(void)
+{
+    if (!s.wire_up) {
+        return;
+    }
+    static char frame[TRUING_WIRE_COMMAND_MAX + 1u];   /* static: not a task-stack budget */
+    size_t len;
+    while ((len = truing_net_poll_inbound(frame, sizeof(frame))) > 0u) {
+        (void)truing_wire_session_handle(&s.session, frame, len);
+    }
+}
+
 static void drain_telemetry(void)
 {
     truing_telemetry_event_t ev;
     while (truing_telemetry_ring_pop(&s.ring, &ev)) {
+        /* A ring has ONE consumer, so the event is forwarded here rather than by
+         * truing_wire_session_pump(): the console log below wants it too. */
+        if (s.wire_up) {
+            (void)truing_wire_session_send_event(&s.session, &ev);
+        }
         switch (ev.kind) {
         case TRUING_EVT_STATE_TRANSITION:
             ESP_LOGI(TAG, "[%6" PRIu32 " ms] c%u %s -> %s", ev.timestamp_ms, (unsigned)ev.cycle_index,
@@ -204,14 +230,39 @@ static void demo_task(void *arg)
         return;
     }
 
+    /* SPEC §12.1 transport. Failure is not fatal: §12.2 makes the host optional for
+     * autonomous work, so the machine runs and the console keeps the record. */
+    s.wire_up = truing_net_start() &&
+                truing_wire_session_init(&s.session, &s.orch, &s.ring, truing_net_sink(), false);
+    if (!s.wire_up) {
+        ESP_LOGW(TAG, "no wire transport; running with the console as the only observer");
+    }
+
     const int64_t t0 = esp_timer_get_time();
     bool started = false;
     uint32_t steps = 0u, waits = 0u, delays = 0u;
     truing_orch_step_t r = TRUING_ORCH_ADVANCED;
     for (;;) {
         r = truing_orch_step(&s.orch);
-        ++steps;
         drain_telemetry();
+        service_wire();
+        /* The auto-operator is a DEVELOPMENT DOUBLE for the human, not machine behaviour.
+         * While a browser is attached the real operator answers the wait, which is the
+         * point of the transport; with nobody attached the double keeps the existing
+         * self-play so the on-target evidence does not regress. Waiting here is correct
+         * behaviour, not a failure (SPEC §12.2) — and a human taking their time is not
+         * progress to be charged against the step budget. */
+        if (r == TRUING_ORCH_WAITING_OPERATOR && truing_net_client_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+        ++steps;
+        /* Let the core-0 idle task run between steps. This task outranks IDLE0, which must
+         * run for the scheduler's own housekeeping and now shares core 0 with the web
+         * server. It has to be EVERY step, not every N: a single step can be a whole
+         * acoustic measurement, so yielding every 64 would mean minutes of starvation.
+         * One tick against a 3.7 s measurement is not a cost worth optimising. */
+        vTaskDelay(1);
         if (r == TRUING_ORCH_WAITING_OPERATOR) {
             truing_orch_snapshot_t snap;
             truing_intent_t intent;
@@ -298,7 +349,21 @@ static void demo_task(void *arg)
                   "real; the audio front end is a synthetic pluck and the wheel is a simulation of the artifact's own model, so "
                   "this proves the workflow, the solver and the DSP path, not the truing of a physical wheel.",
              truing_terminal_str(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY));
-    vTaskDelete(NULL);
+
+    if (!s.wire_up) {
+        vTaskDelete(NULL);
+        return;
+    }
+    /* The run is over but the record is not: both SPEC §12.2 queries answer from RAM,
+     * and the provenance explaining the last adjustment is exactly what an operator
+     * wants to read after the fact. So this task stays alive to serve them rather than
+     * taking the endpoint down with it. */
+    ESP_LOGI(TAG, "run complete; the wire endpoint stays up for state and provenance queries");
+    for (;;) {
+        drain_telemetry();
+        service_wire();
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }
 
 void truing_orch_demo_start(void)

@@ -1,5 +1,7 @@
 #include "bringup_acoustic.h"
 
+#include "net_transport.h"
+
 #include <inttypes.h>
 #include <math.h>
 #include <string.h>
@@ -138,6 +140,10 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
             float worst_df1 = 0.0f, worst_dsnr = 0.0f;
             uint32_t worst_analysis_ms = 0u;
             for (unsigned i = 0; i < ACOUSTIC_GOLDEN_N_CASES; ++i) {
+                /* Each analysis holds core 0 for seconds; without a yield between them the
+                 * idle task never runs and the watchdog reports work that is behaving
+                 * exactly as designed. Costs one tick against several seconds. */
+                vTaskDelay(1);
                 const acoustic_golden_case_t *g = &acoustic_golden_cases[i];
                 truing_tension_estimate_t e;
                 const int64_t t0 = esp_timer_get_time();
@@ -285,9 +291,50 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
             truing_audio_i2s_stats(&i2s, &after);
             check(pass, fail, r == TRUING_AUDIO_OK && after.overrun_events == before.overrun_events,
                   "1 s capture with a compute task at DSP priority on core 1: no DMA overrun (priority separation, SPEC 4.5/9.4)");
-            ESP_LOGI(TAG, "drain under load: %s, load iterations %" PRIu32 ", reads %" PRIu32 ", max read gap %" PRIu32 " us, overruns %" PRIu32
-                          " (WiFi-load stress test deferred to Phase 1e: no WiFi stack in this build)",
+            ESP_LOGI(TAG, "drain under load: %s, load iterations %" PRIu32 ", reads %" PRIu32 ", max read gap %" PRIu32 " us, overruns %" PRIu32,
                      truing_audio_result_str(r), s_load_iterations, after.reads - before.reads, after.max_read_gap_us, after.overrun_events);
+
+            /* ---- SPEC 9.4: the same capture with the radio busy (deferred from Phase 1f,
+             * which had no WiFi stack to load it with) ------------------------------------ */
+            if (!truing_net_started()) {
+                ESP_LOGW(TAG, "WiFi-load stress test NOT PERFORMED: the transport is not up");
+            } else if (!truing_net_rf_load_start()) {
+                ESP_LOGW(TAG, "WiFi-load stress test NOT PERFORMED: the driver refused frame injection");
+            } else {
+                truing_audio_i2s_stats(&i2s, &before);
+                s_load_stop = false;
+                s_load_iterations = 0u;
+                TaskHandle_t lt2 = NULL;
+                xTaskCreatePinnedToCore(load_task, "audio_load", 4096, NULL, tskIDLE_PRIORITY + 2, &lt2, 1);
+                uint32_t got2 = 0u;
+                volatile bool no_cancel2 = false;
+                const truing_audio_result_t r2 = i2s.capture(&i2s, buf, n, &no_cancel2, &got2);
+                s_load_stop = true;
+                uint32_t injected = 0u, inject_fail = 0u;
+                truing_net_rf_load_stop(&injected, &inject_fail);
+                vTaskDelay(pdMS_TO_TICKS(50));
+                truing_audio_i2s_stats(&i2s, &after);
+                /* Injection must actually have happened, or the capture was not loaded and
+                 * a clean result would mean nothing. */
+                check(pass, fail, injected > 0u && r2 == TRUING_AUDIO_OK &&
+                                      after.overrun_events == before.overrun_events,
+                      "1 s capture with the WiFi radio transmitting and a compute task on the audio core: "
+                      "no DMA overrun (SPEC 9.4)");
+                ESP_LOGI(TAG, "WiFi-load capture: %s, frames injected %" PRIu32 " (%" PRIu32 " refused), "
+                              "reads %" PRIu32 ", max read gap %" PRIu32 " us, overruns %" PRIu32
+                              ", stations associated %d",
+                         truing_audio_result_str(r2), injected, inject_fail, after.reads - before.reads,
+                         after.max_read_gap_us, after.overrun_events, (int)truing_net_client_connected());
+                /* Say plainly what this did and did not load. The driver caps management-frame
+                 * injection near 90/s however it is driven, so the radio is genuinely active
+                 * but the throughput is modest, and with no station associated there is no
+                 * TCP path in the picture. The heavier case - an associated browser streaming
+                 * telemetry through a measurement cycle - is a bench step, not this check; the
+                 * firmware would report it as CAPTURE_OVERRUN either way (SPEC §13.2). */
+                ESP_LOGW(TAG, "  scope: radio active at ~%" PRIu32 " frames/s with no station associated. "
+                              "A capture under an associated client's traffic is a bench check, not this one.",
+                         injected);
+            }
             heap_caps_free(buf);
         }
         heap_caps_free(scratch);

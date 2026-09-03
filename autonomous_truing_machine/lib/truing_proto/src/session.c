@@ -28,6 +28,19 @@ bool truing_wire_session_init(truing_wire_session_t *s, truing_orchestrator_t *o
     return true;
 }
 
+bool truing_wire_session_send_event(truing_wire_session_t *s, const truing_telemetry_event_t *ev)
+{
+    if (s == NULL || ev == NULL) {
+        return false;
+    }
+    if (send_frame(s, truing_wire_encode_event(ev, s->scratch, sizeof(s->scratch)))) {
+        s->events_sent++;
+        return true;
+    }
+    s->events_dropped++;
+    return false;
+}
+
 uint32_t truing_wire_session_pump(truing_wire_session_t *s, uint32_t max_events)
 {
     if (s == NULL || s->ring == NULL) {
@@ -40,14 +53,11 @@ uint32_t truing_wire_session_pump(truing_wire_session_t *s, uint32_t max_events)
      * refuses cannot keep this loop spinning on the control path. */
     while ((max_events == 0u || processed < max_events) && truing_telemetry_ring_pop(s->ring, &ev)) {
         processed++;
-        if (send_frame(s, truing_wire_encode_event(&ev, s->scratch, sizeof(s->scratch)))) {
-            s->events_sent++;
+        /* A frame that will not encode, or that the sink refuses, is a dropped frame —
+         * which SPEC §12.2 permits: telemetry is best-effort and the event has already
+         * left the ring, so it is gone rather than retried. */
+        if (truing_wire_session_send_event(s, &ev)) {
             sent++;
-        } else {
-            /* Either it would not encode or the sink refused it. Both are a dropped
-             * frame, which SPEC §12.2 permits: telemetry is best-effort and the event
-             * has already left the ring, so it is gone rather than retried. */
-            s->events_dropped++;
         }
     }
     return sent;

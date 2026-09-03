@@ -78,6 +78,11 @@ bool truing_wire_session_init(truing_wire_session_t *s, truing_orchestrator_t *o
  * Returns the number actually sent. Bounded so one call cannot monopolise the task. */
 uint32_t truing_wire_session_pump(truing_wire_session_t *s, uint32_t max_events);
 
+/* Sends one event the caller has ALREADY popped from the ring. For a caller that wants
+ * to do something else with each event too — the on-target demo logs them to the serial
+ * console as well — since a ring has one consumer and pump() would be the other. */
+bool truing_wire_session_send_event(truing_wire_session_t *s, const truing_telemetry_event_t *ev);
+
 /* Handles one inbound frame and sends exactly one acknowledgement.
  * A query also sends its answer frame, before the acknowledgement.
  * The return value is the WIRE result; the admissibility verdict rides in the ack. */

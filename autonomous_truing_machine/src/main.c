@@ -12,6 +12,7 @@
 #include "firmware_version.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "net_transport.h"
 #include "orch_demo.h"
 
 static const char *TAG = "main";
@@ -34,6 +35,10 @@ static void heartbeat_task(void *arg)
 void app_main(void)
 {
     ESP_LOGI(TAG, "truing firmware %s on %s", TRUING_FIRMWARE_VERSION, truing_board_name());
+    /* Before the bring-up, not after: the SPEC §9.4 capture-under-WiFi-load check needs a
+     * radio to load, and it is part of the bring-up report. Starting here also means the
+     * UI is reachable while the bring-up runs. */
+    (void)truing_net_start();
     truing_bringup_report_t report;
     truing_bringup_run(&report);
     ESP_LOGI(TAG, "bring-up done (passed=%d failed=%d); starting the Phase 1d workflow self-play on core 0",
