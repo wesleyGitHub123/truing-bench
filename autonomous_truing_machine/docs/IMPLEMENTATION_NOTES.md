@@ -285,6 +285,34 @@ correctness oracle**:
 At 3.7 s a 32-spoke measure pass plus a verify pass is under four minutes of
 DSP, down from seventeen.
 
+> **Superseded, 2026-09-04.** Option 1 above was half wrong and the error was
+> worth catching: *radix-4* changes floating-point association, but *cache
+> blocking on its own does not*. The butterflies of one pass are mutually
+> independent, so the order in which a pass sweeps its blocks is free; every
+> butterfly still runs on the same two operands with its own operations in the
+> same order, and only the cache misses change. Blocking was therefore
+> implementable **by construction** rather than needing the oracle re-validated,
+> and it is now in (`bc3fa9c`), worth -16%. Conflating the two costs was what had
+> put it behind an approval gate it did not need.
+>
+> The estimate was also drawn against the wrong cause. Most of the gap was never
+> the pass count: a transform small enough to stay in the 64 KB data cache runs
+> at 0.20 us per butterfly whether it is addressed in internal RAM or PSRAM,
+> while the 131,072-point one runs at 0.98 us. It is misses, not bandwidth and
+> not arithmetic.
+>
+> A pluck is now **3,070 ms**, and a 32-spoke measure plus verify pass is about
+> 3.3 minutes of DSP. The floor is still 0.20 us per butterfly; reaching it needs
+> a compact per-block twiddle table, since the twiddles of the larger blocked
+> passes stride the whole table and begin missing on their own account. That one
+> does change the plan's storage contract and its callers, and is not done.
+> Option 2 is unchanged and still the owner's call.
+>
+> See `docs/BRINGUP_LOG.md` for the measurements, and note the separate finding
+> there that the 3,666 ms figure this section was written against was itself
+> luck: the acoustic scratch had landed on a favourable cache-line offset, and
+> Phase 1e's allocations moved it (`5fcc74d`).
+
 One wrinkle worth knowing: the **first** pluck of a session costs 7.3 s
 because it builds the cached window, chirp, kernel and twiddle tables. That is
 once per workspace, not per pluck.
@@ -383,6 +411,41 @@ single analysis rather than silencing it. Boot now reports **zero**.
 This is a symptom, not the disease. SPEC 4.5 splits the cores and capture is already
 pinned to core 1, but acoustic layers 2-4 still run inline on the control core. Moving
 them is Phase 2 work and is listed under open items.
+
+## Board profiles stop at GPIO, and that is the right place for now
+
+Four board-profile macros are read by **nothing** in the firmware:
+`BOARD_HAS_SEPARATE_DEBUG_PORT`, `BOARD_HAS_PLAIN_STATUS_LED`,
+`BOARD_STATUS_LED_GPIO`, `BOARD_STATUS_LED_ACTIVE_LOW`. They describe the boards;
+they do not configure them. The header now says so, because a macro that looks
+like configuration and is not is worse than no macro at all — the Nano declares
+`BOARD_HAS_SEPARATE_DEBUG_PORT 0` and the console is configured identically for
+both boards regardless.
+
+**Should the console become board-specific? No, on the evidence.** The shared
+`sdkconfig.defaults` sets UART0 as the primary console with the USB-Serial/JTAG
+mirror as secondary, and that is portable across both boards as actually
+deployed: the DevKit's UART0 reaches its CH343 bridge, and the Nano, which has no
+bridge, carries the same log out of the mirror on its native USB. Both are proven
+on hardware — every measurement in this repository from the Nano came off that
+mirror. The Nano loses console *input*, which nothing uses.
+
+The one place it does not hold is under the Nano's **stock Arduino bootloader**,
+which owns the USB PHY differently. That is a deployment model this project does
+not use: Arduino DFU writes an application only, into an OTA slot, so it cannot
+place our bootloader or partition table at all. The supported route is the raw
+esptool write in `docs/BUILD.md`. Supporting stock DFU as well would mean a
+second partition layout, an OTA-slot-aware image and a console configuration that
+survives the Arduino bootloader, for a deployment path with no project benefit.
+**Recorded as unsupported rather than built.**
+
+There is also no clean mechanism to reach for even if it were wanted. PlatformIO
+passes only `-DSDKCONFIG=<generated path>` to ESP-IDF and never sets
+`SDKCONFIG_DEFAULTS`, so both environments read the one shared defaults file; a
+board manifest's `build.esp-idf.sdkconfig_path` relocates the *generated* file,
+not the defaults. Per-board kconfig would need a custom pre-script. If that day
+comes, `BOARD_HAS_SEPARATE_DEBUG_PORT` is the right thing for it to key on, which
+is why the macro is kept rather than deleted.
 
 ## Phase 1c results (host)
 
@@ -496,6 +559,19 @@ configuration exists yet (hub geometry, `c` per side, the influence fingerprint
 and the tension-model parameters all require measurement or model preparation),
 so a normal session cannot be admitted until 1b and a measurement campaign
 supply them; the firmware reports this honestly as "not provisioned".
+
+Carried forward from the 2026-09-04 DSP and build-hygiene pass:
+
+- **The transform is still four times its own compute floor.** 0.79 us per
+  butterfly against 0.20 measured cache-resident. Closing it needs a compact
+  per-block twiddle table, which changes `truing_fft_plan_t`'s storage contract
+  and every caller that sizes it. Not attempted; the estimate is worth roughly
+  another third of a pluck.
+- **`zero_pad_factor` 8 to 4** remains available and remains the owner's call: it
+  changes the bin grid and therefore the golden values, and it is a research
+  parameter in the acoustic repository's `config/dsp.yaml`, not a firmware one.
+- **Stock Arduino DFU deployment of the Nano is unsupported by decision**, not by
+  accident. See the board-profile section above.
 
 Carried forward from 1e:
 

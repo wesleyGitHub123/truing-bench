@@ -17,6 +17,22 @@
  *                                      motor driver (Wheel Navigation owns them; SPEC §10A)
  *   BOARD_PLUCK_ACTUATOR_GPIO          excitation actuator (reserved; acoustic subsystem owns it)
  *   BOARD_STATUS_LED_GPIO / BOARD_STATUS_LED_ACTIVE_LOW / BOARD_HAS_PLAIN_STATUS_LED
+ *
+ * DESCRIPTIVE, NOT WIRED: BOARD_HAS_SEPARATE_DEBUG_PORT, BOARD_HAS_PLAIN_STATUS_LED,
+ * BOARD_STATUS_LED_GPIO and BOARD_STATUS_LED_ACTIVE_LOW are read by nothing in the firmware.
+ * They record what each board is; they do not configure it. In particular the Nano declares
+ * BOARD_HAS_SEPARATE_DEBUG_PORT 0 and the console is still configured identically for both
+ * boards, from the one shared sdkconfig.defaults, which no board profile can reach: ESP-IDF's
+ * console is a kconfig choice made at build time, and PlatformIO exposes no per-environment
+ * defaults file (it passes only -DSDKCONFIG=<generated path>).
+ *
+ * That is deliberate rather than an oversight. UART0 as the primary console with the
+ * USB-Serial/JTAG mirror as secondary is portable across both boards as they are actually
+ * deployed: the DevKit's UART0 reaches its CH343 bridge, and the Nano, which has no bridge,
+ * carries the same log out of the mirror on its native USB. Both are proven on hardware. The
+ * one place it does not hold is under the Nano's stock Arduino bootloader, which owns the USB
+ * PHY differently -- and that is a deployment model this project does not use. See
+ * docs/IMPLEMENTATION_NOTES.md for the assessment and what would have to change to wire these.
  */
 #ifndef TRUING_BOARD_PROFILE_H
 #define TRUING_BOARD_PROFILE_H

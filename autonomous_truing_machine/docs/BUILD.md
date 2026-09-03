@@ -14,7 +14,8 @@ same directory and is the implementation authority.
 | Host tests | PlatformIO `native` platform; MinGW GCC 6.3 (on `PATH`) works, MSYS2 UCRT64 GCC 15 also present |
 
 The development board is an ESP32-S3-DevKitC-1 (N16R8) on the UART bridge port
-`COM4` (CH343). The Arduino Nano ESP32 target builds but has not been flashed.
+`COM4` (CH343). The Arduino Nano ESP32 runs the same firmware from its native
+USB-Serial/JTAG port (`COM5`); see "Flashing the Nano ESP32" below.
 
 ## Path with spaces: build through a junction
 
@@ -56,6 +57,51 @@ pio device monitor -p COM4 -b 115200
 # persistence (SPEC 11.5). Never a demonstration configuration.
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_provision -t upload
 ```
+
+## Flashing the Nano ESP32
+
+The Nano needs a different route from the DevKit and the difference is not
+cosmetic, so follow this rather than rediscovering it.
+
+`pio run -t upload` on `nano_esp32` uses the Arduino DFU path, which writes an
+**application only**, into an OTA slot — its own recipe caps the payload at
+`0x300000`, one app partition. It cannot place a bootloader or a partition
+table, so a merged image handed to DFU alternate 0 does not land at flash offset
+`0x0` and the result does not boot, however cleanly the transfer reports success.
+
+The working route is a raw esptool write over ROM download mode:
+
+1. Put the board in ROM download mode by hand: jumper **B1 → GND**, press
+   **RESET**, release, then remove the jumper. The LED goes solid purple.
+2. Write all three regions:
+
+```bash
+esptool.py --chip esp32s3 --port COM5 --before default_reset --after hard_reset \
+  write_flash -z --flash_mode dio --flash_freq 80m --flash_size 16MB \
+  0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+```
+
+   (the three files are under `.pio/build/nano_esp32/`; `esptool` needs
+   `intelhex` installed in the PlatformIO penv.)
+3. **Physically unplug and replug the USB cable.** This step is mandatory and is
+   the one that is easy to skip. Download mode entered through USB-Serial/JTAG is
+   latched, and neither `--after hard_reset` nor the RESET button clears it; only
+   a real power cycle does. Without it the board stays in download mode and looks
+   like a failed flash.
+
+Then the console is on `COM5` at 115200 and the board runs the same image as the
+DevKit.
+
+**Opening the port matters on this board.** The USB-Serial/JTAG peripheral
+emulates the modem lines, and **DTR is wired to GPIO0**. Clearing DTR pulls GPIO0
+low and the chip reboots into ROM download mode instead of running the app — a
+monitor that de-asserts DTR on open will appear to have bricked the board. Keep
+DTR asserted and reset with RTS (EN) only. `pio device monitor` is fine; a script
+using pyserial should set `dtr = True` before opening.
+
+Recovery, if the board ends up in an unknown state: Arduino IDE's *Burn
+Bootloader* restores the stock Arduino bootloader over the same B1 → GND route,
+after which DFU works again.
 
 ## Reaching the web UI (SPEC 12.1)
 

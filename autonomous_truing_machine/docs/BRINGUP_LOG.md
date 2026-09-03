@@ -346,3 +346,93 @@ measurement costs nothing.
 
 The structural fix is SPEC 4.5's core split — capture is already pinned to core 1,
 the analysis is not — and that is Phase 2.
+
+## 2026-09-04 — the DSP performance delta, its cause, and both boards after it
+
+A pluck cost 3,666 ms at the end of Phase 1f and 4,763 ms after Phase 1e, on
+**both** boards, with `lib/truing_dsp` untouched between the two commits. This
+run reproduced the historical figure rather than trusting the documentation:
+`dc44a77` was built in a throwaway worktree, flashed to the same DevKitC-1 and
+measured by the same code path, and it came back at **3,666,000 us** median over
+7 repetitions. The delta was real and not stale documentation, a build-flag
+change, or a different measurement method — `platformio.ini` is identical
+between the two commits and `sdkconfig.defaults` differs only by the websocket
+and watchdog lines.
+
+### Isolating it
+
+| Configuration | 131,073 double cos+sin | cfft 131,072 | cfft 65,536 | total |
+|---|---|---|---|---|
+| Phase 1f `dc44a77` | 2,318,820 us | 1,094,070 us | 493,440 us | 3,666,000 us |
+| Phase 1e `ea5f2f9` | 2,288,400 us | 1,158,700 us | **749,300 us** | 4,763,234 us |
+| `ea5f2f9`, radio never started | 2,283,360 us | 1,094,020 us | 493,450 us | 3,666,001 us |
+| `ea5f2f9`, radio stopped before the profile | 2,284,790 us | 1,156,900 us | 748,420 us | 4,755,871 us |
+
+The pure-CPU trigonometry benchmark is a shade **faster** in every WiFi build, so
+nothing was being preempted. And stopping the radio while leaving its allocations
+in place changed nothing, so it was never the radio at all: it was where WiFi's
+~512 KB of PSRAM allocations pushed the acoustic scratch. The block moved by
+`0x80128`, which left its base 44 bytes into a cache line instead of 4.
+
+Rounding the base up by **20 bytes** restored the whole 30%. `heap_caps_malloc`
+promises only 4-byte alignment, so the placement had always been a lottery
+decided by whatever allocated first; Phase 1f won it and Phase 1e lost it. The
+alignment is now applied inside `truing_acoustic_real_init` (`5fcc74d`).
+
+### Then: the transform is not arithmetic-bound
+
+| Transform | us per butterfly |
+|---|---|
+| 4,096-pt, internal RAM (48 KB working set, cache-resident) | 0.2015 |
+| 4,096-pt, PSRAM (same working set, still cache-resident) | 0.2021 |
+| 131,072-pt, PSRAM (1 MB, not resident) | 0.9815 |
+
+PSRAM is not slow when the data is cached — nearly four fifths of the big
+transform is cache misses. Running the passes whose butterflies stay inside a
+4096-element chunk chunk-by-chunk instead of sweeping the whole array (`bc3fa9c`)
+recovers a further 16%. It is bit-identical: same butterflies, same operands,
+only the miss pattern differs.
+
+### Result, both boards, production build
+
+| Stage | Phase 1f | after 1e | now |
+|---|---|---|---|
+| Onset | 61,125 us | 61,602 us | 61,406 us |
+| Hilbert envelope | 2,085,466 us | 3,109,971 us | **1,692,349 us** |
+| Smoothing | 38,018 us | 38,022 us | 38,185 us |
+| Transform | 1,411,691 us | 1,483,675 us | **1,207,666 us** |
+| Peak finding | 54,750 us | 54,993 us | 55,021 us |
+| SNR | 15,114 us | 15,136 us | 15,104 us |
+| **Total** | **3,666,164 us** | **4,763,399 us** | **3,069,745 us** |
+
+Medians over repeated boots: DevKitC-1 **3,069,745 us** (5 boots, 3,069,715 to
+3,070,116), Nano ESP32 **3,069,791 us** (7 boots, 3,069,697 to 3,069,929). The
+two boards differ by 0.0015%.
+
+Both: bring-up **62 of 62, 0 failed**, recorded-pluck parity worst |df1| 0.0000
+Hz and worst |dSNR| 0.000 dB, zero watchdog reports, zero DMA overruns under
+WiFi load. Scratch 6,114,544 -> 6,114,607 bytes (the 63 bytes of alignment
+padding); no other memory change.
+
+Net against the state this run started from, 4,763 ms to 3,070 ms, is **-35.5%**;
+against the Phase 1f figure that was believed to be the optimised baseline,
+**-16.3%**.
+
+### The remaining floor
+
+0.20 us per butterfly, versus 0.79 now. Closing it needs a compact per-block
+twiddle table — the twiddles of the larger blocked passes stride the whole table
+and miss on their own account — which changes the plan's storage contract and its
+callers. That is a proposal, not done here. Block sizes 2048 (3,114,076 us) and
+8192 (3,085,580 us) were both measured slower than 4096.
+
+### The whole workflow, DevKitC-1
+
+The self-play is unchanged in every respect that is not time: result
+**CONVERGED_GEOMETRIC_ONLY / MEAN_TENSION_MODEL_UNAVAILABLE**, cycles_run=1,
+steps=725, waits_answered=223, settle_delays=0, telemetry emitted=1365 dropped=0,
+transitions=725, intents_rejected=0, simulated wheel 0.221 mm -> **0.0000 mm**,
+zero watchdog reports.
+
+Elapsed **251,112 ms**, against 289,393 ms before this pass: 38 seconds off a
+measurement run that is mostly DSP, with the same 725 steps and the same result.
