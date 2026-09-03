@@ -19,6 +19,7 @@ typedef struct {
     bool config_provisioned;    /* every configuration kind present and valid in NVS */
     bool artifact_ok;          /* Phase 1c: golden artifact loads and the calculation matches the host reference */
     bool acoustic_ok;          /* Phase 1f: I2S front end runs, layers 2-4 match the reference on target */
+    bool proto_ok;             /* Phase 1e: SPEC §12 wire frames encode and decode as they do on the host */
 } truing_bringup_report_t;
 
 void truing_bringup_run(truing_bringup_report_t *report);

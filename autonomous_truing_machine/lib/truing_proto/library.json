@@ -1,0 +1,21 @@
+{
+  "name": "truing_proto",
+  "version": "0.1.0",
+  "description": "SPEC §12 wire protocol: JSON frames for telemetry events, the required current-state query, GET_CURRENT_CYCLE_PROVENANCE, and inbound operator commands. Transport-independent by design (SPEC §12.1: only the transport changes, the frontend does not), so the same frames serve WiFi, the USB CDC fallback and host tests. Enforces the §12.3 wait_id wire contract; admissibility remains the orchestrator's.",
+  "dependencies": {
+    "truing_core": "*",
+    "truing_hal": "*",
+    "truing_orchestrator": "*"
+  },
+  "build": {
+    "flags": [
+      "-std=c11",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+      "-Wstrict-prototypes",
+      "-Wundef"
+    ]
+  }
+}
