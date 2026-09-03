@@ -79,10 +79,13 @@ typedef struct {
     uint32_t                           rejections;
 } truing_acoustic_real_ctx_t;
 
-/* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace). */
+/* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace).
+ * Includes the padding that lets init() put the working set on a cache line whatever alignment
+ * the caller's allocator happened to return; the placement is worth 30% of the per-pluck time. */
 size_t truing_acoustic_real_scratch_bytes(const truing_chain_profile_t *chain);
 
-/* Wire the seams. `scratch` must hold scratch_bytes(chain); it may live in PSRAM. Returns false
+/* Wire the seams. `scratch` must hold scratch_bytes(chain); it may live in PSRAM, and needs no
+ * particular alignment -- init() aligns the working set itself. Returns false
  * (and leaves the interface answering `unavailable`) when the chain profile is invalid, the
  * source refuses the system format, or the scratch is too small. An incomplete tension-model
  * profile does NOT fail init: every measurement then reports CALIBRATION_MISSING (SPEC 11.3.1). */

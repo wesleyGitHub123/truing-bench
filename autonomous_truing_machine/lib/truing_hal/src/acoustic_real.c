@@ -11,6 +11,22 @@ static size_t align8(size_t v)
     return (v + 7u) & ~(size_t)7u;
 }
 
+/* The DSP working set is megabytes of double-precision arrays streamed out of PSRAM, and its
+ * cost depends on where that block starts: measured on the DevKitC-1, moving the base by 20
+ * bytes off a cache-line boundary costs 30% of the per-pluck time (Hilbert 2,078 -> 3,110 ms),
+ * because every 64-byte line fill then serves a fraction of the doubles it fetched.
+ *
+ * heap_caps_malloc promises only 4-byte alignment, so which side of that a caller lands on is
+ * decided by whatever allocated before it -- Phase 1f was lucky and Phase 1e's WiFi allocations
+ * were not. The base is therefore aligned here rather than trusted from the caller, and
+ * scratch_bytes() carries the padding that guarantees room to do it. */
+#define ACOUSTIC_SCRATCH_ALIGN 64u
+
+static size_t align_scratch(size_t v)
+{
+    return (v + (ACOUSTIC_SCRATCH_ALIGN - 1u)) & ~(size_t)(ACOUSTIC_SCRATCH_ALIGN - 1u);
+}
+
 static uint32_t capture_words(const truing_chain_profile_t *c)
 {
     const float fs = (float)c->sample_rate_hz;
@@ -42,7 +58,8 @@ size_t truing_acoustic_real_scratch_bytes(const truing_chain_profile_t *chain)
         return 0u;
     }
     return align8((size_t)n * sizeof(int32_t)) + align8((size_t)n * sizeof(float)) +
-           align8((size_t)(onset_frames(chain, n) + 1u) * sizeof(float)) + align8(dsp);
+           align8((size_t)(onset_frames(chain, n) + 1u) * sizeof(float)) + align8(dsp) +
+           (ACOUSTIC_SCRATCH_ALIGN - 1u);
 }
 
 /* ---- the measurement ------------------------------------------------------------------ */
@@ -322,7 +339,9 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
         return false;
     }
     const uint32_t n = capture_words(chain);
-    uint8_t *p = (uint8_t *)scratch;
+    /* Start on a cache line whatever the caller's allocator returned; scratch_bytes() reserves
+     * the lead-in this can consume. */
+    uint8_t *p = (uint8_t *)(uintptr_t)align_scratch((size_t)(uintptr_t)scratch);
     ctx->words = (int32_t *)p;    p += align8((size_t)n * sizeof(int32_t));
     ctx->samples = (float *)p;    p += align8((size_t)n * sizeof(float));
     ctx->onset_env_cap = onset_frames(chain, n) + 1u;
