@@ -57,6 +57,31 @@ pio device monitor -p COM4 -b 115200
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_provision -t upload
 ```
 
+## Reaching the web UI (SPEC 12.1)
+
+The board hosts its own network; there is nothing to install on the host. At
+boot it prints the credentials, which are derived from that board's MAC and are
+therefore different on every unit and not stored in this repository:
+
+```
+net:  SPEC 12.1 transport up. Join the network and browse to:
+net:    SSID       truing-xxxxxx
+net:    passphrase truing-xxxxxxxx
+net:    URL        http://192.168.4.1/
+```
+
+Join that network and open the URL. The page opens a websocket to `/ws`, asks
+for the current state, and mirrors the machine from there.
+
+While a browser is attached the workflow self-play stops answering its own
+operator waits and the person at the browser answers them instead. With nobody
+attached the self-play behaves as it always has, so the on-target demonstration
+does not depend on a host being present.
+
+Debug output stays on the serial monitor, which on the DevKitC-1 is a separate
+physical port from the UI transport (SPEC 12.1 — a property of this development
+board, not an architectural guarantee).
+
 ## Host model preparation (Phase 1b, `../model_prep`)
 
 ```bash

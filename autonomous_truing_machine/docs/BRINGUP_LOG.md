@@ -264,3 +264,85 @@ improved because the loops no longer run.
 A negative result worth keeping: **PSRAM at 120 MHz is 1.8x slower than at
 80 MHz** on this board (131,072-point transform 1,094 to 2,092 us; a pluck 3.7
 to 6.6 s). The setting is pinned at 80 MHz.
+
+## 2026-09-03 — Phase 1e comms on the DevKitC-1
+
+Firmware: `s3_devkit`, RAM 142,824 / 327,680, flash 1,481,298 (the WiFi stack
+accounts for the jump from 929 KB).
+
+**Bring-up: 62 of 62 checks pass, 0 fail.** Nine of them are the new wire-protocol
+section; one is the SPEC 9.4 capture-under-WiFi-load check deferred from 1f.
+
+```
+--- wire protocol (SPEC 12) ---
+  PASS  JSON writer completes a float frame on target
+  PASS  float formatting is byte-exact with the host (newlib prints digits)
+  PASS  decoded runout values parse to the same floats as on the host
+  PASS  confirmation without wait_id is rejected (SPEC 12.3)
+  PASS  ABORT carrying a wait_id is rejected (SPEC 12.3)
+  PASS  ABORT decodes in every state it may be sent from
+  PASS  current-state snapshot round-trips with its wait_id and prompt (SPEC 12.2)
+  PASS  GET_CURRENT_CYCLE_PROVENANCE fits its budget for a 36-spoke wheel
+  PASS  provenance frame re-parses as valid JSON on target
+        provenance frame 6113 bytes of 8192 budget
+```
+
+The float checks are the point of this section and not a duplicate of the host
+suite: the conversion behind `truing_json_f32()` and the `strtod()` behind number
+decoding both come from the target C library, and a newlib built without
+floating-point printf would emit frames that stayed valid JSON while losing every
+number in them. Nothing downstream would notice. They are byte-exact here.
+
+### Transport
+
+```
+wifi:mode : softAP (xx:xx:xx:xx:xx:xx)
+esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1
+net:  SPEC 12.1 transport up. Join the network and browse to:
+net:    SSID       truing-xxxxxx
+net:    URL        http://192.168.4.1/
+```
+
+The passphrase is derived from the same MAC and printed beside the SSID; neither
+is stored in the repository.
+
+### SPEC 9.4 — capture under WiFi load
+
+```
+drain under load: OK, load iterations 55, reads 20, max read gap 53344 us, overruns 0
+WiFi-load capture: OK, frames injected 91 (1058 refused), reads 21,
+                   max read gap 53344 us, overruns 0, stations associated 0
+  scope: radio active at ~91 frames/s with no station associated.
+         A capture under an associated client's traffic is a bench check, not this one.
+```
+
+Zero overruns with the radio transmitting, and a 53.3 ms worst read gap against
+the 100 ms drain budget. **The refusals are the honest part of this result**: the
+driver caps raw management-frame injection near 91/s however it is driven, and
+letting it own the sequence numbers changed nothing (88 -> 91 frames). So the
+radio is genuinely active but not saturated, and with no station associated there
+is no TCP path in the picture. The heavier case is a bench step.
+
+### A pre-existing watchdog, found and fixed
+
+The first capture of this slice showed 66 task-watchdog reports per boot. The
+earliest fires at 11,658 ms in `main`, during acoustic bring-up — **before WiFi
+starts at 29 s** — so it predates this work and had simply never been captured
+past the bring-up summary.
+
+Cause: an acoustic analysis holds core 0 for 3.7 s (7.3 s for the first of a
+session) inside one orchestrator step, so IDLE0 cannot run.
+
+| Change | Watchdog reports per boot |
+|---|---|
+| Before | 66 |
+| Yield every 64 steps, timeout 20 s | 6 |
+| Yield every step | 0 |
+
+The intermediate result is the instructive one. Yielding every 64 steps looks
+sufficient until you notice a single step can BE a measurement: 64 steps is then
+four minutes of starvation. It has to be every step, and one tick against a 3.7 s
+measurement costs nothing.
+
+The structural fix is SPEC 4.5's core split — capture is already pinned to core 1,
+the analysis is not — and that is Phase 2.

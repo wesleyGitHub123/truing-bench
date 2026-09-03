@@ -16,7 +16,8 @@ was applied and the more specific normative rule was followed.
 | 1b Host model preparation | Implemented (`../model_prep`, Python): `bike-wheel-calc` verified (commit 6fc380c, its 52 tests pass); per-spoke analytical Φ_u/Φ_v/Φ_t generation; artifact assembly with per-layout pseudoinverses, rank/conditioning, common-mode evaluation, fingerprints and load checks; host reference two-part solve; SPEC 14.3 host gate (29 tests). Golden fixture artifact and parity cases in `model_prep/golden/`. Two findings below need the owner's attention before mean-tension targeting can ever be enabled. |
 | 1c Firmware truing calculation | Implemented. Host side: `model_prep/truing_model_prep/export.py` writes the compact float32 binary artifact (SHA-256 content hash, per-spoke Fourier coefficients, Φ_t, per-layout masks / rank / conditioning / Φ†) and the C fixtures. Core: `truing/sha256` and `truing/artifact` (parse, the three SPEC 8.7 checks, R3 limits, expansion on the rim grid at load). Calculation: `lib/truing_calc/src/calc_artifact.c`, the REAL implementation behind the unchanged `truing_calc` contract (SPEC 8.3.1 residual, 8.7.1 layout-pure inversion, 8.4 two-part solve, 8.6 cost, 8.11 policy, Eq. 2 targets, per-side verification). Parity with the golden host cases on the host and on the DevKitC-1 (docs/BRINGUP_LOG.md); the orchestrator self-play now runs the real calculation against a wheel simulated through the same influence model. Not covered: loading an artifact from the `artifacts` partition or over the protocol (1e), and asymmetric Part 2 (refused by design, SPEC 8.4). |
 | 1f Acoustic subsystem | Implemented. The four seams of SPEC 9.2: layer 1 as `truing_hal/audio_source_if` (fixed 48 kHz / 24-in-32 format enforced at open; recorded-buffer and synthetic sources on the host; `src/audio_i2s.c` on the target with a core-1 drain task, PSRAM ring, pre-trigger tail and overrun detection); layers 2 and 4 ported to C in `lib/truing_dsp` from the research repository (Hann + zero-padded FFT + parabolic refinement, scipy-semantics prominence peaks with the relative-depth gate, Hilbert-envelope window truncation via a Bluestein transform, RMS-envelope onset detection, the four tension models); layer 3 as the research repository's current rule, "lowest strong peak in the f1 band", output marked `presumed_fundamental` with every estimate `suspect` / PROVISIONAL_MODE_ID (SPEC 4.4.1); the composed subsystem `truing_hal/acoustic_real.c` behind the unchanged one-call contract with a pluck actuator contract (GPIO pulse on target, fake on host). Every DSP constant is chain-profile configuration (blob schema 2). Verified against the research pipeline on recorded campaign excerpts (acoustic_prep) on the host and on the DevKitC-1 (docs/BRINGUP_LOG.md). Not done: the WiFi-load capture stress test (no WiFi stack until 1e), any damping ritual, and a validated tension model or L_eff (research, SPEC 9.5). |
-| 1e, 1h, 2+ | Not started. 1e (comms) depends only on 1a; 1h (integration) on all of the above. |
+| 1e Comms | Implemented. `lib/truing_proto`: a framework-free wire protocol (bounded JSON writer and reader; telemetry event frames; the SPEC 12.2 current-state query; `GET_CURRENT_CYCLE_PROVENANCE`; command decoding enforcing the SPEC 12.3 `wait_id` contract) and a session layer that runs on the orchestrator's own task. `src/net_transport.c`: SPEC 12.1 soft-AP, HTTP server and one websocket endpoint. `src/web_ui.h`: the operator UI, served from flash. The SPEC 9.4 capture-under-WiFi-load check deferred from 1f now runs, with its scope stated below. Not done: the SPEC 12.1 USB CDC fallback (the frames are transport-independent, so this is a driver, not a protocol change), loading an artifact over the protocol, and the SPEC 12.5 debug channel, which decodes but is refused by the orchestrator unless enabled. |
+| 1h, 2+ | Not started. 1h (integration) depends on all of the above. |
 
 ## Repository layout
 
@@ -30,7 +31,9 @@ Truing Repo/                      Git root (independent of the acoustic research
     ├── lib/truing_board/         board profiles (all pins, SPEC 4.3)
     ├── lib/truing_calc/          truing-calculation contract (SPEC 8) with stub and synthetic double; real impl is 1c
     ├── lib/truing_orchestrator/  the state machine (SPEC 7) and the auto-operator test driver
-    ├── src/                      ESP-IDF application: bring-up, NVS config store, workflow self-play demo
+    ├── lib/truing_proto/         SPEC 12 wire protocol and session; no transport, no framework
+    ├── src/                      ESP-IDF application: bring-up, NVS config store, workflow self-play demo,
+    │                             WiFi AP + websocket transport and the web UI
     ├── test/                     PlatformIO native (Unity) test suites
     └── docs/                     this file, BUILD.md
 ```
@@ -286,6 +289,101 @@ One wrinkle worth knowing: the **first** pluck of a session costs 7.3 s
 because it builds the cached window, chirp, kernel and twiddle tables. That is
 once per workspace, not per pluck.
 
+## Phase 1e comms — what the protocol decides, and what it deliberately does not
+
+**The wire layer rules on frames; the orchestrator rules on state.** The decoder
+checks that a frame parses, names a known command, carries the fields that command
+requires, and obeys the SPEC 12.3 `wait_id` rule. It says nothing about
+admissibility. That keeps every SPEC 12.3 rule in one implementation and lets a
+decoded command go to `truing_orch_submit_intent()` unexamined.
+
+The `wait_id` rule splits across the two layers along exactly that line:
+
+| Case | Rejected by | As |
+|---|---|---|
+| Omitted on a confirmation | the wire | `MISSING_WAIT_ID` — there is nothing to correlate |
+| Zero on a confirmation | the wire | `MISSING_WAIT_ID` — zero is the "not answering a wait" sentinel |
+| Present but not the active wait | the orchestrator | `STALE_INTENT` — only it knows which wait is live |
+| Present on `ABORT` / `START_TRUING` | the wire | `UNEXPECTED_WAIT_ID` (see below) |
+
+**Two interpretations worth flagging, because SPEC 12.3 does not spell them out.**
+It says "ABORT and START_TRUING carry no wait_id" and, separately, that a client
+which "omits or fabricates wait_id must be rejected, not accommodated". Read
+together, a `wait_id` on an intent that does not answer a wait is refused rather
+than ignored — extended to `SET_PARAMETER` and `DEBUG` on the same reasoning, since
+neither answers a wait either. A client sending one has misunderstood the protocol,
+and silently dropping the field would hide that. If the owner prefers tolerance
+here, it is one branch in `truing_wire_decode_command()`.
+
+**A duplicate confirmation on a still-open wait is idempotent, not stale.** The wait
+is consumed inside `truing_orch_step()`, not at submission, so re-sending the same
+answer before the machine steps merely records it twice. SPEC 7.3 is about a delayed
+confirmation satisfying a *later* wait, and the `wait_id` prevents that. Noted
+because the obvious test asserts the opposite and fails.
+
+**Vocabulary comes from the firmware's own `truing_*_str()` tables**, and the
+decoder's reverse lookups are derived from those same tables, so the protocol and
+the logs cannot drift. The cost is that the tables are not uniformly cased —
+statuses and stations are lowercase, reason codes and states uppercase — and that is
+preserved rather than tidied, so a client reads the tokens that appear in the logs.
+
+**Non-finite floats become `null`.** JSON has neither NaN nor infinity, and in this
+firmware a non-finite float always means "no value here": an unmeasured reading, or a
+rotation the position authority declines to vouch for. `null` says that.
+
+**A frame that does not fit its buffer is dropped whole, never truncated.** For
+best-effort telemetry losing a frame is correct; sending half of one is not.
+
+**The session runs on the orchestrator's task.** The orchestrator is not thread-safe
+and its snapshot and provenance readers take a mutable pointer, so answering a query
+from the web server's task would race the state machine. The transport therefore only
+moves bytes to and from two calls, which is what SPEC 12.4 already means by intent
+being an event and the transport a driver. The payoff is that a command can be
+submitted and its real SPEC 12.3 verdict returned in the same acknowledgement.
+
+The consequence is that the outbound sink must never block, since it is called on the
+control path SPEC 12.2 forbids telemetry from blocking. It copies the frame onto a
+queue and returns; a sender task does the socket write. A slow or dead client fills
+the queue and frames are dropped — permitted, and why the current-state query exists.
+
+**Frame budgets.** Events and the state snapshot fit 512 bytes; provenance is the only
+large frame at **6113 bytes of an 8192-byte budget** for a 36-spoke wheel, measured on
+target. It is answered on demand, never streamed, so its size costs the telemetry path
+nothing.
+
+**Credentials are derived from the board's MAC** and logged at boot. A checked-in
+passphrase would be a secret published to everyone who can read the source.
+
+### SPEC 9.4 capture under WiFi load — what was actually tested
+
+Deferred from 1f, which had no WiFi stack to load the capture with. Measured on the
+DevKitC-1: a 1 s capture with the radio transmitting and a compute task at DSP
+priority on core 1 produced **zero DMA overruns**, with a 53.3 ms worst read gap
+against the 100 ms drain budget.
+
+**Its scope, stated rather than implied.** The load is raw 802.11 injection on the
+board's own AP interface, and the driver caps that near **91 frames/s** however it is
+driven — letting it own the sequence numbers did not move it. No station was
+associated, so no TCP path was in the picture. This is a genuinely active radio, not a
+saturated one. **A capture taken while an associated browser streams telemetry through
+a measurement cycle is a bench check and has not been performed**; the firmware would
+report it as `CAPTURE_OVERRUN` (SPEC 13.2) if it failed. The check reports NOT
+PERFORMED, rather than passing, when injection cannot start.
+
+### A pre-existing watchdog this slice surfaced
+
+The task watchdog was already firing before 1e — 66 reports in a boot — because an
+acoustic analysis legitimately holds core 0 for 3.7 s (7.3 s for the first of a
+session) inside a single orchestrator step, so the idle task cannot run. It mattered
+now because the web server shares core 0. Fixed by yielding once per orchestrator
+step — it must be *per step*, since one step can BE a measurement, so yielding every
+64 would mean minutes of starvation — and by widening the watchdog to 20 s to cover a
+single analysis rather than silencing it. Boot now reports **zero**.
+
+This is a symptom, not the disease. SPEC 4.5 splits the cores and capture is already
+pinned to core 1, but acoustic layers 2-4 still run inline on the control core. Moving
+them is Phase 2 work and is listed under open items.
+
 ## Phase 1c results (host)
 
 | Check | Result |
@@ -398,3 +496,17 @@ configuration exists yet (hub geometry, `c` per side, the influence fingerprint
 and the tension-model parameters all require measurement or model preparation),
 so a normal session cannot be admitted until 1b and a measurement campaign
 supply them; the firmware reports this honestly as "not provisioned".
+
+Carried forward from 1e:
+
+- **Acoustic layers 2-4 run inline on the control core.** SPEC 4.5 splits the
+  cores and capture already honours it, but the analysis does not, which is why a
+  single orchestrator step can occupy core 0 for seconds. Phase 2.
+- **Capture under an associated client's traffic is unverified.** See the SPEC 9.4
+  scope note above — the automated check loads the radio but not a TCP path.
+- **No USB CDC fallback yet** (SPEC 12.1). The frames are transport-independent by
+  construction, so this is a driver, not a protocol change.
+- **Artifact loading over the protocol is not implemented.** SPEC 12.3.1 requires
+  artifact-bound changes to go through host-side regeneration and reload; the
+  reload half has no wire command yet, and `SET_PARAMETER` correctly refuses those
+  fields with `REQUIRES_ARTIFACT_REGENERATION` in the meantime.
