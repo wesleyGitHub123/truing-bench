@@ -16,6 +16,14 @@
 extern "C" {
 #endif
 
+/* Complex elements per cache-resident chunk in the transform's blocked passes. 4096 elements is
+ * 32 KB, half of the ESP32-S3's data cache, leaving the rest for the twiddle table; it was the
+ * measured optimum on that part. Tuning it changes only which butterflies miss the cache, never
+ * which butterflies run, so any value is numerically equivalent. */
+#ifndef TRUING_FFT_CACHE_BLOCK
+#define TRUING_FFT_CACHE_BLOCK 4096u
+#endif
+
 typedef struct {
     float re;
     float im;

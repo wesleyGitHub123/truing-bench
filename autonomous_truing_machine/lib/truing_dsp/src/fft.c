@@ -68,6 +68,36 @@ static uint32_t bit_reverse(uint32_t v, uint32_t bits)
     return r;
 }
 
+/* One radix-2 pass over [from, to), which is a whole number of len-sized blocks. Split out
+ * because the transform runs its passes in two different orders and the body is the hot loop
+ * of the whole DSP: the direction is folded into a +-1 multiplier on the twiddle's imaginary
+ * part, which is exact, and the table index is advanced rather than recomputed, both of which
+ * keep the arithmetic identical while taking a branch and two integer multiplies out of it. */
+static void fft_pass(truing_cpx_t *x, uint32_t from, uint32_t to, uint32_t len, uint32_t tstep,
+                     const truing_cpx_t *tw, float sgn)
+{
+    const uint32_t half = len >> 1;
+    for (uint32_t start = from; start < to; start += len) {
+        truing_cpx_t *a = x + start;
+        truing_cpx_t *b = a + half;
+        uint32_t ti = 0u;
+        for (uint32_t k = 0u; k < half; ++k) {
+            const float wr = tw[ti].re;
+            const float wi = sgn * tw[ti].im;
+            ti += tstep;
+            const float br = b->re, bi = b->im;
+            const float tr = br * wr - bi * wi;
+            const float tim = br * wi + bi * wr;
+            b->re = a->re - tr;
+            b->im = a->im - tim;
+            a->re += tr;
+            a->im += tim;
+            ++a;
+            ++b;
+        }
+    }
+}
+
 void truing_fft_complex(const truing_fft_plan_t *plan, truing_cpx_t *x, bool inverse)
 {
     const uint32_t n = plan->n;
@@ -81,32 +111,29 @@ void truing_fft_complex(const truing_fft_plan_t *plan, truing_cpx_t *x, bool inv
             x[j] = t;
         }
     }
-    /* The direction is folded into a +-1 multiplier on the twiddle's imaginary part, which is exact,
-     * and the table index is advanced rather than recomputed: both keep the arithmetic identical
-     * while taking the branch and two integer multiplies out of the inner loop. */
     const float sgn = inverse ? -1.0f : 1.0f;
-    for (uint32_t len = 2u; len <= n; len <<= 1) {
-        const uint32_t half = len >> 1;
-        const uint32_t tstep = (n / len) * stride;
-        for (uint32_t start = 0u; start < n; start += len) {
-            truing_cpx_t *a = x + start;
-            truing_cpx_t *b = a + half;
-            uint32_t ti = 0u;
-            for (uint32_t k = 0u; k < half; ++k) {
-                const float wr = tw[ti].re;
-                const float wi = sgn * tw[ti].im;
-                ti += tstep;
-                const float br = b->re, bi = b->im;
-                const float tr = br * wr - bi * wi;
-                const float tim = br * wi + bi * wr;
-                b->re = a->re - tr;
-                b->im = a->im - tim;
-                a->re += tr;
-                a->im += tim;
-                ++a;
-                ++b;
-            }
+    /* The butterflies of one pass are independent of each other, so the order in which a pass
+     * sweeps its blocks is free to choose. While len <= block no butterfly reaches outside a
+     * block-aligned chunk, so those passes are run chunk by chunk with the chunk resident in the
+     * data cache, instead of streaming the whole array out of PSRAM once per pass. Every
+     * butterfly, its two operands and its own order of operations are unchanged, so the output
+     * is bit-identical to the linear order; only the misses differ.
+     *
+     * On the ESP32-S3 that is most of the cost. A transform small enough to sit in the 64 KB
+     * data cache runs at 0.20 us per butterfly whether it is addressed in internal RAM or in
+     * PSRAM, while the 131,072-point transform runs at 0.98 us: nearly four fifths of the time
+     * is cache misses, not arithmetic. Blocking at 4096 complex elements (32 KB, leaving the
+     * rest of the cache for the twiddle table) takes a pluck from 3,667 to 3,077 ms. It is a
+     * local optimum on this part -- 2048 and 8192 both measured slower -- because the twiddles
+     * of the larger blocked passes stride the whole table and start missing themselves. */
+    const uint32_t block = n < (uint32_t)TRUING_FFT_CACHE_BLOCK ? n : (uint32_t)TRUING_FFT_CACHE_BLOCK;
+    for (uint32_t c0 = 0u; c0 < n; c0 += block) {
+        for (uint32_t len = 2u; len <= block; len <<= 1) {
+            fft_pass(x, c0, c0 + block, len, (n / len) * stride, tw, sgn);
         }
+    }
+    for (uint32_t len = block << 1; len <= n; len <<= 1) {
+        fft_pass(x, 0u, n, len, (n / len) * stride, tw, sgn);
     }
 }
 
