@@ -19,6 +19,11 @@
  *   - the phase caption is driven off STATE_TRANSITION events, which is still mirroring
  *     (the caption is the `to` field the firmware sent) and is what keeps this to one
  *     snapshot query per wait instead of one per transition.
+ *   - provenance is PULLED, never pushed: on entering the tab that renders it and at the
+ *     workflow milestones that change it (plan computed, verification recorded, run
+ *     finished). That is a handful of §12.2 idempotent queries per cycle — the record only
+ *     changes at those moments, so polling for it would be waste and eventing it would be
+ *     a protocol change.
  *
  * THREE AUDIENCES, three tabs. An operator needs to know what to do next and whether the
  * machine heard them; an evaluator needs to know what produced a number and how far to
@@ -345,6 +350,9 @@ static const char TRUING_WEB_UI_HTML[] =
 "function send(o){if(!ws||ws.readyState!==1){hint('not connected',1);return 0;}\n"
 " o.seq=++seq;ws.send(JSON.stringify(o));dbg('-> '+JSON.stringify(o),'t-ack');return o.seq;}\n"
 "function hint(t,bad){var h=el('hint');h.textContent=t||'';h.className=bad?'bad':'';}\n"
+/* Pull the authoritative provenance record (P6 / SPEC 12.2) on demand: entering the tab that
+   renders it, and at the milestones that change it. Bounded by design — never one per event. */
+"function askProv(){if(ws&&ws.readyState===1)send({cmd:'GET_CURRENT_CYCLE_PROVENANCE'});}\n"
 
 /* ---- command lifecycle ----------------------------------------------------------------- */
 "function submit(intent,waitId,extra){\n"
@@ -440,6 +448,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "   act('measuring spoke '+(lastIdx===null?'':lastIdx)+'...','t-nav',f.ts_ms);\n"
 "  else if(f.to==='COMPUTE_ADJUSTMENTS')act('computing the plan...','t-nav',f.ts_ms);\n"
 "  else if(f.to==='VERIFY')act('verifying...','t-nav',f.ts_ms);\n"
+"  if(f.to==='COMPUTE_ADJUSTMENTS'||f.to==='EVALUATE_CONVERGENCE')askProv();\n"
 "  render();return;}\n"
 " if(k==='WAIT_ISSUED'){\n"
 "  dbg('wait #'+f.wait.wait_id+' '+f.wait.kind+' index '+f.wait.target_index,'t-warn',f.ts_ms);\n"
@@ -455,7 +464,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "  dbg(JSON.stringify(f),'',f.ts_ms);render();return;}\n"
 " if(k==='TERMINAL_RESULT'){act('run finished: '+f.result,'t-good',f.ts_ms);\n"
 "  dbg('TERMINAL '+f.result,'t-good',f.ts_ms);\n"
-"  send({cmd:'GET_CURRENT_STATE'});send({cmd:'GET_CURRENT_CYCLE_PROVENANCE'});return;}\n"
+"  send({cmd:'GET_CURRENT_STATE'});askProv();return;}\n"
 " if(k==='NAVIGATION'){dbg('nav '+f.target_kind+' '+f.index+' '+f.outcome,'t-nav',f.ts_ms);\n"
 "  return;}\n"
 " if(k==='INTENT_REJECTED'){act('refused: '+f.intent,'t-bad',f.ts_ms);\n"
@@ -674,7 +683,7 @@ static const char TRUING_WEB_UI_HTML[] =
 " el('tab-op').className=t==='op'?'on':'';\n"
 " el('tab-run').className=t==='run'?'on':'';\n"
 " el('tab-dev').className=t==='dev'?'on':'';\n"
-" if(t==='dev')loadIdent();}\n"
+" if(t==='run')askProv();if(t==='dev')loadIdent();}\n"
 
 "el('tab-op').onclick=function(){showTab('op');};\n"
 "el('tab-run').onclick=function(){showTab('run');};\n"

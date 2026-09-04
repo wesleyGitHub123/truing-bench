@@ -247,6 +247,22 @@ sandbox.handle(S({ active_wait: null, current_state: 'COMPUTE_ADJUSTMENTS' }));
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 9500, from: 'READ_RUNOUT', to: 'COMPUTE_ADJUSTMENTS' });
 ok(txt('statusbody').indexOf('Computing the plan') >= 0, 'compute stage is named in plain language');
 
+// ---- Run Details pulls the authoritative record, bounded and without state spam -----------
+sent = [];
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 9550, from: 'COMPUTE_ADJUSTMENTS', to: 'EVALUATE_CONVERGENCE' });
+ok(sent.filter(c => c.cmd === 'GET_CURRENT_CYCLE_PROVENANCE').length === 1,
+  'the verification milestone pulls provenance once', JSON.stringify(sent.map(c => c.cmd)));
+ok(sent.filter(c => c.cmd === 'GET_CURRENT_STATE').length === 0,
+  'milestones never trigger a state query');
+sent = [];
+byId['tab-run'].onclick();
+ok(sent.filter(c => c.cmd === 'GET_CURRENT_CYCLE_PROVENANCE').length === 1,
+  'entering Run Details pulls the current provenance', JSON.stringify(sent.map(c => c.cmd)));
+ok(sent.filter(c => c.cmd === 'GET_CURRENT_STATE').length === 0,
+  'the run-tab pull is not a state query');
+byId['tab-op'].onclick();
+
+
 // ---- terminal results are translated ----------------------------------------------------
 sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null, last_known_result: 'CONVERGED_GEOMETRIC_ONLY', last_reason: 'MEAN_TENSION_MODEL_UNAVAILABLE' }));
 ok(txt('statusbody').indexOf('Geometry target reached') >= 0, 'CONVERGED_GEOMETRIC_ONLY is translated');
