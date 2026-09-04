@@ -14,9 +14,20 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "board/board_profile.h"
 #include "config_store_nvs.h"
+#include "esp_timer.h"
+#include "firmware_version.h"
 #include "truing_proto/wire.h"
 #include "web_ui.h"
+
+/* Injected by tools/build_identity.py; the fallbacks keep an ad-hoc compile working. */
+#ifndef TRUING_BUILD_REV
+#define TRUING_BUILD_REV "unknown"
+#endif
+#ifndef TRUING_UI_HASH
+#define TRUING_UI_HASH "unknown"
+#endif
 
 static const char *TAG = "net";
 
@@ -273,10 +284,40 @@ void truing_net_rf_load_stop(uint32_t *frames_injected, uint32_t *inject_failure
 
 /* ---- handlers --------------------------------------------------------------------- */
 
+/* Two boards on this bench serve this page on the same 192.168.4.1, so a cached copy is
+ * indistinguishable from the other board's copy, and both failure modes look like "the old
+ * UI came back". The page is 21 KB off local flash over a link with no other traffic;
+ * caching it buys nothing and costs the one property that matters here, which is that what
+ * you are looking at is what the board is actually running. */
+static void no_store(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store, must-revalidate");
+    httpd_resp_set_hdr(req, "Pragma", "no-cache");
+}
+
 static esp_err_t ui_get_handler(httpd_req_t *req)
 {
+    no_store(req);
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, TRUING_WEB_UI_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+/* Which board, which build, which UI. The UI hash is sha256(src/web_ui.h) truncated by the
+ * build script, so the page can prove it is the page that was compiled in rather than a
+ * copy the browser kept or the other board's. */
+static esp_err_t id_get_handler(httpd_req_t *req)
+{
+    char body[320];
+    uint8_t mac[6] = { 0 };
+    (void)esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    const int n = snprintf(body, sizeof(body),
+        "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\","
+        "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld}",
+        BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH,
+        mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000));
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, n > 0 ? (size_t)n : 0u);
 }
 
 static esp_err_t ws_handler(httpd_req_t *req)
@@ -403,10 +444,12 @@ bool truing_net_start(void)
         return false;
     }
     static const httpd_uri_t ui_uri = { .uri = "/", .method = HTTP_GET, .handler = ui_get_handler };
+    static const httpd_uri_t id_uri = { .uri = "/id", .method = HTTP_GET, .handler = id_get_handler };
     static const httpd_uri_t ws_uri = {
         .uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true,
     };
     (void)httpd_register_uri_handler(s_server, &ui_uri);
+    (void)httpd_register_uri_handler(s_server, &id_uri);
     (void)httpd_register_uri_handler(s_server, &ws_uri);
 
     if (xTaskCreatePinnedToCore(sender_task, "wire_tx", SENDER_STACK, NULL, tskIDLE_PRIORITY + 3, NULL, 0) != pdPASS) {
@@ -421,6 +464,10 @@ bool truing_net_start(void)
     ESP_LOGI(TAG, "   passphrase %s", pass);
     ESP_LOGI(TAG, "   URL        http://192.168.4.1/");
     ESP_LOGI(TAG, " (derived from this board's MAC; not stored in the repository)");
+    /* Printed here and served at /id and shown in the page footer. Both boards answer on
+     * 192.168.4.1, so this is how you tell which one you reached. */
+    ESP_LOGI(TAG, "   board %s | firmware %s | build %s | ui %s",
+             BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH);
     ESP_LOGI(TAG, "=========================================================");
     return true;
 }
