@@ -371,11 +371,27 @@ ok(txt('rundl').indexOf('the machine itself does not retain it once the next run
   'the record states honestly that retention is browser-held, not machine history');
 ok(txt('rundl').indexOf('32 spokes') >= 0 && txt('techdl').indexOf('25b68917ad02f8b4') >= 0,
   'the completed record still carries the full provenance detail');
-// a new live session takes the tab back to the current cycle
+// A new live session takes the tab back to the current cycle -- and must do so from the
+// snapshot alone. Run Details used to redraw only when a provenance frame arrived, so a
+// viewer already sitting on the tab kept reading the finished run all through the next one.
+// Nothing is handed to the page here except the state frame, which is the whole point.
+sent = [];
 sandbox.handle(S({ current_state: 'MEASURE_WHEEL_STATE', session_active: true, active_wait: null }));
+ok(txt('rundl').indexOf('Last completed run') < 0,
+  'a new live session takes Run Details back without waiting for a provenance frame',
+  txt('rundl').slice(0, 70));
+ok(sent.some(c => c.cmd === 'GET_CURRENT_CYCLE_PROVENANCE'),
+  'a new session pulls a fresh record: starting a run is a milestone, not just a tab switch');
+ok(txt('techdl').indexOf('25b68917ad02f8b4') < 0 && txt('rundl').indexOf('32 spokes') < 0,
+  'the finished run\'s numbers are not shown as the live cycle while that pull is in flight',
+  txt('rundl').slice(0, 70));
 sandbox.handle(Object.assign({}, PROV, { session_id: 2, plan: null, verification: null }));
 ok(txt('rundl').indexOf('Last completed run') < 0,
   'a new live session takes Run Details back from the completed run');
+// Ending the run puts the frozen record back, again from the snapshot alone.
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: 'CONVERGED_GEOMETRIC_ONLY' }));
+ok(txt('rundl').indexOf('Last completed run - session 1') >= 0,
+  'returning to idle restores the completed-run record without a tab switch');
 
 
 

@@ -462,8 +462,17 @@ static const char TRUING_WEB_UI_HTML[] =
 "function handle(f){\n"
 " if(f.t==='state'){if(snap&&!snap.session_active&&f.session_active){\n"
 "   logGap('act','new machine session started');\n"
-"   logGap('dbg','--- new machine session ---');}\n"
-"  snap=f;curState=f.current_state;render();return;}\n"
+"   logGap('dbg','--- new machine session ---');\n"
+/* Starting a run clears the machine's plan and verification and takes a new session id, so
+   the record held here describes the run that just ended. Drop it before asking for the new
+   one: a slow answer should leave the tab empty, never show the last run's numbers as this
+   run's. This is the milestone the pull-at-milestones rule was missing. */
+"   prov=null;askProv();}\n"
+"  snap=f;curState=f.current_state;\n"
+/* Live-or-completed is decided from the snapshot, so Run Details has to be rebuilt when one
+   arrives. It used to redraw only on a provenance frame, and a session starting produces
+   none — so a viewer already on the tab kept reading the finished run while the next ran. */
+"  renderRun();render();return;}\n"
 " if(f.t==='provenance'){prov=f;\n"
 /* The provenance answer to the terminal pull is the run's final authoritative record; the
    machine keeps it until the next START_TRUING, this browser keeps it beyond that. */
