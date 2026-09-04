@@ -16,6 +16,7 @@
 
 #include "board/board_profile.h"
 #include "config_store_nvs.h"
+#include "orch_demo.h"
 #include "esp_timer.h"
 #include "build_mode.h"
 #include "firmware_version.h"
@@ -308,6 +309,45 @@ static esp_err_t ui_get_handler(httpd_req_t *req)
  * copy the browser kept or the other board's. `clients` is the live websocket client count:
  * awareness only — the SPEC §12.3 wait_id contract is what keeps two clients safe, and no
  * ownership or locking is offered or implied. */
+#if TRUING_FAST_DEMO
+/* Choose the acquisition path for the NEXT session: GET /demo/acquisition?mode=auto|manual.
+ *
+ * Deliberately NOT an operator intent. It answers no wait, carries no wait_id and cannot
+ * reach a running session - truing_demo_request_acquisition() refuses while one is active,
+ * and the change is applied by the orchestrator's own task between steps. So the SPEC §12.3
+ * contract is untouched and there is nothing here that could alter a session in flight.
+ *
+ * It exists only in this image. The interactive firmware is not hardened against this URL;
+ * it simply does not serve it, and its truing_demo_request_acquisition() refuses outright. */
+static esp_err_t acq_post_handler(httpd_req_t *req)
+{
+    char query[64];
+    char mode[16] = { 0 };
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        (void)httpd_query_key_value(query, "mode", mode, sizeof(mode));
+    }
+    const bool want_auto = strcmp(mode, "auto") == 0;
+    const bool want_manual = strcmp(mode, "manual") == 0;
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (!want_auto && !want_manual) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"mode must be auto or manual\"}");
+    }
+    const char *detail = "";
+    char body[192];
+    if (!truing_demo_request_acquisition(want_auto, &detail)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        const int m = snprintf(body, sizeof(body), "{\"ok\":false,\"detail\":\"%s\"}", detail);
+        return httpd_resp_send(req, body, m > 0 ? (size_t)m : 0u);
+    }
+    ESP_LOGW(TAG, "acquisition path requested: %s", want_auto ? "AUTOMATIC (synthetic)" : "MANUAL (operator)");
+    const int m = snprintf(body, sizeof(body), "{\"ok\":true,\"requested\":\"%s\"}",
+                           want_auto ? "auto" : "manual");
+    return httpd_resp_send(req, body, m > 0 ? (size_t)m : 0u);
+}
+#endif
+
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[320];
@@ -317,8 +357,10 @@ static esp_err_t id_get_handler(httpd_req_t *req)
     truing_net_get_stats(&st);
     const int n = snprintf(body, sizeof(body),
         "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\",\"mode\":\"%s\","
+        "\"acquisition\":\"%s\",\"acquisition_selectable\":%s,"
         "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
         BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR,
+        truing_demo_acquisition_is_automatic() ? "auto" : "manual", TRUING_FAST_DEMO ? "true" : "false",
         mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");
@@ -456,6 +498,12 @@ bool truing_net_start(void)
     (void)httpd_register_uri_handler(s_server, &ui_uri);
     (void)httpd_register_uri_handler(s_server, &id_uri);
     (void)httpd_register_uri_handler(s_server, &ws_uri);
+#if TRUING_FAST_DEMO
+    /* Only this image serves it at all. */
+    static const httpd_uri_t acq_uri = { .uri = "/demo/acquisition", .method = HTTP_GET,
+                                         .handler = acq_post_handler };
+    (void)httpd_register_uri_handler(s_server, &acq_uri);
+#endif
 
     if (xTaskCreatePinnedToCore(sender_task, "wire_tx", SENDER_STACK, NULL, tskIDLE_PRIORITY + 3, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "sender task could not be created");

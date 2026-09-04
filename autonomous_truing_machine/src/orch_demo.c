@@ -63,11 +63,21 @@ static struct {
     uint32_t adj_wait_id;
     uint8_t  adj_spoke;
     float    adj_turns_rev;
+    /* Which acquisition path the CURRENT wiring provides, and one requested by the
+     * operator that has not been applied yet. Applied only while idle (see the loop). */
+    bool     acq_automatic;
+    bool     acq_change_pending;
+    bool     acq_requested;
+    /* The starting wheel, kept so a re-wire can re-seed the simulated rim. */
+    float    seed_lateral[TRUING_MAX_RIM_ANGLES];
+    float    seed_radial[TRUING_MAX_RIM_ANGLES];
+    bool     seeded;
     truing_calc_if_t calc;
     truing_calc_artifact_ctx_t cctx;      /* REAL calculation on the loaded artifact (Phase 1c) */
     truing_telemetry_if_t sink;
     truing_telemetry_ring_ctx_t ring;
     truing_auto_operator_t op;
+    truing_orch_deps_t deps;              /* kept: a path change re-inits against it */
     truing_orchestrator_t orch;
     uint32_t dropped_events;
     /* SPEC §12: the wire session runs on THIS task, which is the orchestrator's own —
@@ -96,6 +106,55 @@ static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke,
         truing_runout_synthetic_set_index(&s.rsyn, k, s.rsyn.lateral_mm[k] + art->phi_u[k][spoke] * turns_rev,
                                           s.rsyn.radial_mm[k] + art->phi_v[k][spoke] * turns_rev);
     }
+}
+
+/* Point navigation and runout at one path or the other. Both implementations already
+ * declare what they are; this is the whole of the difference between the two paths, and it
+ * is why provenance stays honest without anyone maintaining a second story about it. */
+static void wire_acquisition(bool automatic)
+{
+    if (automatic) {
+        truing_runout_synthetic_init(&s.runout, &s.rsyn, s.clock, 32u);
+        truing_navigation_synthetic_init(&s.nav, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
+        if (s.seeded) {
+            for (uint8_t k = 0; k < 32u; ++k) {
+                truing_runout_synthetic_set_index(&s.rsyn, k, s.seed_lateral[k], s.seed_radial[k]);
+            }
+        }
+    } else {
+        truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
+        truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
+    }
+    s.acq_automatic = automatic;
+}
+
+bool truing_demo_acquisition_is_automatic(void)
+{
+    return s.acq_automatic;
+}
+
+bool truing_demo_request_acquisition(bool automatic, const char **detail)
+{
+    if (!TRUING_FAST_DEMO) {
+        if (detail != NULL) {
+            *detail = "this image has no automatic acquisition path";
+        }
+        return false;
+    }
+    truing_orch_snapshot_t snap;
+    truing_orch_snapshot(&s.orch, &snap);
+    if (snap.session_active) {
+        if (detail != NULL) {
+            *detail = "a session is running; abort it first";
+        }
+        return false;
+    }
+    /* Recorded for the orchestrator task to apply at a safe point. Two plain words written
+     * from the server task and read from the demo task; nothing here touches the state
+     * machine, which has one owner (SPEC §12.4). */
+    s.acq_requested = automatic;
+    s.acq_change_pending = true;
+    return true;
 }
 
 /* FAST DEMO: watch the adjustment the operator is being asked to apply, and let the
@@ -211,7 +270,9 @@ static void demo_task(void *arg)
                                 "automatic and SYNTHETIC - this is not a physical wheel result"
                               : (TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
                                                   : "INTERACTIVE: the session starts and the waits are answered from the web UI"),
-             TRUING_FAST_DEMO ? "SYNTHETIC navigation + SYNTHETIC runout" : "manual navigation + manual runout");
+             TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
+                                "SYNTHETIC runout"
+                              : "manual navigation + manual runout");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -249,13 +310,7 @@ static void demo_task(void *arg)
      * No orchestrator branch is involved and no wait is bypassed: POSITION and READ_RUNOUT
      * are entered and left exactly as before. The only difference is that the thing being
      * asked can answer for itself, which is the entire point of the HAL boundary. */
-    if (TRUING_FAST_DEMO) {
-        truing_runout_synthetic_init(&s.runout, &s.rsyn, s.clock, 32u);
-        truing_navigation_synthetic_init(&s.nav, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
-    } else {
-        truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
-        truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
-    }
+    wire_acquisition(TRUING_FAST_DEMO ? true : false);
     truing_artifact_store_status_t ast;
     const truing_artifact_t *art = truing_artifact_store_load_fixture(&s.wheel, &s.solver, &ast);
     if (art == NULL) {
@@ -287,9 +342,15 @@ static void demo_task(void *arg)
     truing_auto_operator_set_wheel(&s.op, 32u, lateral, radial, 0.0f);
     s.op.response_fn = model_response;
     s.op.user = (void *)art;
-    /* FAST DEMO: the same starting wheel, put where the synthetic runout implementation
-     * reads from. One mis-set wheel, two ways of being asked about it. */
-    if (TRUING_FAST_DEMO) {
+    /* The same starting wheel, kept so that whichever path is selected asks about ONE
+     * mis-set wheel. The manual path asks a person for these numbers; the automatic path
+     * reads them from the simulated rim. */
+    for (uint8_t k = 0; k < 32u; ++k) {
+        s.seed_lateral[k] = lateral[k];
+        s.seed_radial[k] = radial[k];
+    }
+    s.seeded = true;
+    if (s.acq_automatic) {
         for (uint8_t k = 0; k < 32u; ++k) {
             truing_runout_synthetic_set_index(&s.rsyn, k, lateral[k], radial[k]);
         }
@@ -315,6 +376,9 @@ static void demo_task(void *arg)
     deps.telemetry = &s.sink;
     deps.clock = s.clock;
     deps.firmware_version = TRUING_FIRMWARE_VERSION;
+    /* The interface structs are re-initialised IN PLACE when the path changes, so these
+     * pointers stay valid and keep pointing at whichever implementation is wired now. */
+    s.deps = deps;
     if (!truing_orch_init(&s.orch, &deps)) {
         ESP_LOGE(TAG, "orchestrator init failed");
         vTaskDelete(NULL);
@@ -337,10 +401,39 @@ static void demo_task(void *arg)
         r = truing_orch_step(&s.orch);
         drain_telemetry();
         service_wire();
-        if (TRUING_FAST_DEMO) {
+        /* The simulated wheel exists only where the rim is simulated. On the manual path a
+         * real person turns a real nipple and the change shows up in what they type. */
+        if (s.acq_automatic) {
             truing_orch_snapshot_t fd;
             truing_orch_snapshot(&s.orch, &fd);
             fastdemo_track_adjustment(&fd, art);
+        }
+        /* A requested acquisition path is applied HERE and only here: on the orchestrator's
+         * own task, between steps, with no session running. Re-initialising takes the
+         * machine back through BOOT -> INITIALIZE, which re-establishes the spoke-0
+         * reference through whichever navigation implementation is now wired - the manual
+         * one will ask a person for it, the synthetic one will not. The next session is
+         * then admitted against the implementations that actually ran (SPEC §6.2). */
+        if (s.acq_change_pending) {
+            truing_orch_snapshot_t now;
+            truing_orch_snapshot(&s.orch, &now);
+            if (!now.session_active) {
+                s.acq_change_pending = false;
+                if (s.acq_requested != s.acq_automatic) {
+                    wire_acquisition(s.acq_requested);
+                    (void)truing_orch_init(&s.orch, &s.deps);
+                    ESP_LOGW(TAG, "acquisition path -> %s; re-initialising so the reference is "
+                                  "established through it",
+                             s.acq_automatic ? "AUTOMATIC (synthetic navigation + synthetic runout)"
+                                             : "MANUAL (operator positions and reads the gauges)");
+                    steps = 0u;
+                    waits = 0u;
+                    delays = 0u;
+                    started = false;
+                    t0 = esp_timer_get_time();
+                    continue;
+                }
+            }
         }
         /* The auto-operator is a DEVELOPMENT DOUBLE for the human, not machine behaviour.
          * While a browser is attached the real operator answers the wait, which is the

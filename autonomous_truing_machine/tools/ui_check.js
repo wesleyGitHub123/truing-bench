@@ -98,6 +98,7 @@ function WebSocket(url) { this.url = url; this.readyState = 1; WebSocket.last = 
 const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
   ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1, mode: 'interactive',
+  acquisition: 'manual', acquisition_selectable: false,
 };
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; };
@@ -399,12 +400,15 @@ ok(txt('rundl').indexOf('Last completed run - session 1') >= 0,
 // The capability is not in the page: there is no command that makes a session synthetic, so
 // a page talking to an interactive board cannot produce one however it is driven. What the
 // page does is refuse to let a synthetic run look like a physical one.
-IDENT.mode = 'interactive';
+IDENT.mode = 'interactive'; IDENT.acquisition = 'manual'; IDENT.acquisition_selectable = false;
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') >= 0, 'interactive build shows no Fast Demo banner');
+ok(byId['acqcard'].className.indexOf('hide') >= 0,
+  'interactive build offers no acquisition selector at all');
 ok(byId['modechip'].className.indexOf('hide') >= 0, 'interactive build shows no Fast Demo chip');
 ok(txt('b-start') === 'Start truing', 'interactive build offers Start truing', txt('b-start'));
-ok(txt('i-mode') === 'INTERACTIVE', 'Diagnostics names the build mode', txt('i-mode'));
+ok(txt('i-mode') === 'INTERACTIVE / acquisition MANUAL (operator)',
+  'Diagnostics names the build and the path', txt('i-mode'));
 // No control anywhere on the page can ask for synthetic measurements.
 sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
 sent = [];
@@ -412,9 +416,12 @@ byId['b-start'].onclick();
 ok(sent.length === 1 && sent[0].cmd === 'START_TRUING' && Object.keys(sent[0]).length === 2,
   'Start sends START_TRUING and nothing else, in either build', JSON.stringify(sent[0]));
 
-IDENT.mode = 'fastdemo';
+IDENT.mode = 'fastdemo'; IDENT.acquisition = 'auto'; IDENT.acquisition_selectable = true;
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') < 0, 'Fast Demo build shows the banner');
+ok(byId['acqcard'].className.indexOf('hide') < 0, 'the Fast Demo build offers the acquisition selector');
+ok(byId['b-acq-auto'].className === 'sel' && byId['b-acq-manual'].className === '',
+  'the selector shows which path is active');
 ok(byId['modechip'].className.indexOf('hide') < 0, 'Fast Demo build shows the header chip');
 ok(page.indexOf('It is not a physical wheel-truing result.') >= 0,
   'the banner says plainly that this is not a physical result');
@@ -422,7 +429,8 @@ ok(page.indexOf('This run uses simulated measurements.') >= 0,
   'the banner says the measurements are simulated');
 ok(page.indexOf('Synthetic measurement mode') >= 0, 'the banner names the mode');
 ok(txt('b-start') === 'Start Fast Demo', 'Fast Demo build labels the action honestly', txt('b-start'));
-ok(txt('i-mode') === 'FAST DEMO / SYNTHETIC', 'Diagnostics names the Fast Demo build', txt('i-mode'));
+ok(txt('i-mode') === 'FAST DEMO / acquisition AUTOMATIC (synthetic)',
+  'Diagnostics names the Fast Demo build and its path', txt('i-mode'));
 
 // The automated-acquisition line counts what the machine reported, never a timer.
 sandbox.handle(PROV);
@@ -434,6 +442,15 @@ for (let i = 0; i < 17; ++i) {
 }
 ok(txt('statusbody').indexOf('17 / 32') >= 0, 'the spoke count follows the measurement events',
   txt('statusbody').slice(-70));
+ok(txt('statusbody').indexOf('spokes measured') >= 0, 'the count says what is being counted');
+const bar = (function find(e) {
+  if (e.className === 'prog') return e.children[0];
+  for (const c of (e.children || [])) { const r = find(c); if (r) return r; }
+  return null;
+})(byId['statusbody']);
+ok(bar !== null, 'a progress bar is rendered during the automated pass');
+ok(bar && bar.style.width === (100 * 17 / 32) + '%', 'the bar width is the real fraction measured',
+  bar && bar.style.width);
 ok(txt('statusbody').indexOf('synthetic acoustic source') >= 0,
   'the automated phase names the synthetic source');
 for (let i = 17; i < 32; ++i) {
@@ -456,23 +473,55 @@ ok(txt('rundl').indexOf('No dial gauge was read') >= 0,
 ok(txt('rundl').indexOf('Manual dial entry') < 0, 'the manual-entry claim is gone in Fast Demo');
 ok(txt('rundl').indexOf('Not a physical wheel result') >= 0,
   'the non-physical warning is still on the Run Details tab');
-IDENT.mode = 'interactive';
+IDENT.mode = 'interactive'; IDENT.acquisition = 'manual';
 sandbox.loadIdent();
 sandbox.handle(PROV);
 ok(txt('rundl').indexOf('Manual dial entry') >= 0,
-  'the interactive build still reports manual dial entry, which is what happens there');
+  'the manual path reports manual dial entry, which is what happens there');
 ok(txt('rundl').indexOf('synthetic navigation') < 0,
-  'the interactive build does not claim synthetic acquisition');
-IDENT.mode = 'fastdemo';
+  'the manual path does not claim synthetic acquisition');
+IDENT.mode = 'fastdemo'; IDENT.acquisition = 'auto';
 sandbox.loadIdent();
 sandbox.showTab('op');
+
+// The Fast Demo IMAGE running the MANUAL path is an ordinary physical-path session, and must
+// present as one: no synthetic banner, and the provenance sentences back to manual.
+IDENT.acquisition = 'manual';
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') >= 0,
+  'selecting the manual path takes the synthetic banner down');
+ok(byId['acqcard'].className.indexOf('hide') < 0, 'the selector stays available on the manual path');
+ok(byId['b-acq-manual'].className === 'sel', 'the selector follows the machine, not the click');
+ok(txt('b-start') === 'Start truing', 'the manual path is not labelled Fast Demo');
+sandbox.handle(PROV);
+ok(txt('rundl').indexOf('Manual dial entry') >= 0,
+  'the manual path reports manual dial entry even in the Fast Demo image');
+ok(txt('rundl').indexOf('synthetic navigation') < 0,
+  'the manual path claims no synthetic acquisition');
+IDENT.acquisition = 'auto';
+sandbox.loadIdent();
 
 // An operator wait still takes over the card: automation never hides something asked of you.
 sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', session_active: true, active_wait: WAITS[5] }));
 ok(txt('statusbody').indexOf('Waiting for you') >= 0,
   'Fast Demo still hands the adjustment back to the operator');
 ok(byId['demobanner'].className.indexOf('hide') < 0, 'the synthetic warning stays up during the run');
-IDENT.mode = 'interactive';
+// The automatic path issues NO waits for the whole acquisition, so the page used to sit on
+// the snapshot it had from before Start: session_active false, which disables Abort and
+// suppresses the busy card entirely. A session beginning must refresh the snapshot by itself.
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sent = [];
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 500, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
+ok(sent.some(c => c.cmd === 'GET_CURRENT_STATE'),
+  'a session beginning refreshes the snapshot without waiting for a wait');
+sandbox.handle(S({ current_state: 'MEASURE_WHEEL_STATE', session_active: true, active_wait: null }));
+ok(byId['b-abort'].disabled === false,
+  'Abort is enabled during the automated acquisition, with no wait outstanding');
+sent = [];
+byId['b-abort'].onclick();
+ok(sent.length === 1 && sent[0].cmd === 'ABORT', 'Abort mid-acquisition sends ABORT', JSON.stringify(sent[0]));
+
+IDENT.mode = 'interactive'; IDENT.acquisition = 'manual'; IDENT.acquisition_selectable = false;
 sandbox.loadIdent();
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
