@@ -28,6 +28,23 @@
 
 static const char *TAG = "orch_demo";
 
+/* Who drives the session.
+ *
+ * 0 (default, interactive): nobody but the operator. The machine sits in READY until a
+ * person presses Start truing over the wire, and every operator wait is theirs to answer.
+ * That is what makes those controls real rather than decorative, and it is the build the
+ * demonstration runs on.
+ *
+ * 1 (`*_selfplay` environments): the auto-operator starts the session and answers the
+ * waits, which is the unattended on-target evidence run recorded in docs/BRINGUP_LOG.md.
+ * It stands down while a browser is attached so a person can take over mid-run.
+ *
+ * Kept as a compile-time constant rather than #ifdef around the branches so both paths are
+ * type-checked in every build; the dead one folds away. */
+#ifndef TRUING_SELF_PLAY
+#define TRUING_SELF_PLAY 0
+#endif
+
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
 static struct {
     truing_wheel_class_config_t wheel;
@@ -146,9 +163,11 @@ static void drain_telemetry(void)
 static void demo_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "== Stage 1 workflow self-play (manual navigation + manual runout answered by the auto-operator; "
+    ESP_LOGI(TAG, "== Stage 1 workflow, %s (manual navigation + manual runout; "
                   "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source; REAL truing calculation on the golden "
-                  "fixture artifact; the simulated wheel responds through the same influence model) ==");
+                  "fixture artifact; the simulated wheel responds through the same influence model) ==",
+             TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
+                              : "INTERACTIVE: the session starts and the waits are answered from the web UI");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -238,7 +257,7 @@ static void demo_task(void *arg)
         ESP_LOGW(TAG, "no wire transport; running with the console as the only observer");
     }
 
-    const int64_t t0 = esp_timer_get_time();
+    int64_t t0 = esp_timer_get_time();
     bool started = false;
     uint32_t steps = 0u, waits = 0u, delays = 0u;
     truing_orch_step_t r = TRUING_ORCH_ADVANCED;
@@ -252,9 +271,20 @@ static void demo_task(void *arg)
          * self-play so the on-target evidence does not regress. Waiting here is correct
          * behaviour, not a failure (SPEC §12.2) — and a human taking their time is not
          * progress to be charged against the step budget. */
-        if (r == TRUING_ORCH_WAITING_OPERATOR && truing_net_client_connected()) {
+        if (r == TRUING_ORCH_WAITING_OPERATOR && (!TRUING_SELF_PLAY || truing_net_client_connected())) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
+        }
+        /* An interactive build does not start a session on its own. Sitting in READY with
+         * nobody asking is the correct behaviour, not a stall, and it is what makes the
+         * operator's Start truing a real control rather than a decoration. */
+        if (!TRUING_SELF_PLAY && r == TRUING_ORCH_IDLE) {
+            truing_orch_snapshot_t idle_snap;
+            truing_orch_snapshot(&s.orch, &idle_snap);
+            if (idle_snap.state == TRUING_STATE_READY) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
         }
         ++steps;
         /* Let the core-0 idle task run between steps. This task outranks IDLE0, which must
@@ -267,6 +297,7 @@ static void demo_task(void *arg)
             truing_orch_snapshot_t snap;
             truing_intent_t intent;
             truing_orch_snapshot(&s.orch, &snap);
+            /* Only reachable in a self-play build; the interactive one continued above. */
             if (!truing_auto_operator_answer(&s.op, &snap, &intent)) {
                 ESP_LOGE(TAG, "auto-operator cannot answer wait kind %s", truing_wait_kind_str(snap.active_wait.kind));
                 break;
@@ -286,7 +317,7 @@ static void demo_task(void *arg)
         } else if (r == TRUING_ORCH_IDLE) {
             truing_orch_snapshot_t snap;
             truing_orch_snapshot(&s.orch, &snap);
-            if (snap.state == TRUING_STATE_READY && !started) {
+            if (snap.state == TRUING_STATE_READY && !started && TRUING_SELF_PLAY) {
                 started = true;
                 truing_intent_t go;
                 memset(&go, 0, sizeof(go));
@@ -297,12 +328,42 @@ static void demo_task(void *arg)
                 if (v != TRUING_INTENT_ADMIT_ACCEPT) {
                     break;
                 }
-            } else {
-                ESP_LOGE(TAG, "idle in %s (init_error=%s)", truing_state_str(snap.state), truing_reason_str(snap.init_error));
+            } else if (snap.init_error != TRUING_REASON_NONE) {
+                /* The only genuinely terminal idle: the machine could not initialise. */
+                ESP_LOGE(TAG, "idle in %s (init_error=%s)", truing_state_str(snap.state),
+                         truing_reason_str(snap.init_error));
                 break;
+            } else {
+                /* IDLE is only ever returned from READY or a failed INITIALIZE, so a
+                 * different state here means an intent arrived through service_wire()
+                 * between the step and this snapshot and has already moved the machine
+                 * on - which is exactly what pressing Start truing does. The IDLE we are
+                 * holding is stale, not an error. */
+                vTaskDelay(pdMS_TO_TICKS(20));
             }
         } else if (r == TRUING_ORCH_TERMINAL) {
-            break;
+            if (TRUING_SELF_PLAY) {
+                break;
+            }
+            /* Interactive: say what happened on the console, then hand the machine back so
+             * the next session is a button press rather than a power cycle. The long
+             * summary below belongs to the unattended evidence run; here the operator has
+             * the same thing in front of them in the UI. */
+            truing_orch_snapshot_t done;
+            truing_orch_snapshot(&s.orch, &done);
+            ESP_LOGI(TAG, "run finished: %s (%s) after %" PRIu32 " steps in %lld ms",
+                     truing_terminal_str(done.last_result), truing_reason_str(done.last_reason),
+                     steps, (long long)((esp_timer_get_time() - t0) / 1000));
+            if (!truing_orch_reset_to_ready(&s.orch)) {
+                ESP_LOGW(TAG, "cannot return to READY; the endpoint stays up for queries only");
+                break;
+            }
+            ESP_LOGI(TAG, "back in READY - press Start truing for another session");
+            steps = 0u;
+            waits = 0u;
+            delays = 0u;
+            t0 = esp_timer_get_time();
+            continue;
         }
         if (steps > 20000u) {
             ESP_LOGE(TAG, "step budget exhausted");
