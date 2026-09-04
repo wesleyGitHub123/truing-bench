@@ -104,9 +104,16 @@ function XMLHttpRequest() {
   this.send = () => { this.responseText = JSON.stringify(IDENT); if (this.onload) this.onload(); };
 }
 const location = { protocol: 'http:', host: '192.168.4.1' };
+// Minimal Web Storage stub: the diagnostics history lives in the tab's sessionStorage.
+const memStore = new Map();
+const sessionStorage = {
+  getItem: (k) => (memStore.has(k) ? memStore.get(k) : null),
+  setItem: (k, v) => { memStore.set(k, String(v)); },
+  removeItem: (k) => { memStore.delete(k); },
+};
 
 const sandbox = {
-  document, WebSocket, XMLHttpRequest, location, JSON, Math, console, parseFloat, String, Object, Array,
+  document, WebSocket, XMLHttpRequest, sessionStorage, location, JSON, Math, console, parseFloat, String, Object, Array,
   setTimeout: setTimeout_, setInterval: setInterval_, clearTimeout: clearAny, clearInterval: clearAny,
   Date: { now: () => now },
 };
@@ -312,6 +319,33 @@ advance(2000);
 WebSocket.last.onopen();
 ok(sent.some(c => c.cmd === 'GET_CURRENT_STATE'), 'reconnect re-asks for the authoritative state');
 ok(byId['v-op'].className === '', 'reconnect leaves the operator view in place');
+
+// ---- diagnostics history: persisted per tab, marked at session edges, cleared deliberately --
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle(S({ current_state: 'MEASURE_WHEEL_STATE', session_active: true, active_wait: null }));
+ok(feedText('dbg').indexOf('new machine session') >= 0, 'a machine session start marks the log');
+advance(300);   // let the debounced sessionStorage mirror flush
+const stored = () => JSON.parse(sessionStorage.getItem('truing_diag') || '[]');
+ok(stored().length > 0, 'feed entries are mirrored to the tab sessionStorage');
+ok(stored().some(e => e.t === 'connected'), 'mirrored entries keep their text');
+byId['b-clear'].onclick();
+ok(byId['dbg'].children.length === 1 && byId['act'].children.length === 1,
+  'Clear empties both feeds down to one marker row');
+ok(stored().length === 2 && stored().every(e => e.c === 'gap'),
+  'Clear also wipes the persisted history');
+// A reload of the page runs the script again in a fresh context over the same tab storage.
+const sandbox2 = {
+  document, WebSocket, XMLHttpRequest, sessionStorage, location, JSON, Math, console, parseFloat, String, Object, Array,
+  setTimeout: setTimeout_, setInterval: setInterval_, clearTimeout: clearAny, clearInterval: clearAny,
+  Date: { now: () => now },
+};
+sandbox2.window = sandbox2;
+vm.createContext(sandbox2);
+vm.runInContext(script, sandbox2, { filename: 'web_ui.js' });
+ok(feedText('dbg').indexOf('history cleared') >= 0, 'a page reload restores the persisted history');
+ok(feedText('dbg').indexOf('restored - frames while the page was closed are lost') >= 0,
+  'the reload says honestly that closed-page frames are gone');
+
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);

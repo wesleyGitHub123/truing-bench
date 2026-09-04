@@ -24,6 +24,10 @@
  *     finished). That is a handful of §12.2 idempotent queries per cycle — the record only
  *     changes at those moments, so polling for it would be waste and eventing it would be
  *     a protocol change.
+ *   - the diagnostics feeds persist in this tab's sessionStorage, so a refresh does not
+ *     destroy the history being inspected. Telemetry is never replayed by the machine
+ *     (SPEC §12.2), so the browser is the only place that history can live. It is developer
+ *     convenience, never provenance, and the explicit Clear button is the only remover.
  *
  * THREE AUDIENCES, three tabs. An operator needs to know what to do next and whether the
  * machine heard them; an evaluator needs to know what produced a number and how far to
@@ -168,6 +172,9 @@ static const char TRUING_WEB_UI_HTML[] =
 " word-break:break-word;font-size:13px}\n"
 ".feed>div:nth-child(odd){background:#ffffff05}\n"
 ".feed .ts{color:#5d6675;flex:none;font-variant-numeric:tabular-nums;font-size:11px}\n"
+".feed>div.gap{display:block;text-align:center;color:#5d6675;font-size:11px;\n"
+" background:none;letter-spacing:.05em}\n"
+".lognote{font-size:11px;color:#5d6675;margin:8px 0 0}\n"
 "#dbg>div{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}\n"
 ".t-ack{color:var(--dim)}.t-bad{color:var(--bad)}.t-good{color:var(--ok)}\n"
 ".t-warn{color:var(--warn)}.t-nav{color:var(--run)}.t-pend{color:var(--dim);opacity:.7}\n"
@@ -241,7 +248,10 @@ static const char TRUING_WEB_UI_HTML[] =
 "  </div>\n"
 " </div>\n"
 " <div class='col'>\n"
-"  <div class='card'><h2>Protocol</h2><div class='feed' id='dbg'></div></div>\n"
+"  <div class='card'><h2>Protocol<button class='tiny sp' id='b-clear'>Clear history</button></h2>\n"
+"   <div class='feed' id='dbg'></div>\n"
+"   <p class='lognote'>Kept in this browser tab only, restored on refresh, removed only by\n"
+"    the button above. Developer convenience - not machine provenance.</p></div>\n"
 " </div>\n"
 "</main>\n"
 
@@ -337,10 +347,37 @@ static const char TRUING_WEB_UI_HTML[] =
 " for(var i=0;i<STAGES.length;i++)if(STAGES[i][1].indexOf(st)>=0)return i;\n"
 " return -1;}\n"
 
-/* ---- feeds ---------------------------------------------------------------------------- */
+/* ---- feeds ----------------------------------------------------------------------------- */
+/* The feeds are developer observability, and telemetry is never replayed by the machine
+   (SPEC 12.2), so the browser is the only place their history can survive a refresh. Entries
+   are mirrored to this tab's sessionStorage (bounded, debounced), restored on load with an
+   honest gap marker, and removed only by the explicit Clear button. Convenience, not
+   provenance: the P6 record is pulled from the machine, never rebuilt from this log. */
+"var logBuf=[],logFlush=null;\n"
+"function logRecord(w,t,c,s){logBuf.push({w:w,t:t,c:c||'',s:s===undefined?-1:s});\n"
+" if(logBuf.length>300)logBuf.splice(0,logBuf.length-300);\n"
+" if(!logFlush)logFlush=setTimeout(function(){logFlush=null;logPersist();},250);}\n"
+"function logPersist(){try{sessionStorage.setItem('truing_diag',JSON.stringify(logBuf));}catch(e){}}\n"
+"function logRow(e){if(e.c==='gap'){var g=mk('div','gap');g.textContent=e.t;\n"
+"  el(e.w).appendChild(g);return;}\n"
+" var d=mk('div');d.appendChild(mk('span','ts',e.s>=0?hms(e.s):''));\n"
+" d.appendChild(mk('span',e.c||'',e.t));el(e.w).appendChild(d);}\n"
+"function logGap(w,t){logRecord(w,t,'gap',undefined);var g=mk('div','gap');\n"
+" g.textContent=t;el(w).appendChild(g);}\n"
+"function logRestore(){var raw=null;\n"
+" try{raw=sessionStorage.getItem('truing_diag');}catch(e){}\n"
+" if(!raw)return;\n"
+" try{logBuf=JSON.parse(raw)||[];}catch(e){logBuf=[];return;}\n"
+" for(var i=0;i<logBuf.length;i++)logRow(logBuf[i]);\n"
+" if(logBuf.length){logGap('act','restored - frames while the page was closed are lost');\n"
+"  logGap('dbg','restored - frames while the page was closed are lost');}}\n"
+"function logClear(){el('act').innerHTML='';el('dbg').innerHTML='';logBuf=[];\n"
+" try{sessionStorage.removeItem('truing_diag');}catch(e){}\n"
+" logGap('act','history cleared');logGap('dbg','history cleared');logPersist();}\n"
 "function feed(which,text,cls,ts){var d=mk('div');\n"
 " d.appendChild(mk('span','ts',ts===undefined?'':hms(ts)));\n"
 " d.appendChild(mk('span',cls||'',text));\n"
+" logRecord(which,text,cls,ts);\n"
 " var L=el(which);var stick=L.scrollTop+L.clientHeight>=L.scrollHeight-24;\n"
 " L.appendChild(d);while(L.childNodes.length>300){L.removeChild(L.firstChild);}\n"
 " if(stick)L.scrollTop=L.scrollHeight;return d;}\n"
@@ -401,7 +438,10 @@ static const char TRUING_WEB_UI_HTML[] =
 " ws.onmessage=function(m){var f;try{f=JSON.parse(m.data);}catch(e){return;}handle(f);};}\n"
 
 "function handle(f){\n"
-" if(f.t==='state'){snap=f;curState=f.current_state;render();return;}\n"
+" if(f.t==='state'){if(snap&&!snap.session_active&&f.session_active){\n"
+"   logGap('act','new machine session started');\n"
+"   logGap('dbg','--- new machine session ---');}\n"
+"  snap=f;curState=f.current_state;render();return;}\n"
 " if(f.t==='provenance'){prov=f;\n"
 "  el('prov').textContent=JSON.stringify(f,null,1);renderRaw();\n"
 "  if(f.wheel_state_summary&&f.wheel_state_summary.n_spokes)\n"
@@ -693,7 +733,8 @@ static const char TRUING_WEB_UI_HTML[] =
 "el('b-refresh').onclick=function(){send({cmd:'GET_CURRENT_STATE'});\n"
 " send({cmd:'GET_CURRENT_CYCLE_PROVENANCE'});loadIdent();};\n"
 "el('b-raw').onclick=function(){rawOpen=!rawOpen;renderRaw();};\n"
-"render();renderRun();renderRaw();connect();\n"
+"el('b-clear').onclick=function(){logClear();};\n"
+"logRestore();render();renderRun();renderRaw();connect();\n"
 "</script></body></html>\n";
 
 #endif /* TRUING_WEB_UI_H */
