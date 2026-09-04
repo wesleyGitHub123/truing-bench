@@ -103,6 +103,69 @@ Recovery, if the board ends up in an unknown state: Arduino IDE's *Burn
 Bootloader* restores the stock Arduino bootloader over the same B1 → GND route,
 after which DFU works again.
 
+## Two boards, one address: how to know which one you are looking at
+
+Both boards run the same firmware and both serve the UI on **`http://192.168.4.1/`**. Only
+the SSID differs, and a laptop or phone that loses one access point will silently rejoin
+the other, at the same address, with no visible sign that it moved. If the two boards are
+carrying different builds — which happens the moment you flash one and not the other — the
+result looks exactly like a stale page or a failed flash. It is neither.
+
+So every image carries its own identity:
+
+```
+I (989) net:    board esp32-s3-devkitc-1-n16r8 | firmware 0.1.0-phase1f | build 55c92cc | ui 5e9be3b3
+```
+
+- printed at boot,
+- served as JSON at **`http://192.168.4.1/id`**,
+- shown in the page header and under Diagnostics.
+
+`build` is the git short hash, suffixed `-dirty` when the tree does not match it; `ui` is
+`sha256(src/web_ui.h)` truncated to 8 hex, printed by the build too:
+
+```
+build identity: rev 55c92cc | ui 5e9be3b3 | env s3_devkit
+```
+
+**If the `ui` in the page does not match the `ui` the build printed, you are not looking at
+the firmware you just flashed** — most likely you are on the other board. Check the SSID.
+
+The UI is served with `Cache-Control: no-store, must-revalidate`, so a browser cannot be
+the cause of a stale page. That is deliberate: the page is 32 KB off local flash over an
+otherwise idle link, and caching it buys nothing against the cost of ever doubting what
+the board is running.
+
+## Interactive and self-play images
+
+`s3_devkit` / `nano_esp32` are **interactive**: the machine sits in READY and does nothing
+until an operator presses *Start truing* in the web UI, and every operator wait is answered
+from the browser. This is the demonstration image.
+
+`s3_devkit_selfplay` / `nano_esp32_selfplay` add `-DTRUING_SELF_PLAY=1`: the auto-operator
+starts the session and answers its own waits, unattended. This is the on-target evidence
+run recorded in `docs/BRINGUP_LOG.md`, and it is what to flash when reproducing those
+numbers. It stands down while a browser is attached, so a person can still take over.
+
+```bash
+pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
+pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the demo image
+```
+
+The boot banner says which one is running.
+
+## Checking the UI without a board
+
+`tools/ui_check.js` extracts the page from `src/web_ui.h` and runs its script against a
+stub DOM, a virtual clock and real firmware frames. Nothing else in the build executes that
+script, so this is what stops a typo in the operator card from being found in front of an
+audience.
+
+```bash
+node tools/ui_check.js                  # against src/web_ui.h
+node tools/ui_check.js served.html      # against a page fetched from a board
+```
+
 ## Reaching the web UI (SPEC 12.1)
 
 The board hosts its own network; there is nothing to install on the host. At

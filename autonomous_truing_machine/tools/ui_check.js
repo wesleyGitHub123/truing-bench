@@ -6,8 +6,8 @@
  * front of whoever you are demonstrating to. This extracts the string, runs it, and
  * asserts the behaviour that matters - that a command carries the wait_id the snapshot
  * gave it (SPEC 12.3), that one click cannot become two commands, that a rejection and a
- * silent firmware are both visible, and that state queries have not crept back into
- * every event.
+ * silent firmware are both visible, that internal enums reach the operator translated
+ * rather than raw, and that state queries have not crept back into every event.
  *
  *   node tools/ui_check.js                 (reads src/web_ui.h)
  *   node tools/ui_check.js served.html     (or a page fetched from a board)
@@ -30,11 +30,11 @@ function fromHeader(file) {
   return out.join('');
 }
 const arg = process.argv[2];
-const src0 = arg
+const page = arg
   ? (arg.endsWith('.h') ? fromHeader(arg) : fs.readFileSync(arg, 'utf8'))
   : fromHeader(path.join(__dirname, '..', 'src', 'web_ui.h'));
 
-const m = src0.match(/<script>([\s\S]*?)<\/script>/);
+const m = page.match(/<script>([\s\S]*?)<\/script>/);
 if (!m) { console.log('FAIL: no <script> block'); process.exit(1); }
 const script = m[1];
 
@@ -49,7 +49,7 @@ const byId = {};
 function makeEl(tag) {
   const e = {
     tag, className: '', type: '', step: '', placeholder: '', inputMode: '', value: '',
-    disabled: false, onclick: null, style: {}, _text: '', _html: '', children: [],
+    disabled: false, onclick: null, onload: null, style: {}, _text: '', _html: '', children: [],
     appendChild(c) { this.children.push(c); return c; },
     removeChild(c) { this.children = this.children.filter(x => x !== c); return c; },
     scrollTop: 0, clientHeight: 100, scrollHeight: 100,
@@ -72,6 +72,7 @@ function makeEl(tag) {
 const document = {
   getElementById(id) { if (!byId[id]) { byId[id] = makeEl('div'); byId[id].id = id; } return byId[id]; },
   createElement(tag) { return makeEl(tag); },
+  createTextNode(t) { const e = makeEl('#text'); e.textContent = t; return e; },
 };
 
 // ---- virtual clock --------------------------------------------------------------------
@@ -91,13 +92,21 @@ function advance(ms) {
   now = end;
 }
 
-// ---- stub socket ----------------------------------------------------------------------
+// ---- stub socket + /id ----------------------------------------------------------------
 let sent = [];
 function WebSocket(url) { this.url = url; this.readyState = 1; WebSocket.last = this; this.send = s => sent.push(JSON.parse(s)); }
+const IDENT = {
+  board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
+  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42,
+};
+function XMLHttpRequest() {
+  this.open = (mth, url) => { this._url = url; };
+  this.send = () => { this.responseText = JSON.stringify(IDENT); if (this.onload) this.onload(); };
+}
 const location = { protocol: 'http:', host: '192.168.4.1' };
 
 const sandbox = {
-  document, WebSocket, location, JSON, Math, console, parseFloat, String, Object, Array,
+  document, WebSocket, XMLHttpRequest, location, JSON, Math, console, parseFloat, String, Object, Array,
   setTimeout: setTimeout_, setInterval: setInterval_, clearTimeout: clearAny, clearInterval: clearAny,
   Date: { now: () => now },
 };
@@ -124,15 +133,25 @@ const WAITS = [
   { wait_id: 5, kind: 'ENTER_RUNOUT', expected_intent: 'SUBMIT_RUNOUT', station: 'runout', target_index: 12, timeout_ms: 0 },
   { wait_id: 6, kind: 'APPLY_ADJUSTMENT', expected_intent: 'CONFIRM_ADJUSTMENT_DONE', station: 'adjust', target_index: 3, display_turns_rev: -0.3, timeout_ms: 0 },
 ];
+const PROV = {
+  t: 'provenance', session_id: 1, influence_artifact_id: 1,
+  generating_fingerprint: '25b68917ad02f8b4', tension_model_profile_id: 1,
+  chain_profile_id: 1, machine_profile_id: 1, active_layout: 'NONE',
+  wheel_state_summary: { n_spokes: 32, n_rim_angles: 32, spokes_solver_admissible: 32, runout_solver_admissible: 32, spokes_verification_grade: 0 },
+  plan: { valid: true, n_valid_rows: 32, n_suspect_rows: 0, policy_reason: 'MEAN_TENSION_MODEL_UNAVAILABLE', mean_tension_targeting_applied: false, solver_version: 1 },
+  verification: { max_lateral_mm: 0.08, max_radial_mm: 0.12, geometric_converged: true, tension_evaluated: false, tension_compliant: false, reason: 'TENSION_NOT_VERIFICATION_GRADE' },
+  contains_non_real_implementations: true,
+};
 function answerBtn() {
   const found = [];
   (function walk(e) { if (e.tag === 'button' && e.onclick) found.push(e); (e.children || []).forEach(walk); })(byId['answer']);
   return found[found.length - 1];
 }
+const txt = (id) => byId[id].textContent;
 const feedText = (id) => byId[id].children.map(d => d.textContent).join('\n');
 
 // ---- every wait kind renders and answers with its own wait_id -------------------------
-sandbox.handle({ t: 'provenance', wheel_state_summary: { n_spokes: 32 } });
+sandbox.handle(PROV);
 for (const w of WAITS) {
   let threw = null;
   try { sandbox.handle(S({ active_wait: w })); } catch (e) { threw = e.message; }
@@ -144,25 +163,22 @@ for (const w of WAITS) {
   b.onclick();
   const c = sent[0];
   ok(c && c.cmd === w.expected_intent && c.wait_id === w.wait_id, 'answer ' + w.kind, JSON.stringify(c));
-  // clear the pending command so the next kind starts clean
   sandbox.handle({ t: 'ack', seq: c.seq, cmd_kind: 'INTENT', intent: c.cmd, accepted: true, wire: 'OK', verdict: 'ACCEPT', reason: 'NONE' });
   advance(1000);
 }
 
 // ---- one click cannot become two commands ---------------------------------------------
 sandbox.handle(S({ active_wait: WAITS[1] }));
-const b1 = answerBtn();
 sent = [];
+const b1 = answerBtn();
 b1.onclick(); b1.onclick(); b1.onclick();
 ok(sent.length === 1, 'triple click sends exactly one command', sent.length + ' sent');
-ok(byId['answer'].children.length === 0 || true, 'card switched out of the wait view');
-ok(byId['prompt'].textContent.indexOf('SENDING') >= 0, 'shows SENDING immediately', JSON.stringify(byId['prompt'].textContent.slice(0, 40)));
-ok(byId['b-start'].disabled === true && byId['b-abort'].disabled === true, 'other controls locked while a command is in flight');
+ok(txt('statusbody').indexOf('Sending') >= 0, 'shows Sending immediately');
+ok(byId['b-start'].disabled === true && byId['b-abort'].disabled === true, 'other controls locked while in flight');
 
-// ---- accepted ack clears it and confirms ----------------------------------------------
 const seqUsed = sent[0].seq;
 sandbox.handle({ t: 'ack', seq: seqUsed, cmd_kind: 'INTENT', intent: 'CONFIRM_POSITIONED', accepted: true, wire: 'OK', verdict: 'ACCEPT', reason: 'NONE' });
-ok(byId['prompt'].textContent.indexOf('CONFIRMED') >= 0, 'accepted ack shows CONFIRMED');
+ok(txt('statusbody').indexOf('Confirmed') >= 0, 'accepted ack shows Confirmed');
 ok(feedText('act').indexOf('accepted') >= 0, 'activity feed records the accepted answer');
 advance(1000);
 
@@ -172,29 +188,27 @@ sent = [];
 answerBtn().onclick();
 const mySeq = sent[0].seq;
 sandbox.handle({ t: 'ack', seq: mySeq + 500, cmd_kind: 'GET_CURRENT_STATE', accepted: true, wire: 'OK', verdict: 'ACCEPT', reason: 'NONE' });
-ok(byId['prompt'].textContent.indexOf('SENDING') >= 0, 'foreign ack does not resolve our command');
+ok(txt('statusbody').indexOf('Sending') >= 0, 'foreign ack does not resolve our command');
 sandbox.handle({ t: 'ack', seq: mySeq, cmd_kind: 'INTENT', intent: 'CONFIRM_POSITIONED', accepted: true, wire: 'OK', verdict: 'ACCEPT', reason: 'NONE' });
 advance(1000);
 
-// ---- rejection is explained ------------------------------------------------------------
+// ---- rejection and silence are both explained in words ---------------------------------
 sandbox.handle(S({ active_wait: WAITS[1] }));
 sent = [];
 answerBtn().onclick();
-const rSeq = sent[0].seq;
-sandbox.handle({ t: 'ack', seq: rSeq, cmd_kind: 'INTENT', intent: 'CONFIRM_POSITIONED', accepted: false, wire: 'OK', verdict: 'REJECT_STALE_INTENT', reason: 'NONE' });
-ok(byId['hint'].textContent.indexOf('already answered') >= 0, 'stale rejection is explained in words', JSON.stringify(byId['hint'].textContent));
+sandbox.handle({ t: 'ack', seq: sent[0].seq, cmd_kind: 'INTENT', intent: 'CONFIRM_POSITIONED', accepted: false, wire: 'OK', verdict: 'REJECT_STALE_INTENT', reason: 'NONE' });
+ok(txt('hint').indexOf('already answered') >= 0, 'stale rejection is explained in words', JSON.stringify(txt('hint')));
 ok(sent.some(c => c.cmd === 'GET_CURRENT_STATE'), 'rejection triggers a resync');
 
-// ---- silence is visible ----------------------------------------------------------------
 sandbox.handle(S({ active_wait: WAITS[1] }));
 sent = [];
 answerBtn().onclick();
 advance(7000);
-ok(byId['hint'].textContent.indexOf('No reply') >= 0, 'no ack within 6 s raises a warning', JSON.stringify(byId['hint'].textContent));
-ok(feedText('act').indexOf('NO REPLY') >= 0, 'the unanswered command is marked in the activity feed');
+ok(txt('hint').indexOf('No reply') >= 0, 'no ack within 6 s raises a warning');
+ok(feedText('act').indexOf('NO REPLY') >= 0, 'the unanswered command is marked in the feed');
 
 // ---- state queries did not creep back into every event --------------------------------
-sandbox.handle(S({ active_wait: null, current_state: 'WAIT_FOR_OPERATOR' }));
+sandbox.handle(S({ active_wait: null }));
 sent = [];
 const spoke = [
   { t: 'event', kind: 'WAIT_ISSUED', ts_ms: 1000, wait: WAITS[1] },
@@ -206,41 +220,82 @@ const spoke = [
   { t: 'event', kind: 'NAVIGATION', ts_ms: 5815, target_kind: 'spoke', index: 18, outcome: 'PENDING_OPERATOR' },
 ];
 spoke.forEach(f => sandbox.handle(f));
-const queries = sent.filter(c => c.cmd === 'GET_CURRENT_STATE').length;
-ok(queries === 1, 'one state query per spoke, not one per transition', queries + ' queries for ' + spoke.length + ' events');
+ok(sent.filter(c => c.cmd === 'GET_CURRENT_STATE').length === 1, 'one state query per spoke, not one per transition');
 
-// ---- the two feeds are actually separate ----------------------------------------------
+// ---- the three audiences stay separate -------------------------------------------------
 ok(feedText('act').indexOf('ack seq') < 0, 'activity feed carries no ack spam');
 ok(feedText('dbg').indexOf('ack seq') >= 0, 'protocol feed keeps the acks');
 ok(feedText('act').indexOf('MEASURE_SPOKE_TENSION -> MEASURE_WHEEL_STATE') < 0, 'activity feed carries no raw transitions');
 ok(feedText('dbg').indexOf('MEASURE_SPOKE_TENSION -> MEASURE_WHEEL_STATE') >= 0, 'protocol feed keeps the raw transitions');
-ok(feedText('act').indexOf('spoke 17 measured: 460 Hz, 781.55 N') >= 0, 'measurement reads as a sentence', JSON.stringify(feedText('act').split('\n').pop()));
 
-// ---- busy state is shown while the DSP runs -------------------------------------------
+// ---- latest measurement is translated, not an enum dump --------------------------------
+ok(txt('last').indexOf('460 Hz') >= 0 && txt('last').indexOf('781.55 N') >= 0, 'latest measurement shows frequency and tension');
+ok(txt('last').indexOf('Provisional measurement') >= 0, 'suspect reason is translated for the operator', JSON.stringify(txt('last').slice(-90)));
+ok(txt('last').indexOf('PROVISIONAL_MODE_ID') >= 0, 'the original reason code is still shown alongside');
+
+// ---- busy state -------------------------------------------------------------------------
 sandbox.handle(S({ active_wait: null, current_state: 'MEASURE_SPOKE_TENSION' }));
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 9000, from: 'WAIT_FOR_OPERATOR', to: 'MEASURE_SPOKE_TENSION' });
-ok(byId['prompt'].textContent.indexOf('MEASURING') >= 0, 'measuring is announced, not left blank');
+ok(txt('statusbody').indexOf('Measuring') >= 0, 'measuring is announced, not left blank');
 advance(2500);
-ok(/2\.\d s/.test(byId['elapsed'].textContent), 'elapsed time is real and ticking', JSON.stringify(byId['elapsed'].textContent));
+ok(/2\.\d s elapsed/.test(byId['elapsed'].textContent), 'elapsed time is real and ticking', JSON.stringify(byId['elapsed'].textContent));
 
-// ---- progress --------------------------------------------------------------------------
-sandbox.handle(S({ active_wait: WAITS[1] }));
-ok(byId['pos'].textContent === 'spoke 17 of 32', 'progress names the spoke and the total', JSON.stringify(byId['pos'].textContent));
+// ---- session progress maps to the real workflow ----------------------------------------
+ok(txt('stepper').indexOf('Measure spokes') >= 0 && txt('stepper').indexOf('Verify') >= 0, 'stepper lists the real stages');
+ok(txt('stepper').indexOf('17 / 32') >= 0, 'stepper shows spoke progress against the total', JSON.stringify(txt('stepper')));
+sandbox.handle(S({ active_wait: null, current_state: 'COMPUTE_ADJUSTMENTS' }));
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 9500, from: 'READ_RUNOUT', to: 'COMPUTE_ADJUSTMENTS' });
+ok(txt('statusbody').indexOf('Computing the plan') >= 0, 'compute stage is named in plain language');
 
-// ---- gating ----------------------------------------------------------------------------
-sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null }));
-ok(byId['b-start'].disabled === false && byId['b-abort'].disabled === true, 'READY enables start only');
-sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null, last_known_result: 'CONVERGED_GEOMETRIC_ONLY' }));
-ok(byId['b-start'].disabled === true && byId['b-abort'].disabled === true, 'TERMINAL disables both');
+// ---- terminal results are translated ----------------------------------------------------
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null, last_known_result: 'CONVERGED_GEOMETRIC_ONLY', last_reason: 'MEAN_TENSION_MODEL_UNAVAILABLE' }));
+ok(txt('statusbody').indexOf('Geometry target reached') >= 0, 'CONVERGED_GEOMETRIC_ONLY is translated');
+ok(txt('statusbody').indexOf('Mean-tension correction unavailable') >= 0, 'its reason is translated too');
+ok(txt('statusbody').indexOf('CONVERGED_GEOMETRIC_ONLY') >= 0, 'the enum is still shown for reference');
+ok(txt('statusbody').indexOf('0.08 mm') >= 0, 'finished summary shows the real final runout', JSON.stringify(txt('statusbody').slice(-120)));
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null, last_known_result: 'ABORT_OPERATOR', last_reason: 'NONE' }));
+ok(txt('statusbody').indexOf('Run stopped') >= 0 && txt('statusbody').indexOf('cancelled') >= 0, 'ABORT_OPERATOR is translated');
+
+// ---- run details are sentences, raw JSON is behind a toggle -----------------------------
+ok(txt('rundl').indexOf('32 spokes') >= 0, 'run details name the wheel');
+ok(txt('rundl').indexOf('Geometry only') >= 0, 'run details name the solver mode');
+ok(txt('rundl').indexOf('Not a physical wheel result') >= 0, 'synthetic components are called out prominently');
+ok(txt('outcome').indexOf('Within tolerance') >= 0, 'outcome reports the geometry verdict');
+ok(txt('outcome').indexOf('Not verification-grade') >= 0, 'outcome is honest about tension');
+ok(txt('techdl').indexOf('25b68917ad02f8b4') >= 0, 'fingerprint lives under technical detail');
+ok(byId['prov'].className.indexOf('hide') >= 0, 'raw JSON is hidden until asked for');
+byId['b-raw'].onclick.call(byId['b-raw']);
+ok(byId['prov'].className.indexOf('hide') < 0, 'raw JSON toggles open');
+
+// ---- build identity ---------------------------------------------------------------------
+ok(txt('i-board') === IDENT.board && txt('i-build') === IDENT.build && txt('i-ui') === IDENT.ui, 'build identity is rendered from /id');
+ok(txt('ident').indexOf(IDENT.build) >= 0 && txt('ident').indexOf(IDENT.ui) >= 0, 'identity is visible in the header');
+
+// ---- session lifecycle ------------------------------------------------------------------
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+ok(byId['b-start'].disabled === false && byId['b-abort'].disabled === true, 'READY enables Start only');
+sent = [];
+byId['b-start'].onclick();
+ok(sent.length === 1 && sent[0].cmd === 'START_TRUING', 'Start sends START_TRUING', JSON.stringify(sent[0]));
 sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
-ok(byId['b-start'].disabled === true && byId['b-abort'].disabled === false, 'running enables abort only');
+ok(byId['b-start'].disabled === true && byId['b-abort'].disabled === false, 'running enables Abort only');
+sent = [];
+byId['b-abort'].onclick();
+ok(sent.length === 1 && sent[0].cmd === 'ABORT', 'Abort sends ABORT');
 
-// ---- reconnect resyncs -----------------------------------------------------------------
+// ---- tabs -------------------------------------------------------------------------------
+byId['tab-dev'].onclick();
+ok(byId['v-op'].className === 'hide' && byId['v-dev'].className === '', 'Diagnostics tab hides the operator view');
+byId['tab-op'].onclick();
+ok(byId['v-op'].className === '' && byId['v-dev'].className === 'hide', 'Operator tab comes back');
+
+// ---- reconnect resyncs -------------------------------------------------------------------
 sent = [];
 WebSocket.last.onclose();
 advance(2000);
 WebSocket.last.onopen();
 ok(sent.some(c => c.cmd === 'GET_CURRENT_STATE'), 'reconnect re-asks for the authoritative state');
+ok(byId['v-op'].className === '', 'reconnect leaves the operator view in place');
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);
