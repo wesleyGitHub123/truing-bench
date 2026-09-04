@@ -149,9 +149,21 @@ numbers. It stands down while a browser is attached, so a person can still take 
 
 `s3_devkit_fastdemo` / `nano_esp32_fastdemo` add `-DTRUING_FAST_DEMO=1`: an **accelerated
 demonstration**. A person still presses *Start Fast Demo* and still applies every
-adjustment, but the repetitive acquisition runs by itself, so the solver, adjustment and
+adjustment, but the repetitive acquisition can run by itself, so the solver, adjustment and
 verification stages are reachable in a couple of minutes instead of sixty-four operator
 confirmations.
+
+This image carries **both** acquisition paths and lets the operator pick between them in the
+UI, per session — the manual path is not removed, it is the other choice:
+
+- **Automatic (synthetic)** — the machine measures all 32 spokes and the whole rim unattended.
+- **Manual (as on the machine)** — the machine stops and asks you to position the wheel and
+  read the dial gauges, exactly as the physical path does. 64 answers per cycle.
+
+Choosing a path re-initialises the machine so it re-establishes the spoke-0 reference through
+the newly selected navigation implementation, and the next session is admitted against what
+actually ran. It is refused while a session is active, and applied by the orchestrator's own
+task between steps, so no session can change character underneath itself.
 
 It does that by **swapping implementations, not by answering waits**, and the difference
 matters:
@@ -159,7 +171,8 @@ matters:
 | | navigation | runout | provenance |
 |---|---|---|---|
 | interactive / self-play | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
-| fast demo | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
+| fast demo, automatic path | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
+| fast demo, manual path | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
 
 The manual implementations are REAL because a person turns a real wheel and reads real dial
 gauges. Having the firmware answer their waits with numbers it invented would record
