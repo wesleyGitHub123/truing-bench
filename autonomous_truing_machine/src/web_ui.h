@@ -150,6 +150,17 @@ static const char TRUING_WEB_UI_HTML[] =
 ".dl .x{font-size:12px;color:var(--dim);margin-top:2px}\n"
 ".lastnote{font-size:12px;color:var(--dim);margin:0 0 12px;padding-bottom:9px;\n"
 " border-bottom:1px solid var(--line)}\n"
+/* The fast-demo banner is the one place this page raises its voice. A viewer who misses it
+   would read synthetic numbers as a measured wheel, which is the only way this UI could
+   actually mislead someone. */
+".demo{border-color:#6d4a1f;background:linear-gradient(#3a2c14,#2a2116)}\n"
+".demotitle{font-size:13px;font-weight:800;letter-spacing:.18em;color:#e8c48f}\n"
+".demosub{font-size:15px;font-weight:650;margin-top:2px}\n"
+".demotext{margin:8px 0 0;font-size:13px;color:#d8cbb4}\n"
+".demotext b{color:#f0d9b5}\n"
+".demochip{font-size:10px;font-weight:800;letter-spacing:.14em;color:#3a2c14;\n"
+" background:#e8c48f;border-radius:4px;padding:3px 7px}\n"
+".autoline{font-size:12px;color:var(--dim);margin-top:8px;font-variant-numeric:tabular-nums}\n"
 ".warnbox{border:1px solid #6d4a1f;background:#3a2c14;border-radius:8px;padding:11px 13px;\n"
 " font-size:13px}\n"
 ".warnbox b{color:#e8c48f}\n"
@@ -203,6 +214,7 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "<header>\n"
 " <div class='hrow'><span id='dot'></span><h1>Truing Machine</h1>\n"
+"  <span id='modechip' class='demochip hide'>FAST DEMO</span>\n"
 "  <span id='viewers' class='viewers'></span>\n"
 "  <div id='ident'>connecting</div></div>\n"
 " <div class='tabs'>\n"
@@ -214,6 +226,13 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "<main id='v-op'>\n"
 " <div class='col'>\n"
+"  <div class='card demo hide' id='demobanner'>\n"
+"   <div class='demotitle'>FAST DEMO</div>\n"
+"   <div class='demosub'>Synthetic measurement mode</div>\n"
+"   <p class='demotext'>This run uses simulated measurements. It demonstrates the\n"
+"    workflow, solver behaviour and system integration.\n"
+"    <b>It is not a physical wheel-truing result.</b></p>\n"
+"  </div>\n"
 "  <div class='card' id='status'>\n"
 "   <div id='statusbody'></div>\n"
 "   <div id='answer'></div>\n"
@@ -260,6 +279,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "   <dt>firmware</dt><dd id='i-fw' class='mono'>-</dd>\n"
 "   <dt>build</dt><dd id='i-build' class='mono'>-</dd>\n"
 "   <dt>ui hash</dt><dd id='i-ui' class='mono'>-</dd>\n"
+"   <dt>build mode</dt><dd id='i-mode' class='mono'>-</dd>\n"
 "   <dt>ap ssid</dt><dd id='i-ssid' class='mono'>-</dd>\n"
 "   <dt>uptime</dt><dd id='i-up' class='mono'>-</dd></dl>\n"
 "  </div>\n"
@@ -276,6 +296,9 @@ static const char TRUING_WEB_UI_HTML[] =
 "var ws=null,snap=null,prov=null,ident=null,seq=0,pending=null,curState=null;\n"
 "var lastRun=null,termPending=null;\n"
 "var nSpokes=0,lastIdx=null,lastMeas=null,busySince=0,tick=null,flash=null,tab='op';\n"
+/* Progress through the automated acquisition, counted from the machine's own measurement
+   events rather than from a timer: nMeas/nRim only ever move because a result arrived. */
+"var nMeas=0,nRim=0,lastRim=null;\n"
 /* Owned here rather than read back off the element's class, so the visible state has one
    source and does not depend on what the markup happened to start with. */
 "var rawOpen=false;\n"
@@ -438,8 +461,17 @@ static const char TRUING_WEB_UI_HTML[] =
 " var n=ident&&ident.clients?ident.clients:0;\n"
 " if(n>1){v.textContent=n+' viewers - another client is also connected';v.className='viewers multi';}\n"
 " else{v.textContent='';v.className='viewers';}}\n"
+"function fastDemo(){return !!ident&&ident.mode==='fastdemo';}\n"
+"function renderMode(){\n"
+" var on=fastDemo();\n"
+" el('demobanner').className=on?'card demo':'card demo hide';\n"
+" el('modechip').className=on?'demochip':'demochip hide';\n"
+" el('b-start').textContent=on?'Start Fast Demo':'Start truing';\n"
+" el('i-mode').textContent=on?'FAST DEMO / SYNTHETIC':\n"
+"  ((ident&&ident.mode==='selfplay')?'SELF-PLAY':'INTERACTIVE');}\n"
 "function renderIdent(){\n"
 " if(!ident)return;\n"
+" renderMode();\n"
 " el('ident').textContent=ident.board+' \\u00b7 fw '+ident.firmware+'\\n'+\n"
 "  'build '+ident.build+' \\u00b7 ui '+ident.ui;\n"
 " el('ident').style.whiteSpace='pre';\n"
@@ -467,7 +499,7 @@ static const char TRUING_WEB_UI_HTML[] =
    the record held here describes the run that just ended. Drop it before asking for the new
    one: a slow answer should leave the tab empty, never show the last run's numbers as this
    run's. This is the milestone the pull-at-milestones rule was missing. */
-"   prov=null;askProv();}\n"
+"   prov=null;nMeas=0;lastRim=null;askProv();}\n"
 "  snap=f;curState=f.current_state;\n"
 /* Live-or-completed is decided from the snapshot, so Run Details has to be rebuilt when one
    arrives. It used to redraw only on a provenance frame, and a session starting produces
@@ -481,6 +513,8 @@ static const char TRUING_WEB_UI_HTML[] =
 "  el('prov').textContent=JSON.stringify(f,null,1);renderRaw();\n"
 "  if(f.wheel_state_summary&&f.wheel_state_summary.n_spokes)\n"
 "   nSpokes=f.wheel_state_summary.n_spokes;\n"
+"  if(f.wheel_state_summary&&f.wheel_state_summary.n_rim_angles)\n"
+"   nRim=f.wheel_state_summary.n_rim_angles;\n"
 "  dbg('provenance '+JSON.stringify(f).length+' bytes','t-ack');renderRun();render();return;}\n"
 " if(f.t==='ack'){onAck(f);return;}\n"
 " if(f.t==='event')onEvent(f);}\n"
@@ -531,10 +565,12 @@ static const char TRUING_WEB_UI_HTML[] =
 "  send({cmd:'GET_CURRENT_STATE'});return;}\n"
 " if(k==='MEASUREMENT_RESULT'){\n"
 "  if(f.channel==='TENSION'){lastMeas=f;\n"
+"   if(f.index+1>nMeas)nMeas=f.index+1;\n"
 "   act('spoke '+f.index+' measured: '+f.selected_frequency_hz+' Hz, '+f.tension_n+' N'+\n"
 "    (f.status==='valid'?'':' - '+f.status),\n"
 "    f.status==='valid'?'t-good':(f.status==='suspect'?'t-warn':'t-bad'),f.ts_ms);}\n"
-"  else{act('rim '+f.index+' read: lat '+f.lateral_mm+' mm, rad '+f.radial_mm+' mm',\n"
+"  else{lastRim=f.index;\n"
+"   act('rim '+f.index+' read: lat '+f.lateral_mm+' mm, rad '+f.radial_mm+' mm',\n"
 "   't-good',f.ts_ms);}\n"
 "  dbg(JSON.stringify(f),'',f.ts_ms);render();return;}\n"
 " if(k==='TERMINAL_RESULT'){act('run finished: '+f.result,'t-good',f.ts_ms);\n"
@@ -615,6 +651,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "  if(!busySince)busySince=Date.now();\n"
 "  put(p,'p','head b',b3[0]);put(p,'p','sub',b3[1]);\n"
 "  put(put(p,'div','shim'),'i');\n"
+"  if(fastDemo())put(p,'div','autoline',autoLine());\n"
 "  var e=put(p,'div','el','0.0 s elapsed');e.id='elapsed';\n"
 "  put(p,'div','enum',curState);startTick();return;}\n"
 
@@ -635,6 +672,18 @@ static const char TRUING_WEB_UI_HTML[] =
 " put(p,'p','sub','Nothing to confirm right now.');}\n"
 
 /* Only values the firmware actually reported. Nothing here is computed by the page. */
+/* What the fast-demo build is doing on the operator's behalf right now. Every number here
+   is a count of something the machine reported: spokes measured comes from the tension
+   MEASUREMENT_RESULT events, the total from the provenance record. */
+"function autoLine(){\n"
+" if(curState==='READ_RUNOUT')\n"
+"  return 'Acquiring simulated runout automatically'+\n"
+"   (nRim?(' - rim '+(lastRim===null?0:lastRim+1)+' / '+nRim):'')+\n"
+"   ' \\u00b7 synthetic runout source';\n"
+" if(nSpokes&&nMeas>=nSpokes)\n"
+"  return 'Measurement pass complete: '+nSpokes+' / '+nSpokes+' spokes';\n"
+" return 'Measuring spokes automatically'+(nSpokes?(' - '+nMeas+' / '+nSpokes):'')+\n"
+"  ' \\u00b7 synthetic acoustic source';}\n"
 "function renderSummaryInto(p){\n"
 " if(!prov)return;\n"
 " var v=prov.verification,rows=[];\n"

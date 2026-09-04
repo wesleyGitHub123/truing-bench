@@ -21,6 +21,7 @@
 #include "truing_hal/audio_source_if.h"
 #include "truing_hal/pluck_if.h"
 #include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
 #include "truing_orch/auto_operator.h"
@@ -28,22 +29,12 @@
 
 static const char *TAG = "orch_demo";
 
-/* Who drives the session.
+/* Which image this is: see build_mode.h. TRUING_SELF_PLAY says who answers the waits;
+ * TRUING_FAST_DEMO says which implementations are wired in before the session starts.
  *
- * 0 (default, interactive): nobody but the operator. The machine sits in READY until a
- * person presses Start truing over the wire, and every operator wait is theirs to answer.
- * That is what makes those controls real rather than decorative, and it is the build the
- * demonstration runs on.
- *
- * 1 (`*_selfplay` environments): the auto-operator starts the session and answers the
- * waits, which is the unattended on-target evidence run recorded in docs/BRINGUP_LOG.md.
- * It stands down while a browser is attached so a person can take over mid-run.
- *
- * Kept as a compile-time constant rather than #ifdef around the branches so both paths are
+ * Kept as compile-time constants rather than #ifdef around the branches so every path is
  * type-checked in every build; the dead one folds away. */
-#ifndef TRUING_SELF_PLAY
-#define TRUING_SELF_PLAY 0
-#endif
+#include "build_mode.h"
 
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
 static struct {
@@ -62,8 +53,16 @@ static struct {
     void *acoustic_scratch;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
+    truing_runout_synthetic_ctx_t rsyn;   /* FAST DEMO: the simulated wheel's rim, read as a snapshot */
     truing_navigation_if_t nav;
     truing_navigation_manual_ctx_t nctx;
+    truing_navigation_synthetic_ctx_t nsyn;   /* FAST DEMO: positions itself instead of asking */
+    /* FAST DEMO: the adjustment the operator is currently being asked to apply. The
+     * simulated wheel reacts when they confirm it, which is what a real wheel would do. */
+    bool     adj_pending;
+    uint32_t adj_wait_id;
+    uint8_t  adj_spoke;
+    float    adj_turns_rev;
     truing_calc_if_t calc;
     truing_calc_artifact_ctx_t cctx;      /* REAL calculation on the loaded artifact (Phase 1c) */
     truing_telemetry_if_t sink;
@@ -85,6 +84,48 @@ static void model_response(void *user, truing_auto_wheel_model_t *wheel, uint8_t
         wheel->lateral_mm[k] += art->phi_u[k][spoke] * turns_rev;
         wheel->radial_mm[k] += art->phi_v[k][spoke] * turns_rev;
     }
+}
+
+/* FAST DEMO: the same physics, applied to the synthetic runout table instead of the
+ * auto-operator's model, because in this build the table IS the simulated wheel's rim -
+ * it is what truing_runout_read_snapshot() answers from. Nothing here writes wheel state:
+ * the orchestrator still has to go and measure the rim to find out what changed. */
+static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke, float turns_rev)
+{
+    for (uint8_t k = 0; k < art->n_rim_angles && k < TRUING_MAX_RIM_ANGLES; ++k) {
+        truing_runout_synthetic_set_index(&s.rsyn, k, s.rsyn.lateral_mm[k] + art->phi_u[k][spoke] * turns_rev,
+                                          s.rsyn.radial_mm[k] + art->phi_v[k][spoke] * turns_rev);
+    }
+}
+
+/* FAST DEMO: watch the adjustment the operator is being asked to apply, and let the
+ * simulated wheel react once they confirm it. The wait disappearing is only a
+ * confirmation if the session is still running - an abort clears waits too, and a wheel
+ * that "moved" because the run was cancelled would be a lie in the next cycle's runout. */
+static void fastdemo_track_adjustment(const truing_orch_snapshot_t *snap, const truing_artifact_t *art)
+{
+    if (snap->waiting && snap->active_wait.kind == TRUING_WAIT_APPLY_ADJUSTMENT) {
+        s.adj_pending = true;
+        s.adj_wait_id = snap->active_wait.wait_id;
+        s.adj_spoke = snap->active_wait.target_index;
+        s.adj_turns_rev = snap->active_wait.display_turns_rev;
+        return;
+    }
+    if (!s.adj_pending) {
+        return;
+    }
+    const bool still_that_wait = snap->waiting && snap->active_wait.wait_id == s.adj_wait_id;
+    if (still_that_wait) {
+        return;
+    }
+    s.adj_pending = false;
+    if (!snap->session_active) {
+        ESP_LOGI(TAG, "fast demo: adjustment on spoke %u was not applied (session ended)", (unsigned)s.adj_spoke);
+        return;
+    }
+    fastdemo_apply_to_wheel(art, s.adj_spoke, s.adj_turns_rev);
+    ESP_LOGI(TAG, "fast demo: simulated wheel responded to %.3f rev on spoke %u", (double)s.adj_turns_rev,
+             (unsigned)s.adj_spoke);
 }
 
 static uint32_t boot_clock_now(void *ctx)
@@ -163,11 +204,14 @@ static void drain_telemetry(void)
 static void demo_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "== Stage 1 workflow, %s (manual navigation + manual runout; "
+    ESP_LOGI(TAG, "== Stage 1 workflow, %s (%s; "
                   "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source; REAL truing calculation on the golden "
                   "fixture artifact; the simulated wheel responds through the same influence model) ==",
-             TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
-                              : "INTERACTIVE: the session starts and the waits are answered from the web UI");
+             TRUING_FAST_DEMO ? "FAST DEMO: a person starts the session and applies the adjustments; acquisition is "
+                                "automatic and SYNTHETIC - this is not a physical wheel result"
+                              : (TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
+                                                  : "INTERACTIVE: the session starts and the waits are answered from the web UI"),
+             TRUING_FAST_DEMO ? "SYNTHETIC navigation + SYNTHETIC runout" : "manual navigation + manual runout");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -189,8 +233,29 @@ static void demo_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
-    truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
+    /* THE fast-demo substitution, and the only one. Both implementations already exist and
+     * both already declare what they are; picking between them here - before
+     * truing_orch_init() - is what makes the whole session honest downstream.
+     *
+     *   manual     TRUING_SOURCE_REAL       a person turns the wheel and reads the gauges,
+     *                                       so navigation returns PENDING_OPERATOR and
+     *                                       runout advertises MANUAL_ENTRY: the
+     *                                       orchestrator stops and asks.
+     *   synthetic  TRUING_SOURCE_SYNTHETIC  the implementation can do it itself, so
+     *                                       navigation returns DONE and runout answers a
+     *                                       snapshot: the orchestrator walks the same
+     *                                       states without stopping.
+     *
+     * No orchestrator branch is involved and no wait is bypassed: POSITION and READ_RUNOUT
+     * are entered and left exactly as before. The only difference is that the thing being
+     * asked can answer for itself, which is the entire point of the HAL boundary. */
+    if (TRUING_FAST_DEMO) {
+        truing_runout_synthetic_init(&s.runout, &s.rsyn, s.clock, 32u);
+        truing_navigation_synthetic_init(&s.nav, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
+    } else {
+        truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
+        truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
+    }
     truing_artifact_store_status_t ast;
     const truing_artifact_t *art = truing_artifact_store_load_fixture(&s.wheel, &s.solver, &ast);
     if (art == NULL) {
@@ -222,6 +287,13 @@ static void demo_task(void *arg)
     truing_auto_operator_set_wheel(&s.op, 32u, lateral, radial, 0.0f);
     s.op.response_fn = model_response;
     s.op.user = (void *)art;
+    /* FAST DEMO: the same starting wheel, put where the synthetic runout implementation
+     * reads from. One mis-set wheel, two ways of being asked about it. */
+    if (TRUING_FAST_DEMO) {
+        for (uint8_t k = 0; k < 32u; ++k) {
+            truing_runout_synthetic_set_index(&s.rsyn, k, lateral[k], radial[k]);
+        }
+    }
     float start_max = 0.0f;
     for (uint8_t k = 0; k < 32u; ++k) {
         if (fabsf(lateral[k]) > start_max) start_max = fabsf(lateral[k]);
@@ -265,6 +337,11 @@ static void demo_task(void *arg)
         r = truing_orch_step(&s.orch);
         drain_telemetry();
         service_wire();
+        if (TRUING_FAST_DEMO) {
+            truing_orch_snapshot_t fd;
+            truing_orch_snapshot(&s.orch, &fd);
+            fastdemo_track_adjustment(&fd, art);
+        }
         /* The auto-operator is a DEVELOPMENT DOUBLE for the human, not machine behaviour.
          * While a browser is attached the real operator answers the wait, which is the
          * point of the transport; with nobody attached the double keeps the existing

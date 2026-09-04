@@ -17,6 +17,7 @@
 #include "board/board_profile.h"
 #include "config_store_nvs.h"
 #include "esp_timer.h"
+#include "build_mode.h"
 #include "firmware_version.h"
 #include "truing_proto/wire.h"
 #include "web_ui.h"
@@ -315,9 +316,9 @@ static esp_err_t id_get_handler(httpd_req_t *req)
     truing_net_stats_t st;
     truing_net_get_stats(&st);
     const int n = snprintf(body, sizeof(body),
-        "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\","
+        "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\",\"mode\":\"%s\","
         "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
-        BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH,
+        BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR,
         mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");
@@ -470,8 +471,11 @@ bool truing_net_start(void)
     ESP_LOGI(TAG, " (derived from this board's MAC; not stored in the repository)");
     /* Printed here and served at /id and shown in the page footer. Both boards answer on
      * 192.168.4.1, so this is how you tell which one you reached. */
-    ESP_LOGI(TAG, "   board %s | firmware %s | build %s | ui %s",
-             BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH);
+    ESP_LOGI(TAG, "   board %s | firmware %s | build %s | ui %s | mode %s",
+             BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR);
+    if (TRUING_FAST_DEMO) {
+        ESP_LOGW(TAG, "   FAST DEMO image: acquisition is SYNTHETIC; results are not physical wheel validation");
+    }
     ESP_LOGI(TAG, "=========================================================");
     return true;
 }

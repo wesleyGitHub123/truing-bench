@@ -11,6 +11,7 @@
 #include "truing_hal/acoustic_if.h"
 #include "truing_hal/clock_if.h"
 #include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
 #include "truing_orch/auto_operator.h"
@@ -55,8 +56,10 @@ typedef struct {
     truing_acoustic_synthetic_ctx_t actx;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
+    truing_runout_synthetic_ctx_t rsyn;
     truing_navigation_if_t nav;
     truing_navigation_manual_ctx_t nctx;
+    truing_navigation_synthetic_ctx_t nsyn;
     truing_calc_if_t calc;
     truing_calc_synthetic_ctx_t cctx;
     truing_telemetry_if_t sink;
@@ -137,6 +140,131 @@ static void two_spoke_lateral(float *lat)
     memset(lat, 0, sizeof(float) * TRUING_MAX_RIM_ANGLES);
     lat[3] = 0.4f;
     lat[10] = -0.3f;
+}
+
+/* ---- FAST DEMO -------------------------------------------------------------------------
+ * The demonstration image differs from the interactive one in exactly one way: navigation
+ * and runout are the SYNTHETIC implementations instead of the manual ones. Nothing in the
+ * orchestrator knows about a "mode". These tests pin that down, because the whole safety
+ * argument rests on it: a build that automated the acquisition by ANSWERING the manual
+ * implementations' waits would record runout_manual/TRUING_SOURCE_REAL for numbers no dial
+ * gauge ever produced, and the session would claim to be physical. */
+static void rig_build_fastdemo(rig_t *r, const float *lateral)
+{
+    rig_build(r, lateral, 0.0f);
+    truing_runout_synthetic_init(&r->runout, &r->rsyn, r->clock, 32u);
+    truing_navigation_synthetic_init(&r->nav, &r->nsyn, r->clock, 32u, 32u, &r->machine, NULL, 0.0f, 0u);
+    for (uint8_t k = 0; k < 32u; ++k) {
+        truing_runout_synthetic_set_index(&r->rsyn, k, lateral != NULL ? lateral[k] : 0.0f, 0.0f);
+    }
+    /* Re-init so the orchestrator holds the substituted dependencies, exactly as the
+     * firmware does: the choice is made before truing_orch_init(), never after. */
+    truing_orch_deps_t deps;
+    memset(&deps, 0, sizeof(deps));
+    deps.wheel = &r->wheel;
+    deps.solver = &r->solver;
+    deps.chain = &r->chain;
+    deps.tension_model = &r->tmodel;
+    deps.machine = &r->machine;
+    deps.acoustic = &r->acoustic;
+    deps.runout = &r->runout;
+    deps.navigation = &r->nav;
+    deps.calc = &r->calc;
+    deps.telemetry = &r->sink;
+    deps.clock = r->clock;
+    deps.firmware_version = "test";
+    TEST_ASSERT_TRUE(truing_orch_init(&r->orch, &deps));
+}
+
+/* The acquisition waits stop being issued, and only those. The machine still walks the same
+ * states: it is not skipping the work, it is doing it itself. */
+static void test_fastdemo_automates_acquisition_without_skipping_states(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_fastdemo(&g, lat);
+    bring_to_ready(&g);
+    /* Establishing the spoke-0 reference no longer stops for a person (SPEC 6.5). */
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION]);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_RIM_INDEX]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_RIM_ANGLE]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_ENTER_RUNOUT]);
+    /* but the states themselves are still entered, once per spoke and per rim index */
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_POSITION]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_READ_RUNOUT]);
+    /* and the real solver still ran */
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.state_entries[TRUING_STATE_COMPUTE_ADJUSTMENTS]);
+}
+
+/* The adjustment stays with the human: this is the part of the workflow being demonstrated. */
+static void test_fastdemo_still_asks_the_operator_to_apply_adjustments(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_fastdemo(&g, lat);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_APPLY_ADJUSTMENT]);
+}
+
+/* The point of the whole design: the session says what it is, from admission onward. */
+static void test_fastdemo_provenance_declares_synthetic_acquisition(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_fastdemo(&g, lat);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    truing_cycle_provenance_t pv;
+    truing_orch_provenance(&g.orch, &pv);
+    TEST_ASSERT_TRUE(pv.contains_non_real_implementations);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, g.runout.source_impl);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, g.nav.source_impl);
+    TEST_ASSERT_EQUAL_STRING("runout_synthetic", g.runout.impl_name);
+    TEST_ASSERT_EQUAL_STRING("navigation_synthetic", g.nav.impl_name);
+}
+
+/* The contrast that makes the substitution meaningful: the interactive dependency set DOES
+ * stop for a person, and declares those two channels REAL. Automating a build like this one
+ * by answering its waits is precisely what would make provenance lie. */
+static void test_interactive_acquisition_is_operator_driven_and_declares_real(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build(&g, lat, 1.0f);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_ENTER_RUNOUT]);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_REAL, g.runout.source_impl);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_REAL, g.nav.source_impl);
+}
+
+/* Abort is not weakened by any of this. */
+static void test_fastdemo_abort_still_ends_the_session(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_fastdemo(&g, lat);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 200u);
+    truing_intent_t a;
+    memset(&a, 0, sizeof(a));
+    a.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &a, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, g.sctx.last_terminal);
+    truing_orch_snapshot_t sn;
+    truing_orch_snapshot(&g.orch, &sn);
+    TEST_ASSERT_FALSE(sn.session_active);
 }
 
 void setUp(void) {}
@@ -555,6 +683,11 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
     UNITY_BEGIN();
+    RUN_TEST(test_fastdemo_automates_acquisition_without_skipping_states);
+    RUN_TEST(test_fastdemo_still_asks_the_operator_to_apply_adjustments);
+    RUN_TEST(test_fastdemo_provenance_declares_synthetic_acquisition);
+    RUN_TEST(test_interactive_acquisition_is_operator_driven_and_declares_real);
+    RUN_TEST(test_fastdemo_abort_still_ends_the_session);
     RUN_TEST(test_initialize_establishes_reference_through_navigation);
     RUN_TEST(test_start_is_refused_without_a_usable_model_or_profile);
     RUN_TEST(test_full_workflow_reaches_converged_geometric_only);

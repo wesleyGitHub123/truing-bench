@@ -97,7 +97,7 @@ let sent = [];
 function WebSocket(url) { this.url = url; this.readyState = 1; WebSocket.last = this; this.send = s => sent.push(JSON.parse(s)); }
 const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
-  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1,
+  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1, mode: 'interactive',
 };
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; };
@@ -394,6 +394,64 @@ ok(txt('rundl').indexOf('Last completed run - session 1') >= 0,
   'returning to idle restores the completed-run record without a tab switch');
 
 
+
+// ---- fast demo is a property of the firmware, and the page only ever mirrors it ---------
+// The capability is not in the page: there is no command that makes a session synthetic, so
+// a page talking to an interactive board cannot produce one however it is driven. What the
+// page does is refuse to let a synthetic run look like a physical one.
+IDENT.mode = 'interactive';
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') >= 0, 'interactive build shows no Fast Demo banner');
+ok(byId['modechip'].className.indexOf('hide') >= 0, 'interactive build shows no Fast Demo chip');
+ok(txt('b-start') === 'Start truing', 'interactive build offers Start truing', txt('b-start'));
+ok(txt('i-mode') === 'INTERACTIVE', 'Diagnostics names the build mode', txt('i-mode'));
+// No control anywhere on the page can ask for synthetic measurements.
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sent = [];
+byId['b-start'].onclick();
+ok(sent.length === 1 && sent[0].cmd === 'START_TRUING' && Object.keys(sent[0]).length === 2,
+  'Start sends START_TRUING and nothing else, in either build', JSON.stringify(sent[0]));
+
+IDENT.mode = 'fastdemo';
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') < 0, 'Fast Demo build shows the banner');
+ok(byId['modechip'].className.indexOf('hide') < 0, 'Fast Demo build shows the header chip');
+ok(page.indexOf('It is not a physical wheel-truing result.') >= 0,
+  'the banner says plainly that this is not a physical result');
+ok(page.indexOf('This run uses simulated measurements.') >= 0,
+  'the banner says the measurements are simulated');
+ok(page.indexOf('Synthetic measurement mode') >= 0, 'the banner names the mode');
+ok(txt('b-start') === 'Start Fast Demo', 'Fast Demo build labels the action honestly', txt('b-start'));
+ok(txt('i-mode') === 'FAST DEMO / SYNTHETIC', 'Diagnostics names the Fast Demo build', txt('i-mode'));
+
+// The automated-acquisition line counts what the machine reported, never a timer.
+sandbox.handle(PROV);
+sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
+ok(txt('statusbody').indexOf('0 / 32') >= 0, 'progress starts from nothing measured', txt('statusbody').slice(-60));
+for (let i = 0; i < 17; ++i) {
+  sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: i, ts_ms: 1000 + i,
+    status: 'valid', selected_frequency_hz: 460, tension_n: 1000 });
+}
+ok(txt('statusbody').indexOf('17 / 32') >= 0, 'the spoke count follows the measurement events',
+  txt('statusbody').slice(-70));
+ok(txt('statusbody').indexOf('synthetic acoustic source') >= 0,
+  'the automated phase names the synthetic source');
+for (let i = 17; i < 32; ++i) {
+  sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: i, ts_ms: 2000 + i,
+    status: 'valid', selected_frequency_hz: 460, tension_n: 1000 });
+}
+ok(txt('statusbody').indexOf('Measurement pass complete: 32 / 32') >= 0,
+  'a complete pass is reported as complete', txt('statusbody').slice(-70));
+sandbox.handle(S({ current_state: 'READ_RUNOUT', session_active: true, active_wait: null }));
+ok(txt('statusbody').indexOf('simulated runout') >= 0, 'the runout phase says it is simulated',
+  txt('statusbody').slice(-80));
+// An operator wait still takes over the card: automation never hides something asked of you.
+sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', session_active: true, active_wait: WAITS[5] }));
+ok(txt('statusbody').indexOf('Waiting for you') >= 0,
+  'Fast Demo still hands the adjustment back to the operator');
+ok(byId['demobanner'].className.indexOf('hide') < 0, 'the synthetic warning stays up during the run');
+IDENT.mode = 'interactive';
+sandbox.loadIdent();
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);
