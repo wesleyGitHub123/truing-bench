@@ -28,6 +28,10 @@
  *     destroy the history being inspected. Telemetry is never replayed by the machine
  *     (SPEC §12.2), so the browser is the only place that history can live. It is developer
  *     convenience, never provenance, and the explicit Clear button is the only remover.
+ *   - viewer awareness: /id carries the live websocket client count, refreshed on connect,
+ *     on Resync and on a slow 10 s cadence, so a second client's presence is visible.
+ *     Awareness only — the wait_id contract (SPEC §12.3), not a lock, is what keeps two
+ *     clients safe; nothing here owns, prioritises or excludes anyone.
  *
  * THREE AUDIENCES, three tabs. An operator needs to know what to do next and whether the
  * machine heard them; an evaluator needs to know what produced a number and how far to
@@ -69,6 +73,8 @@ static const char TRUING_WEB_UI_HTML[] =
 " box-shadow:0 0 0 3px #e85c5c22}\n"
 "#dot.up{background:var(--ok);box-shadow:0 0 0 3px #4fc08d22}\n"
 "#ident{margin-left:auto;font-size:11px;color:var(--dim);text-align:right;line-height:1.35}\n"
+".viewers{font-size:11px;color:var(--dim);letter-spacing:.02em}\n"
+".viewers.multi{color:var(--warn);font-weight:600}\n"
 ".tabs{display:flex;gap:2px;padding:0 var(--pad)}\n"
 ".tabs button{background:none;border:0;border-bottom:2px solid transparent;color:var(--dim);\n"
 " font:inherit;font-size:12px;padding:7px 11px;cursor:pointer;min-height:0}\n"
@@ -187,6 +193,7 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "<header>\n"
 " <div class='hrow'><span id='dot'></span><h1>Truing Machine</h1>\n"
+"  <span id='viewers' class='viewers'></span>\n"
 "  <div id='ident'>connecting</div></div>\n"
 " <div class='tabs'>\n"
 "  <button id='tab-op' class='on'>Operator</button>\n"
@@ -414,8 +421,12 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "function loadIdent(){\n"
 " try{var x=new XMLHttpRequest();x.open('GET','/id?t='+Date.now(),true);\n"
-"  x.onload=function(){try{ident=JSON.parse(x.responseText);renderIdent();}catch(e){}};\n"
+"  x.onload=function(){try{ident=JSON.parse(x.responseText);renderIdent();renderViewers();}catch(e){}};\n"
 "  x.send();}catch(e){}}\n"
+"function renderViewers(){var v=el('viewers');\n"
+" var n=ident&&ident.clients?ident.clients:0;\n"
+" if(n>1){v.textContent=n+' viewers - another client is also connected';v.className='viewers multi';}\n"
+" else{v.textContent='';v.className='viewers';}}\n"
 "function renderIdent(){\n"
 " if(!ident)return;\n"
 " el('ident').textContent=ident.board+' \\u00b7 fw '+ident.firmware+'\\n'+\n"
@@ -735,6 +746,10 @@ static const char TRUING_WEB_UI_HTML[] =
 "el('b-raw').onclick=function(){rawOpen=!rawOpen;renderRaw();};\n"
 "el('b-clear').onclick=function(){logClear();};\n"
 "logRestore();render();renderRun();renderRaw();connect();\n"
+/* Viewer awareness: a bounded 10 s /id refresh while connected. This is an HTTP GET on a
+   transport-local endpoint, deliberately outside the websocket command channel and the
+   state-query budget — it carries no machine state and no wait_id. */
+"setInterval(function(){if(ws&&ws.readyState===1)loadIdent();},10000);\n"
 "</script></body></html>\n";
 
 #endif /* TRUING_WEB_UI_H */

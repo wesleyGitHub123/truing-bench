@@ -97,7 +97,7 @@ let sent = [];
 function WebSocket(url) { this.url = url; this.readyState = 1; WebSocket.last = this; this.send = s => sent.push(JSON.parse(s)); }
 const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
-  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42,
+  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1,
 };
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; };
@@ -319,6 +319,17 @@ advance(2000);
 WebSocket.last.onopen();
 ok(sent.some(c => c.cmd === 'GET_CURRENT_STATE'), 'reconnect re-asks for the authoritative state');
 ok(byId['v-op'].className === '', 'reconnect leaves the operator view in place');
+
+// ---- a second viewer is visible in the header, awareness only -----------------------------
+ok(txt('viewers') === '', 'one client shows no viewer notice');
+IDENT.clients = 2;
+byId['b-refresh'].onclick();
+ok(txt('viewers').indexOf('2 viewers') >= 0, 'a second client is counted in the header');
+ok(txt('viewers').indexOf('another client is also connected') >= 0, 'the notice warns in words');
+ok(byId['viewers'].className.indexOf('multi') >= 0, 'more than one viewer reads as a warning tone');
+IDENT.clients = 1;
+byId['b-refresh'].onclick();
+ok(txt('viewers') === '', 'the notice clears when it is one client again');
 
 // ---- diagnostics history: persisted per tab, marked at session edges, cleared deliberately --
 sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));

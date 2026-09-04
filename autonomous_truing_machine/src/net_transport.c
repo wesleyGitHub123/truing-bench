@@ -304,17 +304,21 @@ static esp_err_t ui_get_handler(httpd_req_t *req)
 
 /* Which board, which build, which UI. The UI hash is sha256(src/web_ui.h) truncated by the
  * build script, so the page can prove it is the page that was compiled in rather than a
- * copy the browser kept or the other board's. */
+ * copy the browser kept or the other board's. `clients` is the live websocket client count:
+ * awareness only — the SPEC §12.3 wait_id contract is what keeps two clients safe, and no
+ * ownership or locking is offered or implied. */
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[320];
     uint8_t mac[6] = { 0 };
     (void)esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    truing_net_stats_t st;
+    truing_net_get_stats(&st);
     const int n = snprintf(body, sizeof(body),
         "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\","
-        "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld}",
+        "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
         BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH,
-        mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000));
+        mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, n > 0 ? (size_t)n : 0u);
