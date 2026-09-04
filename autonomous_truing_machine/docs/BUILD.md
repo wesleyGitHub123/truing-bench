@@ -136,7 +136,7 @@ the cause of a stale page. That is deliberate: the page is 32 KB off local flash
 otherwise idle link, and caching it buys nothing against the cost of ever doubting what
 the board is running.
 
-## Interactive and self-play images
+## The three images
 
 `s3_devkit` / `nano_esp32` are **interactive**: the machine sits in READY and does nothing
 until an operator presses *Start truing* in the web UI, and every operator wait is answered
@@ -147,12 +147,48 @@ starts the session and answers its own waits, unattended. This is the on-target 
 run recorded in `docs/BRINGUP_LOG.md`, and it is what to flash when reproducing those
 numbers. It stands down while a browser is attached, so a person can still take over.
 
+`s3_devkit_fastdemo` / `nano_esp32_fastdemo` add `-DTRUING_FAST_DEMO=1`: an **accelerated
+demonstration**. A person still presses *Start Fast Demo* and still applies every
+adjustment, but the repetitive acquisition runs by itself, so the solver, adjustment and
+verification stages are reachable in a couple of minutes instead of sixty-four operator
+confirmations.
+
+It does that by **swapping implementations, not by answering waits**, and the difference
+matters:
+
+| | navigation | runout | provenance |
+|---|---|---|---|
+| interactive / self-play | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
+| fast demo | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
+
+The manual implementations are REAL because a person turns a real wheel and reads real dial
+gauges. Having the firmware answer their waits with numbers it invented would record
+`runout_manual` / REAL against measurements no gauge produced — the session would misreport
+its own inputs. Substituting the implementation instead means the orchestrator asks the same
+interfaces it always asks and gets an honest answer, `contains_non_real_implementations` is
+true from session admission onward, and no orchestrator state is skipped: `POSITION`,
+`READ_RUNOUT` and `MEASURE_SPOKE_TENSION` are entered exactly as before.
+
+The choice is made before `truing_orch_init()`, so it cannot change mid-session, and Fast
+Demo adds no wire command — there is nothing for the interactive firmware to refuse, because
+nothing was added to ask it. See `src/build_mode.h`.
+
 ```bash
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the demo image
+pio run -d %USERPROFILE%\truing_ws -e s3_devkit_fastdemo -t upload   # accelerated demonstration
+pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the physical-path image
 ```
 
-The boot banner says which one is running.
+The boot banner says which one is running, and so does `GET /id`:
+
+```json
+{"board":"esp32-s3-devkitc-1-n16r8","build":"45a6d2c","ui":"f9e59677","mode":"fastdemo", ...}
+```
+
+A fast-demo board says so three ways — the boot log, `/id`, and a banner across the top of
+the page reading **FAST DEMO / Synthetic measurement mode / It is not a physical
+wheel-truing result** — and the Start button is labelled *Start Fast Demo*. Diagnostics
+shows `build mode` for all three.
 
 ## Checking the UI without a board
 

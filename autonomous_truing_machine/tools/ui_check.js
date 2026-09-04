@@ -445,6 +445,28 @@ ok(txt('statusbody').indexOf('Measurement pass complete: 32 / 32') >= 0,
 sandbox.handle(S({ current_state: 'READ_RUNOUT', session_active: true, active_wait: null }));
 ok(txt('statusbody').indexOf('simulated runout') >= 0, 'the runout phase says it is simulated',
   txt('statusbody').slice(-80));
+// Run Details must not describe a Fast Demo acquisition as manual work someone did. These
+// two rows used to state "Manual operator positioning" and "Manual dial entry" as facts.
+sandbox.showTab('run');
+sandbox.handle(PROV);
+ok(txt('rundl').indexOf('synthetic navigation') >= 0,
+  'Run Details says the positioning was automatic and synthetic', txt('rundl').slice(0, 60));
+ok(txt('rundl').indexOf('No dial gauge was read') >= 0,
+  'Run Details does not claim a dial gauge was read in Fast Demo');
+ok(txt('rundl').indexOf('Manual dial entry') < 0, 'the manual-entry claim is gone in Fast Demo');
+ok(txt('rundl').indexOf('Not a physical wheel result') >= 0,
+  'the non-physical warning is still on the Run Details tab');
+IDENT.mode = 'interactive';
+sandbox.loadIdent();
+sandbox.handle(PROV);
+ok(txt('rundl').indexOf('Manual dial entry') >= 0,
+  'the interactive build still reports manual dial entry, which is what happens there');
+ok(txt('rundl').indexOf('synthetic navigation') < 0,
+  'the interactive build does not claim synthetic acquisition');
+IDENT.mode = 'fastdemo';
+sandbox.loadIdent();
+sandbox.showTab('op');
+
 // An operator wait still takes over the card: automation never hides something asked of you.
 sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', session_active: true, active_wait: WAITS[5] }));
 ok(txt('statusbody').indexOf('Waiting for you') >= 0,
