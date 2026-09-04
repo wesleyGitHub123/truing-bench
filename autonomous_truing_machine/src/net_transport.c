@@ -32,16 +32,24 @@ static const char *TAG = "net";
 typedef struct {
     char  *frame;    /* heap; the sender frees it */
     size_t len;
+    int    fd;       /* >=0: reply to that client only. -1: broadcast. */
 } out_item_t;
 
 typedef struct {
     uint16_t len;
+    int      fd;     /* the socket the command arrived on, so its reply can go back */
     char     data[TRUING_WIRE_COMMAND_MAX + 1u];
 } in_item_t;
 
 static httpd_handle_t   s_server;
 static QueueHandle_t    s_outbound;
 static QueueHandle_t    s_inbound;
+/* The socket whose command is being processed right now, or -1 when nothing is.
+ * Everything the session emits while dispatching a command is a REPLY to that command
+ * -- its ack, and the snapshot answering a state query -- and belongs to the client that
+ * asked. Telemetry emitted outside a dispatch has no originator and is broadcast. Safe
+ * as a plain static: poll_inbound and the session both run on the orchestrator task. */
+static int              s_reply_fd = -1;
 static truing_wire_sink_t s_sink;
 static truing_net_stats_t s_stats;
 static bool             s_started;
@@ -87,7 +95,20 @@ static void sender_task(void *arg)
             continue;
         }
         int fds[MAX_WS_CLIENTS];
-        const size_t n = ws_clients(fds, MAX_WS_CLIENTS);
+        size_t n = ws_clients(fds, MAX_WS_CLIENTS);
+        if (item.fd >= 0) {
+            /* A reply goes to the one client that asked. Still checked against the live
+             * client list: the socket may have closed between the command and the ack. */
+            size_t keep = 0u;
+            for (size_t i = 0u; i < n; ++i) {
+                if (fds[i] == item.fd) {
+                    fds[0] = item.fd;
+                    keep = 1u;
+                    break;
+                }
+            }
+            n = keep;
+        }
         for (size_t i = 0u; i < n; ++i) {
             httpd_ws_frame_t f;
             memset(&f, 0, sizeof(f));
@@ -125,6 +146,7 @@ static bool sink_send(truing_wire_sink_t *self, const char *frame, size_t len)
     memcpy(item.frame, frame, len);
     item.frame[len] = '\0';
     item.len = len;
+    item.fd = s_reply_fd;   /* set only while a command is being dispatched */
     /* Zero ticks: enqueueing must never wait on the control path. */
     if (xQueueSend(s_outbound, &item, 0) != pdTRUE) {
         free(item.frame);
@@ -149,8 +171,11 @@ size_t truing_net_poll_inbound(char *out, size_t cap)
     }
     static in_item_t item;   /* static: 513 bytes is too much for a caller's stack budget */
     if (xQueueReceive(s_inbound, &item, 0) != pdTRUE) {
+        s_reply_fd = -1;     /* nothing in flight: anything emitted now is telemetry */
         return 0u;
     }
+    /* Held across the caller's handling of this frame, which is where the ack is emitted. */
+    s_reply_fd = item.fd;
     if ((size_t)item.len + 1u > cap) {
         return 0u;
     }
@@ -284,6 +309,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (e != ESP_OK) {
         return e;
     }
+    item.fd = httpd_req_to_sockfd(req);
     item.len = (uint16_t)frame.len;
     item.data[item.len] = '\0';
     if (xQueueSend(s_inbound, &item, 0) != pdTRUE) {
