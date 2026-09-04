@@ -357,6 +357,27 @@ ok(feedText('dbg').indexOf('history cleared') >= 0, 'a page reload restores the 
 ok(feedText('dbg').indexOf('restored - frames while the page was closed are lost') >= 0,
   'the reload says honestly that closed-page frames are gone');
 
+// ---- the completed run's provenance is kept in this browser, labeled as browser-held -------
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null, last_known_result: 'CONVERGED_GEOMETRIC_ONLY', last_reason: 'MEAN_TENSION_MODEL_UNAVAILABLE' }));
+sent = [];
+sandbox.handle({ t: 'event', kind: 'TERMINAL_RESULT', ts_ms: 20000, result: 'CONVERGED_GEOMETRIC_ONLY' });
+ok(sent.some(c => c.cmd === 'GET_CURRENT_CYCLE_PROVENANCE'), 'a finished run pulls the final provenance');
+sandbox.handle(PROV);   // the answer to that pull is the run's final authoritative record
+ok(feedText('dbg').indexOf('completed-run record kept in this browser') >= 0,
+  'the freeze is visible in the log, not silent');
+ok(txt('rundl').indexOf('Last completed run - session 1') >= 0,
+  'Run Details names the completed-run record once the machine is idle');
+ok(txt('rundl').indexOf('the machine itself does not retain it once the next run starts') >= 0,
+  'the record states honestly that retention is browser-held, not machine history');
+ok(txt('rundl').indexOf('32 spokes') >= 0 && txt('techdl').indexOf('25b68917ad02f8b4') >= 0,
+  'the completed record still carries the full provenance detail');
+// a new live session takes the tab back to the current cycle
+sandbox.handle(S({ current_state: 'MEASURE_WHEEL_STATE', session_active: true, active_wait: null }));
+sandbox.handle(Object.assign({}, PROV, { session_id: 2, plan: null, verification: null }));
+ok(txt('rundl').indexOf('Last completed run') < 0,
+  'a new live session takes Run Details back from the completed run');
+
+
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);

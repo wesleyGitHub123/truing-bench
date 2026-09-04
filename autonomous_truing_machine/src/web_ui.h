@@ -32,6 +32,11 @@
  *     on Resync and on a slow 10 s cadence, so a second client's presence is visible.
  *     Awareness only — the wait_id contract (SPEC §12.3), not a lock, is what keeps two
  *     clients safe; nothing here owns, prioritises or excludes anyone.
+ *   - the completed run's provenance is frozen IN THE BROWSER at the terminal pull and shown
+ *     in Run Details once the machine is idle again. It is a mirror of a record the machine
+ *     verifiably sent, not durable history: the machine keeps its P6 record only until the
+ *     next run starts (it answers from RAM, SPEC §12.2), so closing this browser loses the
+ *     older copy. That limitation is stated on the page rather than papered over.
  *
  * THREE AUDIENCES, three tabs. An operator needs to know what to do next and whether the
  * machine heard them; an evaluator needs to know what produced a number and how far to
@@ -142,6 +147,8 @@ static const char TRUING_WEB_UI_HTML[] =
 ".dl .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}\n"
 ".dl .v{font-size:14px}\n"
 ".dl .x{font-size:12px;color:var(--dim);margin-top:2px}\n"
+".lastnote{font-size:12px;color:var(--dim);margin:0 0 12px;padding-bottom:9px;\n"
+" border-bottom:1px solid var(--line)}\n"
 ".warnbox{border:1px solid #6d4a1f;background:#3a2c14;border-radius:8px;padding:11px 13px;\n"
 " font-size:13px}\n"
 ".warnbox b{color:#e8c48f}\n"
@@ -264,6 +271,7 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "<script>\n"
 "var ws=null,snap=null,prov=null,ident=null,seq=0,pending=null,curState=null;\n"
+"var lastRun=null,termPending=null;\n"
 "var nSpokes=0,lastIdx=null,lastMeas=null,busySince=0,tick=null,flash=null,tab='op';\n"
 /* Owned here rather than read back off the element's class, so the visible state has one
    source and does not depend on what the markup happened to start with. */
@@ -454,6 +462,10 @@ static const char TRUING_WEB_UI_HTML[] =
 "   logGap('dbg','--- new machine session ---');}\n"
 "  snap=f;curState=f.current_state;render();return;}\n"
 " if(f.t==='provenance'){prov=f;\n"
+/* The provenance answer to the terminal pull is the run's final authoritative record; the
+   machine keeps it until the next START_TRUING, this browser keeps it beyond that. */
+"  if(termPending!==null){lastRun={prov:f,result:termPending};termPending=null;\n"
+"   dbg('completed-run record kept in this browser','t-ack');}\n"
 "  el('prov').textContent=JSON.stringify(f,null,1);renderRaw();\n"
 "  if(f.wheel_state_summary&&f.wheel_state_summary.n_spokes)\n"
 "   nSpokes=f.wheel_state_summary.n_spokes;\n"
@@ -515,6 +527,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "  dbg(JSON.stringify(f),'',f.ts_ms);render();return;}\n"
 " if(k==='TERMINAL_RESULT'){act('run finished: '+f.result,'t-good',f.ts_ms);\n"
 "  dbg('TERMINAL '+f.result,'t-good',f.ts_ms);\n"
+"  termPending=f.result;\n"
 "  send({cmd:'GET_CURRENT_STATE'});askProv();return;}\n"
 " if(k==='NAVIGATION'){dbg('nav '+f.target_kind+' '+f.index+' '+f.outcome,'t-nav',f.ts_ms);\n"
 "  return;}\n"
@@ -664,7 +677,18 @@ static const char TRUING_WEB_UI_HTML[] =
 "function renderRun(){\n"
 " var h=el('rundl'),t=el('techdl'),o=el('outcome');\n"
 " h.innerHTML='';t.innerHTML='';o.innerHTML='';\n"
+" if(snap&&!snap.session_active&&lastRun){\n"
+/* No live session: show the completed run this browser witnessed. The freeze mirrors a
+   record the machine verifiably sent (the answer to the terminal pull); it is not durable
+   history, and the machine itself answers P6 from RAM only until the next run starts. */
+"  var P=lastRun.prov;\n"
+"  put(h,'p','lastnote','Last completed run - session '+(P.session_id||'?')+' ('+\n"
+"   lastRun.result+'). This browser keeps what the machine reported when the run ended; '+\n"
+"   'the machine itself does not retain it once the next run starts.');\n"
+"  renderRunFrom(P,h,t,o);return;}\n"
 " if(!prov){put(h,'p','sub','Press Resync to fetch the run details.');return;}\n"
+" renderRunFrom(prov,h,t,o);}\n"
+"function renderRunFrom(prov,h,t,o){\n"
 " var ws2=prov.wheel_state_summary||{};\n"
 " row(h,'Wheel',(ws2.n_spokes||'?')+' spokes, '+(ws2.n_rim_angles||'?')+' rim positions',\n"
 "  'Machine profile '+prov.machine_profile_id);\n"
