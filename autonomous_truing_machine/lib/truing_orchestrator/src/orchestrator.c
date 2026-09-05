@@ -130,10 +130,51 @@ static void store_unavailable_rim(truing_orchestrator_t *o, uint8_t rim, truing_
     emit_measurement(o, TRUING_EVT_CHANNEL_RUNOUT, rim, &m.meta, NAN, NAN);
 }
 
+/* Which layout the calculation would ask for, asked WITHOUT committing to it. select_layout is
+ * a pure query on the artifact, so the measurement phase can consult it before collecting, and
+ * CHECK_SOLVER_ADMISSION asks again for the answer it actually admits against. */
+static truing_layout_id_t selected_layout(const truing_orchestrator_t *o, truing_reason_t *policy_reason_out)
+{
+    truing_reason_t policy_reason = TRUING_REASON_NONE;
+    truing_layout_id_t requested = TRUING_LAYOUT_FULL;
+    if (o->deps.calc != NULL && o->deps.calc->select_layout != NULL) {
+        requested = o->deps.calc->select_layout(o->deps.calc, o->deps.geometry_only_policy, &policy_reason);
+    }
+    if (requested != TRUING_LAYOUT_TENSION_ABSENT) {
+        requested = TRUING_LAYOUT_FULL;
+    }
+    if (policy_reason_out != NULL) {
+        *policy_reason_out = policy_reason;
+    }
+    return requested;
+}
+
+/* How many spokes this pass will pluck. Normally every one of them: tension_sample_limit is 0
+ * in the machine and in every interactive image, and this returns n_spokes unchanged.
+ *
+ * A demonstration image may bound it, but ONLY while the tension rows are excluded from the
+ * solve by policy. Under TENSION_ABSENT the layout mask holds no tension rows at all, so
+ * admission rule R1 (exact match with the shipped layout) is satisfied by the runout rows
+ * alone and the number of spokes plucked cannot change whether the state is admissible. The
+ * moment the layout is FULL those rows are load-bearing, the bound is refused here, and the
+ * pass collects every spoke as it always did. */
+static uint8_t tension_targets_this_pass(const truing_orchestrator_t *o)
+{
+    const uint8_t n = o->wheel_state.n_spokes;
+    if (o->deps.tension_sample_limit == 0u || o->remeasure_mode) {
+        return n;
+    }
+    if (selected_layout(o, NULL) != TRUING_LAYOUT_TENSION_ABSENT) {
+        return n;   /* tension is in the solve: a bound here would starve it */
+    }
+    return o->deps.tension_sample_limit < n ? o->deps.tension_sample_limit : n;
+}
+
 static bool next_measurement_target(truing_orchestrator_t *o, truing_nav_target_t *t)
 {
     memset(t, 0, sizeof(*t));
-    for (uint8_t i = 0; i < o->wheel_state.n_spokes; ++i) {
+    const uint8_t n_tension = tension_targets_this_pass(o);
+    for (uint8_t i = 0; i < n_tension; ++i) {
         const bool wanted = o->remeasure_mode ? o->remeasure_spoke[i] : !truing_wheel_state_spoke_measured(&o->wheel_state, i);
         if (wanted) {
             t->kind = TRUING_NAV_TARGET_SPOKE;
@@ -259,13 +300,7 @@ typedef enum { ADMIT_OK, ADMIT_REMEASURING, ADMIT_ABORTED } admit_outcome_t;
 static admit_outcome_t admit_or_remeasure(truing_orchestrator_t *o, truing_orch_step_t *step_out)
 {
     truing_reason_t policy_reason = TRUING_REASON_NONE;
-    truing_layout_id_t requested = TRUING_LAYOUT_FULL;
-    if (o->deps.calc != NULL && o->deps.calc->select_layout != NULL) {
-        requested = o->deps.calc->select_layout(o->deps.calc, o->deps.geometry_only_policy, &policy_reason);
-    }
-    if (requested != TRUING_LAYOUT_TENSION_ABSENT) {
-        requested = TRUING_LAYOUT_FULL;
-    }
+    const truing_layout_id_t requested = selected_layout(o, &policy_reason);
     truing_admission_evaluate(&o->wheel_state, &o->dims, requested, policy_reason, &o->admission);
     if (o->admission.admissible) {
         truing_reason_t reason = TRUING_REASON_NONE;
@@ -871,4 +906,15 @@ void truing_orch_provenance(truing_orchestrator_t *o, truing_cycle_provenance_t 
     out->verification = o->verification;
     truing_navigation_query(o->deps.navigation, &out->wheel_position);
     out->contains_non_real_implementations = o->session.contains_non_real_implementations;
+    out->tension_sample_limit = o->deps.tension_sample_limit;
+    for (uint8_t i = 0; i < o->wheel_state.n_spokes && i < TRUING_MAX_SPOKES; ++i) {
+        if (truing_wheel_state_spoke_measured(&o->wheel_state, i)) {
+            out->tension_sampled++;
+        }
+    }
+    /* Only claim the omission is by layout when it demonstrably is: the bound is set, it is
+     * actually taking effect, and the layout in force excludes the tension rows. */
+    out->tension_omitted_by_layout = o->deps.tension_sample_limit > 0u &&
+                                     out->tension_sampled < o->wheel_state.n_spokes &&
+                                     selected_layout(o, NULL) == TRUING_LAYOUT_TENSION_ABSENT;
 }

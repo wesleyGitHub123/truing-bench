@@ -64,6 +64,11 @@ typedef struct {
     const char             *firmware_version;
     bool                    geometry_only_policy;   /* SPEC §8.11 sanctioned policy exclusion of the tension channel */
     bool                    debug_channel_enabled;  /* SPEC §12.5: development only */
+    /* 0 = collect every spoke, which is what the machine does and what every interactive image
+     * sets. A demonstration image may bound the acoustic pass, and the orchestrator honours the
+     * bound ONLY while the selected layout is TENSION_ABSENT, i.e. while those rows are not in
+     * the solve at all (SPEC §8.11). Under any layout that uses tension this is ignored. */
+    uint8_t                 tension_sample_limit;
 } truing_orch_deps_t;
 
 /* What the machine resumes with once the active wait is answered. */
@@ -163,6 +168,12 @@ typedef struct {
     truing_verification_result_t verification;
     truing_wheel_position_t      wheel_position;     /* SPEC §10A position authority snapshot */
     bool                         contains_non_real_implementations;
+    /* Bounded acoustic sampling (demonstration images only; limit 0 everywhere else). Reported
+     * so that a record showing three tension measurements on a 32-spoke wheel says WHY it holds
+     * three, and cannot be read as a complete physical measurement of the wheel. */
+    uint8_t                      tension_sample_limit;      /* 0 = every spoke was to be collected */
+    uint8_t                      tension_sampled;           /* spokes with a tension record this cycle */
+    bool                         tension_omitted_by_layout; /* the rest were left uncollected: not in the layout */
 } truing_cycle_provenance_t;
 
 bool truing_orch_init(truing_orchestrator_t *o, const truing_orch_deps_t *deps);

@@ -331,6 +331,13 @@ size_t truing_wire_encode_provenance(const truing_cycle_provenance_t *p, char *b
      * It travels with the provenance so a synthetic run can never be mistaken for a
      * measured one by whoever reads the record. */
     truing_json_bool(&w, "contains_non_real_implementations", p->contains_non_real_implementations);
+
+    /* How much of the acoustic channel this cycle actually holds, and why it holds that much.
+     * A reader that sees three tension records on a 32-spoke wheel must be able to tell a
+     * bounded demonstration from a wheel that was measured and mostly failed. */
+    truing_json_u32(&w, "tension_sample_limit", p->tension_sample_limit);
+    truing_json_u32(&w, "tension_sampled", p->tension_sampled);
+    truing_json_bool(&w, "tension_omitted_by_layout", p->tension_omitted_by_layout);
     truing_json_obj_close(&w);
 
     size_t len = 0u;

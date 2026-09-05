@@ -33,6 +33,13 @@
  *                          suspect / PROVISIONAL_MODE_ID (SPEC 4.4.1): a real front end
  *                          is a real acquisition, not a validated measurement.
  *
+ *   FAST DEMO + MIC        the acoustic demonstration: the real INMP441 front end with the
+ *                          synthetic acquisition path, and a BOUND on how many spokes are
+ *                          plucked (TRUING_ACOUSTIC_DEMO_SPOKES). A few real plucks prove
+ *                          the microphone -> DSP path; the remaining tension rows are left
+ *                          uncollected because the active layout does not contain them.
+ *                          Legal only while that is true - see the run-time guard below.
+ *
  * Fast demo is deliberately NOT self-play with a nicer label. Self-play leaves the REAL
  * manual implementations in place and has a robot press the buttons, which is right for a
  * test rig and wrong for a demonstration: provenance would record runout_manual/REAL for
@@ -58,16 +65,43 @@
 #error "TRUING_SELF_PLAY and TRUING_FAST_DEMO are different images: pick one."
 #endif
 
-/* The physical front end only makes sense where a person is at the station to pluck: the
- * auto-operator cannot excite a spoke, and a microphone pointed at the fast demo's
- * synthetic rim while the session claims synthetic runout is a story told twice. */
-#if TRUING_REAL_FRONT_END && (TRUING_SELF_PLAY || TRUING_FAST_DEMO)
-#error "TRUING_REAL_FRONT_END is an interactive-image variant: pick it or the other image, not both."
+/* The physical front end needs a person at the station to pluck, so it cannot be combined
+ * with self-play: the auto-operator has no hands. */
+#if TRUING_REAL_FRONT_END && TRUING_SELF_PLAY
+#error "TRUING_SELF_PLAY answers its own waits and cannot pluck a spoke: not with TRUING_REAL_FRONT_END."
+#endif
+
+/* Fast demo WITH the real front end is the acoustic demonstration image, and the bound below
+ * is the only reason it is coherent. Real tension from the wheel in front of you and
+ * synthetic runout from a simulated rim describe two different objects; a row vector built
+ * from both would be a wheel that does not exist. That is only contained because the tension
+ * channel is excluded from the solve by policy (SPEC 8.11), which makes the real plucks
+ * displayed evidence rather than solver input. So the image samples a few spokes to show the
+ * INMP441 -> DSP path works and does not spend acquisition on rows the solver has already
+ * decided to discard.
+ *
+ * The condition is CHECKED AT RUN TIME, not assumed: the orchestrator applies the bound only
+ * while the selected layout really is TENSION_ABSENT. If the artifact ever identifies its
+ * common mode the layout becomes FULL, tension enters the solve, the bound stops applying and
+ * every spoke is measured again. The failure direction is "it measured everything", which is
+ * never a dishonest one. */
+#ifndef TRUING_ACOUSTIC_DEMO_SPOKES
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
+#define TRUING_ACOUSTIC_DEMO_SPOKES 3
+#else
+#define TRUING_ACOUSTIC_DEMO_SPOKES 0   /* 0 = no bound: measure every spoke, as the machine must */
+#endif
+#endif
+
+#if TRUING_ACOUSTIC_DEMO_SPOKES && !(TRUING_FAST_DEMO && TRUING_REAL_FRONT_END)
+#error "TRUING_ACOUSTIC_DEMO_SPOKES is the fast-demo acoustic image only: the real machine measures every spoke."
 #endif
 
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441"
+#elif TRUING_FAST_DEMO
 #define TRUING_BUILD_MODE_STR "fastdemo"
 #elif TRUING_SELF_PLAY
 #define TRUING_BUILD_MODE_STR "selfplay"

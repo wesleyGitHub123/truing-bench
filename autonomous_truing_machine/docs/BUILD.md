@@ -173,6 +173,7 @@ matters:
 | interactive / self-play | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
 | fast demo, automatic path | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
 | fast demo, manual path | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
+| acoustic demonstration | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
 
 The manual implementations are REAL because a person turns a real wheel and reads real dial
 gauges. Having the firmware answer their waits with numbers it invented would record
@@ -193,15 +194,55 @@ bounded window (~1.2 s) of real audio and the existing DSP runs on it. No plucke
 so the operator plucks by hand at the station during the capture window — a spoke nobody
 plucked is reported as `NO_ONSET_DETECTED`, never invented. Every estimate is still `suspect`
 / `PROVISIONAL_MODE_ID`: a real front end means the samples are real, not that mode
-identification or tension accuracy is validated. It is exclusive with self-play and fast
-demo (`src/build_mode.h` errors if combined), and `GET /id` reports it as
-`"mode":"interactive+inmp441"`.
+identification or tension accuracy is validated. It is exclusive with self-play — the
+auto-operator has no hands — and `GET /id` reports it as `"mode":"interactive+inmp441"`.
+
+### The acoustic demonstration (`*_fastdemo_mic`)
+
+`s3_devkit_fastdemo_mic` / `nano_esp32_fastdemo_mic` set **both** `-DTRUING_FAST_DEMO=1` and
+`-DTRUING_REAL_FRONT_END=1`: the real microphone with the synthetic acquisition path, and a
+**bound on how many spokes are plucked** (`TRUING_ACOUSTIC_DEMO_SPOKES`, 3). You pluck a few
+spokes by hand to show that the INMP441 → DSP path works; the remaining tension rows are left
+uncollected; the runout sweep is untouched and the real solver runs on it.
+
+This is the one combination that needs an argument, because real tension from the wheel in
+front of you and synthetic runout from a simulated rim describe two different objects, and a
+row vector built from both would be a wheel that does not exist. It is contained by one fact:
+**the tension channel is excluded from the solve by policy.** The shipped artifact has
+`n_mt_identified == false` (asserted by the bring-up self-test in `src/bringup_artifact.c`),
+so `art_select_layout()` returns `TENSION_ABSENT` and admission masks every tension row out
+before the solver sees it. Rule R1 then compares the active row set against a layout mask that
+holds no tension rows at all, so **how many spokes were plucked cannot change whether the
+state is admissible.** The real plucks are displayed evidence, never solver input.
+
+That condition is *checked, not assumed*. `tension_targets_this_pass()` asks the calculation
+which layout it would select — `select_layout` is a pure query — and applies the bound only
+while the answer is `TENSION_ABSENT`. If the artifact ever identifies its common mode the
+layout becomes `FULL`, tension rows become load-bearing, the bound stops applying and every
+spoke is measured again. The failure direction is "it measured everything", which is never a
+dishonest one. `test_acoustic_demo_bound_is_refused_when_tension_is_in_the_layout` pins it.
+
+The bound is a dependency (`truing_orch_deps_t.tension_sample_limit`), **0 in every other
+image**, so the machine and the interactive builds are unchanged and still collect every
+spoke even under `TENSION_ABSENT` — those measurements are the evidence that the acquisition
+chain works, and the mode-ID research still needs them.
+
+The record says what it holds and why: provenance carries `tension_sample_limit`,
+`tension_sampled` and `tension_omitted_by_layout`, and the page prints
+
+> **Acoustic demonstration: 3 spokes sampled.** Remaining tension measurements omitted because
+> tension is not part of the active solver layout (TENSION_ABSENT), so no adjustment depends on
+> them. Runout is synthetic in this Fast Demo session.
+
+so three tension records on a 32-spoke wheel can never be read as a wheel that was measured
+and mostly failed.
 
 ```bash
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_fastdemo -t upload   # accelerated demonstration
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the physical-path image
 pio run -d %USERPROFILE%\truing_ws -e nano_esp32_mic -t upload        # the physical INMP441 front end
+pio run -d %USERPROFILE%\truing_ws -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
 ```
 
 The boot banner says which one is running, and so does `GET /id`:

@@ -266,7 +266,10 @@ static void demo_task(void *arg)
     (void)arg;
     ESP_LOGI(TAG, "== Stage 1 workflow, %s (%s; %s; REAL truing calculation on the golden "
                   "fixture artifact%s) ==",
-             TRUING_FAST_DEMO ? "FAST DEMO: a person starts the session and applies the adjustments; acquisition is "
+             (TRUING_FAST_DEMO && TRUING_REAL_FRONT_END)
+                     ? "ACOUSTIC DEMONSTRATION: a few spokes are plucked on the real microphone to show the front "
+                       "end works; runout is automatic and SYNTHETIC - this is not a physical wheel result"
+             : TRUING_FAST_DEMO ? "FAST DEMO: a person starts the session and applies the adjustments; acquisition is "
                                 "automatic and SYNTHETIC - this is not a physical wheel result"
                               : (TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
                                                   : (TRUING_REAL_FRONT_END
@@ -406,6 +409,15 @@ static void demo_task(void *arg)
     deps.telemetry = &s.sink;
     deps.clock = s.clock;
     deps.firmware_version = TRUING_FIRMWARE_VERSION;
+    /* 0 in every image but the acoustic demonstration, where it bounds the pluck pass to a few
+     * spokes. The orchestrator ignores it unless the layout in force excludes tension, so this
+     * cannot shorten a pass whose measurements the solver is going to use. */
+    deps.tension_sample_limit = (uint8_t)TRUING_ACOUSTIC_DEMO_SPOKES;
+    if (TRUING_ACOUSTIC_DEMO_SPOKES > 0) {
+        ESP_LOGW(TAG, "ACOUSTIC DEMONSTRATION: at most %d spokes will be plucked; the rest are left "
+                      "uncollected while the active layout is TENSION_ABSENT. Not a physical wheel measurement.",
+                 (int)TRUING_ACOUSTIC_DEMO_SPOKES);
+    }
     /* The interface structs are re-initialised IN PLACE when the path changes, so these
      * pointers stay valid and keep pointing at whichever implementation is wired now. */
     s.deps = deps;

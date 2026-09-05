@@ -149,16 +149,10 @@ static void two_spoke_lateral(float *lat)
  * argument rests on it: a build that automated the acquisition by ANSWERING the manual
  * implementations' waits would record runout_manual/TRUING_SOURCE_REAL for numbers no dial
  * gauge ever produced, and the session would claim to be physical. */
-static void rig_build_fastdemo(rig_t *r, const float *lateral)
+/* Re-initialise the orchestrator against whatever interfaces the rig holds now, optionally
+ * with a bound on the acoustic pass. limit 0 is the machine's setting: collect every spoke. */
+static void rig_reinit(rig_t *r, uint8_t tension_sample_limit)
 {
-    rig_build(r, lateral, 0.0f);
-    truing_runout_synthetic_init(&r->runout, &r->rsyn, r->clock, 32u);
-    truing_navigation_synthetic_init(&r->nav, &r->nsyn, r->clock, 32u, 32u, &r->machine, NULL, 0.0f, 0u);
-    for (uint8_t k = 0; k < 32u; ++k) {
-        truing_runout_synthetic_set_index(&r->rsyn, k, lateral != NULL ? lateral[k] : 0.0f, 0.0f);
-    }
-    /* Re-init so the orchestrator holds the substituted dependencies, exactly as the
-     * firmware does: the choice is made before truing_orch_init(), never after. */
     truing_orch_deps_t deps;
     memset(&deps, 0, sizeof(deps));
     deps.wheel = &r->wheel;
@@ -173,7 +167,32 @@ static void rig_build_fastdemo(rig_t *r, const float *lateral)
     deps.telemetry = &r->sink;
     deps.clock = r->clock;
     deps.firmware_version = "test";
+    deps.tension_sample_limit = tension_sample_limit;
     TEST_ASSERT_TRUE(truing_orch_init(&r->orch, &deps));
+}
+
+static void rig_build_fastdemo(rig_t *r, const float *lateral)
+{
+    rig_build(r, lateral, 0.0f);
+    truing_runout_synthetic_init(&r->runout, &r->rsyn, r->clock, 32u);
+    truing_navigation_synthetic_init(&r->nav, &r->nsyn, r->clock, 32u, 32u, &r->machine, NULL, 0.0f, 0u);
+    for (uint8_t k = 0; k < 32u; ++k) {
+        truing_runout_synthetic_set_index(&r->rsyn, k, lateral != NULL ? lateral[k] : 0.0f, 0.0f);
+    }
+    /* Re-init so the orchestrator holds the substituted dependencies, exactly as the
+     * firmware does: the choice is made before truing_orch_init(), never after. */
+    rig_reinit(r, 0u);
+}
+
+/* The acoustic demonstration image: the fast demo's synthetic acquisition, a bound on how many
+ * spokes are plucked, and the ONE condition that bound is legal under - the artifact's common
+ * mode is unidentified, so the layout is TENSION_ABSENT and no adjustment depends on a tension
+ * row. Take that condition away and the bound must stop applying; that is its own test. */
+static void rig_build_acoustic_demo(rig_t *r, const float *lateral, uint8_t limit)
+{
+    rig_build_fastdemo(r, lateral);
+    r->cctx.n_mt_identified = false;
+    rig_reinit(r, limit);
 }
 
 /* The acquisition waits stop being issued, and only those. The machine still walks the same
@@ -265,6 +284,116 @@ static void test_fastdemo_abort_still_ends_the_session(void)
     truing_orch_snapshot_t sn;
     truing_orch_snapshot(&g.orch, &sn);
     TEST_ASSERT_FALSE(sn.session_active);
+}
+
+/* ---- bounded acoustic sampling ----------------------------------------------------------
+ *
+ * A demonstration image may pluck a few spokes instead of all of them, but ONLY while the
+ * tension rows are outside the solve. Admission rule R1 requires the active row set to match
+ * the shipped layout exactly; under TENSION_ABSENT that mask holds no tension rows, so how many
+ * spokes were plucked cannot change whether the state is admissible. Under FULL it decides it,
+ * and the bound must not apply. These tests pin both directions. */
+static void test_acoustic_demo_bounds_the_pluck_pass(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 3u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    /* The runout sweep is untouched - those rows ARE the solve - so it counts the passes at 32
+     * apiece, and an unbounded run would enter the tension state exactly as often. Three spokes
+     * a pass is nowhere near that, however many passes this run takes. */
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_READ_RUNOUT]);
+    TEST_ASSERT_LESS_THAN_UINT32(g.sctx.state_entries[TRUING_STATE_READ_RUNOUT],
+                                 4u * g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    /* and the real solver still ran on them */
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.state_entries[TRUING_STATE_COMPUTE_ADJUSTMENTS]);
+    truing_cycle_provenance_t pv;
+    truing_orch_provenance(&g.orch, &pv);
+    TEST_ASSERT_EQUAL_INT(TRUING_LAYOUT_TENSION_ABSENT, pv.active_layout);
+    TEST_ASSERT_TRUE(pv.plan.valid);
+}
+
+/* THE guard. Same bound, same image, but the artifact identifies its common mode, so the
+ * layout is FULL and every tension row is load-bearing. The bound must be refused and the
+ * pass must collect every spoke, exactly as the machine does. */
+static void test_acoustic_demo_bound_is_refused_when_tension_is_in_the_layout(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 3u);
+    g.cctx.n_mt_identified = true;   /* tension enters the solve: the shortcut becomes illegal */
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    truing_cycle_provenance_t pv;
+    truing_orch_provenance(&g.orch, &pv);
+    TEST_ASSERT_EQUAL_INT(TRUING_LAYOUT_FULL, pv.active_layout);
+    TEST_ASSERT_EQUAL_UINT8(32u, pv.tension_sampled);
+    TEST_ASSERT_FALSE(pv.tension_omitted_by_layout);
+}
+
+/* The record has to say what it holds and why, or three tension measurements on a 32-spoke
+ * wheel read as a wheel that was measured and mostly failed. */
+static void test_acoustic_demo_provenance_reports_the_bound(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 3u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    truing_cycle_provenance_t pv;
+    truing_orch_provenance(&g.orch, &pv);
+    TEST_ASSERT_EQUAL_UINT8(3u, pv.tension_sample_limit);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(3u, pv.tension_sampled);
+    TEST_ASSERT_TRUE(pv.tension_omitted_by_layout);
+    TEST_ASSERT_TRUE(pv.contains_non_real_implementations);
+}
+
+/* The machine is unchanged: no bound is set anywhere but the demonstration image, and without
+ * one every spoke is collected even though this layout will discard the rows. Those
+ * measurements are the evidence that the acquisition chain works. */
+static void test_without_a_bound_every_spoke_is_measured_under_tension_absent(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 0u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    truing_cycle_provenance_t pv;
+    truing_orch_provenance(&g.orch, &pv);
+    TEST_ASSERT_EQUAL_INT(TRUING_LAYOUT_TENSION_ABSENT, pv.active_layout);
+    TEST_ASSERT_EQUAL_UINT8(0u, pv.tension_sample_limit);
+    TEST_ASSERT_EQUAL_UINT8(32u, pv.tension_sampled);
+    TEST_ASSERT_FALSE(pv.tension_omitted_by_layout);
+}
+
+/* Bounding the pluck pass must not weaken the wait contract or the abort path. */
+static void test_acoustic_demo_still_asks_for_adjustments_and_aborts(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 3u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_APPLY_ADJUSTMENT]);
+
+    rig_build_acoustic_demo(&g, lat, 3u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 50u);
+    truing_intent_t a;
+    memset(&a, 0, sizeof(a));
+    a.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &a, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, g.sctx.last_terminal);
 }
 
 void setUp(void) {}
@@ -688,6 +817,11 @@ int main(int argc, char **argv)
     RUN_TEST(test_fastdemo_provenance_declares_synthetic_acquisition);
     RUN_TEST(test_interactive_acquisition_is_operator_driven_and_declares_real);
     RUN_TEST(test_fastdemo_abort_still_ends_the_session);
+    RUN_TEST(test_acoustic_demo_bounds_the_pluck_pass);
+    RUN_TEST(test_acoustic_demo_bound_is_refused_when_tension_is_in_the_layout);
+    RUN_TEST(test_acoustic_demo_provenance_reports_the_bound);
+    RUN_TEST(test_without_a_bound_every_spoke_is_measured_under_tension_absent);
+    RUN_TEST(test_acoustic_demo_still_asks_for_adjustments_and_aborts);
     RUN_TEST(test_initialize_establishes_reference_through_navigation);
     RUN_TEST(test_start_is_refused_without_a_usable_model_or_profile);
     RUN_TEST(test_full_workflow_reaches_converged_geometric_only);

@@ -99,6 +99,7 @@ const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
   ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1, mode: 'interactive',
   acquisition: 'manual', acquisition_selectable: false,
+  real_front_end: false, acoustic_demo_spokes: 0,
 };
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; };
@@ -499,6 +500,62 @@ ok(txt('rundl').indexOf('Manual dial entry') >= 0,
 ok(txt('rundl').indexOf('synthetic navigation') < 0,
   'the manual path claims no synthetic acquisition');
 IDENT.acquisition = 'auto';
+sandbox.loadIdent();
+
+// ---- the acoustic demonstration image -------------------------------------------------------
+// mode is 'fastdemo+inmp441' here, so anything testing the image by string equality against
+// 'fastdemo' silently stops recognising it - the banner and the Start label included.
+IDENT.mode = 'fastdemo+inmp441'; IDENT.real_front_end = true; IDENT.acoustic_demo_spokes = 3;
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') < 0,
+  'the acoustic demonstration image still raises the synthetic banner');
+ok(txt('b-start') === 'Start Fast Demo', 'the acoustic demonstration image is still a Fast Demo');
+ok(txt('i-mode').indexOf('FAST DEMO + REAL MIC') >= 0,
+  'the identity line distinguishes the real microphone from a fully synthetic demo');
+ok(txt('acqnote').indexOf('pluck 3 spokes by hand') >= 0,
+  'the selector explains that you pluck a few spokes by hand');
+ok(txt('acqnote').indexOf('not in the active solver layout') >= 0,
+  'the selector gives the reason the rest are left uncollected');
+ok(txt('acqnote').indexOf('measures all 32 spokes') < 0,
+  'the bounded image does not claim it measures all 32 spokes');
+
+// ---- bounded acoustic sampling -------------------------------------------------------------
+// Three tension measurements on a 32-spoke wheel must read as a bounded demonstration, never as
+// a wheel that was measured and mostly failed. The page has to say the number AND the reason.
+const PROV_ACOUSTIC = Object.assign({}, PROV, {
+  active_layout: 'TENSION_ABSENT',
+  tension_sample_limit: 3, tension_sampled: 3, tension_omitted_by_layout: true,
+});
+sandbox.handle(PROV_ACOUSTIC);
+ok(txt('rundl').indexOf('3 of 32 spokes plucked') >= 0,
+  'the page says how many spokes were actually plucked');
+ok(txt('rundl').indexOf('Remaining tension measurements omitted') >= 0,
+  'the page says the rest were omitted, not attempted and lost');
+ok(txt('rundl').indexOf('not part of the active solver layout') >= 0,
+  'the page gives the reason: those rows are not in the solve');
+ok(txt('rundl').indexOf('TENSION_ABSENT') >= 0,
+  'the page names the layout that makes the omission legal');
+ok(txt('rundl').indexOf('Runout is synthetic in this Fast Demo session') >= 0,
+  'the page still says the runout was synthetic');
+
+// An ordinary run carries no bound, and must not grow a sampling notice out of nowhere.
+sandbox.handle(PROV);
+ok(txt('rundl').indexOf('spokes plucked') < 0,
+  'a run with no bound says nothing about bounded sampling');
+ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
+  'a run with no bound claims no omission');
+
+// A bound that is NOT taking effect (tension is in the solve) must not claim an omission.
+sandbox.handle(Object.assign({}, PROV, {
+  active_layout: 'FULL', tension_sample_limit: 3, tension_sampled: 32, tension_omitted_by_layout: false,
+}));
+ok(txt('rundl').indexOf('32 of 32 spokes plucked') >= 0,
+  'a refused bound reports the full sweep it actually did');
+ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
+  'a refused bound claims no omission');
+sandbox.handle(PROV);
+// Back to the plain Fast Demo image, so nothing below inherits the microphone.
+IDENT.mode = 'fastdemo'; IDENT.real_front_end = false; IDENT.acoustic_demo_spokes = 0;
 sandbox.loadIdent();
 
 // An operator wait still takes over the card: automation never hides something asked of you.

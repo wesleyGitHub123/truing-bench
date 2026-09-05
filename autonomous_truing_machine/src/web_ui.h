@@ -483,8 +483,12 @@ static const char TRUING_WEB_UI_HTML[] =
 /* fastDemo() is about the IMAGE; autoAuto() is about the path THIS session will take. Only
    the second one decides whether the numbers are synthetic, so it is the one that drives the
    warnings and the provenance sentences. Both come from /id, which reports firmware state. */
-"function fastDemo(){return !!ident&&ident.mode==='fastdemo';}\n"
+"function fastDemo(){return !!ident&&(''+ident.mode).indexOf('fastdemo')===0;}\n"
 "function autoAuto(){return !!ident&&ident.acquisition==='auto';}\n"
+/* The acoustic demonstration: a real microphone AND a bound on how many spokes it plucks.
+   Both are reported by /id as facts, so the page never parses the mode name to find out. */
+"function micReal(){return !!ident&&ident.real_front_end===true;}\n"
+"function acqBound(){return (!!ident&&ident.acoustic_demo_spokes)||0;}\n"
 "function renderMode(){\n"
 " var auto=autoAuto(),sel=!!ident&&ident.acquisition_selectable;\n"
 " el('demobanner').className=auto?'card demo':'card demo hide';\n"
@@ -494,11 +498,15 @@ static const char TRUING_WEB_UI_HTML[] =
 " el('b-acq-auto').className=auto?'sel':'';\n"
 " el('b-acq-manual').className=auto?'':'sel';\n"
 " el('acqnote').textContent=auto\n"
-"  ?'Positioning and runout are done by the synthetic implementations, so the machine '+\n"
-"   'measures all 32 spokes and the whole rim without stopping. Not a physical result.'\n"
+"  ?('Positioning and runout are done by the synthetic implementations, so the machine '+\n"
+"    'covers the whole rim without stopping. '+\n"
+"    (acqBound()?('You pluck '+acqBound()+' spokes by hand on the real microphone; the rest '+\n"
+"      'are left uncollected because tension is not in the active solver layout.')\n"
+"     :'It measures all 32 spokes as well.')+' Not a physical result.')\n"
 "  :'The machine stops and asks you to position the wheel and read the dial gauges, exactly '+\n"
 "   'as it would on the real machine. 64 answers per cycle.';\n"
-" el('i-mode').textContent=(fastDemo()?'FAST DEMO':(ident&&ident.mode==='selfplay'?'SELF-PLAY':'INTERACTIVE'))+\n"
+" el('i-mode').textContent=(fastDemo()?(micReal()?'FAST DEMO + REAL MIC':'FAST DEMO')\n"
+"  :(ident&&ident.mode==='selfplay'?'SELF-PLAY':(micReal()?'INTERACTIVE + REAL MIC':'INTERACTIVE')))+\n"
 "  ' / acquisition '+(auto?'AUTOMATIC (synthetic)':'MANUAL (operator)');}\n"
 /* Changing the path re-initialises the machine, so it is only offered between sessions and
    the firmware refuses it during one. The reply is rendered rather than assumed. */
@@ -826,6 +834,17 @@ static const char TRUING_WEB_UI_HTML[] =
 "   prov.wheel_position&&prov.wheel_position.operator_confirmed\n"
 "    ?'Confirmed by the operator':'Not operator-confirmed');\n"
 "  row(h,'Runout entry','Manual dial entry','');}\n"
+" if(prov.tension_sample_limit){\n"
+"  row(h,'Acoustic sampling',\n"
+"   prov.tension_sampled+' of '+(ws2.n_spokes||'?')+' spokes plucked',\n"
+"   'Bounded demonstration; limit '+prov.tension_sample_limit);\n"
+"  if(prov.tension_omitted_by_layout){\n"
+"   var ab=put(h,'div','warnbox');\n"
+"   put(ab,'b','','Acoustic demonstration: '+prov.tension_sampled+' spokes sampled. ');\n"
+"   ab.appendChild(document.createTextNode(\n"
+"    'Remaining tension measurements omitted because tension is not part of the active '+\n"
+"    'solver layout ('+prov.active_layout+'), so no adjustment depends on them. '+\n"
+"    (autoAuto()?'Runout is synthetic in this Fast Demo session.':'')));}}\n"
 " if(prov.contains_non_real_implementations){\n"
 "  var wb=put(h,'div','warnbox');\n"
 "  put(wb,'b','','Not a physical wheel result. ');\n"
