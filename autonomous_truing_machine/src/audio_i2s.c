@@ -205,7 +205,15 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     }
     i2s_std_config_t sc = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(TRUING_AUDIO_SAMPLE_RATE_HZ),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_24BIT, I2S_SLOT_MODE_MONO),
+        /* 32, not 24, and the difference is the whole sample. The INMP441 sends 24 valid bits
+         * left-justified in a 32-bit slot, and the rest of this system is built on receiving
+         * them that way: TRUING_AUDIO_SLOT_BITS is 32 and truing_audio_word_to_float() reads
+         * `word >> 8`. Asking the driver for a 24-bit DATA width instead changes how it lays
+         * samples into the DMA buffer, so `>> 8` then shifts a sample that was never
+         * left-justified and every word is noise - full-scale, varying, and superficially
+         * alive, which is the worst way for this to be wrong. Measured on the Nano: 24-bit
+         * data width gave rms 0.520 (uniform noise is 0.577); 32-bit gives a real room. */
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = BOARD_I2S_MIC_BCLK_GPIO,
