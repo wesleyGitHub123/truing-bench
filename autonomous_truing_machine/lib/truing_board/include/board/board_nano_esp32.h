@@ -17,13 +17,19 @@
 #define BOARD_PSRAM_EXPECTED_BYTES     (8u * 1024u * 1024u)
 #define BOARD_HAS_SEPARATE_DEBUG_PORT  0
 
-/* INMP441 on D5/D6/D7. */
-#define BOARD_I2S_MIC_BCLK_GPIO        8
-#define BOARD_I2S_MIC_WS_GPIO          9
-#define BOARD_I2S_MIC_DIN_GPIO         10
+/* INMP441 I2S microphone on D2/D3/D4 (GPIO 5/6/7): the wiring the standalone bring-up
+ * (workspace "INMP441 Test") validated on real hardware — 48 kHz, mono, L/R tied low.
+ * The front end was first planned on D5/D6/D7; the physical build landed on D2/D3/D4 and
+ * this profile now records that truth rather than a disagreement with it. The index
+ * sensor and pluck actuator that were reserved on D2/D3 have never been wired to
+ * anything; they are rehomed to D5/D6 below with their "reserved, not a final
+ * commitment" caveat unchanged. */
+#define BOARD_I2S_MIC_BCLK_GPIO        5
+#define BOARD_I2S_MIC_WS_GPIO          6
+#define BOARD_I2S_MIC_DIN_GPIO         7
 
-/* Wheel Navigation subsystem (SPEC §10A). Index / reference sensor on D2. */
-#define BOARD_INDEX_SENSOR_GPIO        5
+/* Wheel Navigation subsystem (SPEC §10A). Index / reference sensor on D5. */
+#define BOARD_INDEX_SENSOR_GPIO        8
 /* Wheel-drive actuator, RESERVED for the Stage 2 development motor driver
  * (expected first: TMC2209). STEP=D8, DIR=D9, EN=D10, UART TX=D11, RX=D12, DIAG=A6.
  * Not validated; not a final hardware commitment. */
@@ -35,8 +41,8 @@
 #define BOARD_WHEEL_DRIVE_UART_RX_GPIO 47
 #define BOARD_WHEEL_DRIVE_DIAG_GPIO    13
 
-/* Excitation actuator on D3. */
-#define BOARD_PLUCK_ACTUATOR_GPIO      6
+/* Excitation actuator on D6. */
+#define BOARD_PLUCK_ACTUATOR_GPIO      9
 
 /* Yellow built-in LED on D13 (GPIO48), active-high. */
 #define BOARD_HAS_PLAIN_STATUS_LED     1
