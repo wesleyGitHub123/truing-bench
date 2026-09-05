@@ -150,8 +150,11 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
         return;
     }
     d->window = w;
-    /* Everything past here is seconds of FFT on megabytes of doubles. Saying so is what stops
-     * the operator plucking again into a window that is already shut. */
+    /* The spectral analysis proper. NOT the whole of the cost: measured on the Nano, the
+     * envelope and window selection above already spent ~1.75 s, against ~1.2 s for what
+     * follows. The boundary is still worth marking - it is the last thing before the FFT - but
+     * ONSET_DETECTED is what tells the station to stop plucking, and it is the frame that
+     * matters. Nothing here re-opens the window. */
     emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_ANALYZING, spoke_index, 0u);
     /* Layers 2 + interim 3. */
     truing_dsp_event_t ev;

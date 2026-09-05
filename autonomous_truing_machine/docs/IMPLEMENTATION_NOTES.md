@@ -402,8 +402,17 @@ by the composition root exactly the way the pluck seam is:
 | phase | emitted | means |
 |---|---|---|
 | `LISTENING` | immediately before `capture()` | the window is open — pluck now |
-| `ONSET_DETECTED` | after the onset pass, before the FFT | the pluck was heard |
-| `ANALYZING` | before `truing_dsp_analyze_window` | the window is shut; seconds of arithmetic |
+| `ONSET_DETECTED` | after the onset pass | the pluck was heard; stop plucking |
+| `ANALYZING` | before `truing_dsp_analyze_window` | the spectral analysis proper |
+
+**Measured on the Nano** (`nano_esp32_fastdemo_mic`, real INMP441), per attempt:
+`LISTENING` → `ONSET_DETECTED` ≈ **1.08 s** (the capture window), `ONSET_DETECTED` →
+`ANALYZING` ≈ **1.75 s**, `ANALYZING` → result ≈ **1.2 s**. So the plan's assumption that
+window selection is cheap and the FFT is the cost is wrong by a factor of one and a half —
+the Hilbert envelope and gating before `ANALYZING` cost *more* than the transform after it.
+`ANALYZING` is therefore not "the start of the expensive part"; **`ONSET_DETECTED` is**, and it
+is also the frame that tells the operator to stop. The split is kept because two cards read
+better than one long one, but no timing conclusion should be drawn from `ANALYZING` alone.
 
 **Why an observer and not `acoustic_if.h`.** The generic interface is the orchestrator's contract
 and it stays a one-call contract. Only the application knows there is a transport to push to, so
