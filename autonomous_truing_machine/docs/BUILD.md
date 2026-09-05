@@ -136,7 +136,7 @@ the cause of a stale page. That is deliberate: the page is 32 KB off local flash
 otherwise idle link, and caching it buys nothing against the cost of ever doubting what
 the board is running.
 
-## The three images
+## The images
 
 `s3_devkit` / `nano_esp32` are **interactive**: the machine sits in READY and does nothing
 until an operator presses *Start truing* in the web UI, and every operator wait is answered
@@ -186,10 +186,22 @@ The choice is made before `truing_orch_init()`, so it cannot change mid-session,
 Demo adds no wire command — there is nothing for the interactive firmware to refuse, because
 nothing was added to ask it. See `src/build_mode.h`.
 
+`s3_devkit_mic` / `nano_esp32_mic` add `-DTRUING_REAL_FRONT_END=1`: the interactive image
+with the **physical INMP441 front end**. The microphone is opened once at boot and drained
+continuously by its own core-1 task into a PSRAM ring; each spoke measurement captures one
+bounded window (~1.2 s) of real audio and the existing DSP runs on it. No plucker is built,
+so the operator plucks by hand at the station during the capture window — a spoke nobody
+plucked is reported as `NO_ONSET_DETECTED`, never invented. Every estimate is still `suspect`
+/ `PROVISIONAL_MODE_ID`: a real front end means the samples are real, not that mode
+identification or tension accuracy is validated. It is exclusive with self-play and fast
+demo (`src/build_mode.h` errors if combined), and `GET /id` reports it as
+`"mode":"interactive+inmp441"`.
+
 ```bash
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_fastdemo -t upload   # accelerated demonstration
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the physical-path image
+pio run -d %USERPROFILE%\truing_ws -e nano_esp32_mic -t upload        # the physical INMP441 front end
 ```
 
 The boot banner says which one is running, and so does `GET /id`:

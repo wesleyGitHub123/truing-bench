@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 
 #include "artifact_store.h"
+#include "audio_i2s.h"
 #include "firmware_version.h"
 #include "net_transport.h"
 #include "truing_proto/session.h"
@@ -263,16 +264,21 @@ static void drain_telemetry(void)
 static void demo_task(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "== Stage 1 workflow, %s (%s; "
-                  "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source; REAL truing calculation on the golden "
-                  "fixture artifact; the simulated wheel responds through the same influence model) ==",
+    ESP_LOGI(TAG, "== Stage 1 workflow, %s (%s; %s; REAL truing calculation on the golden "
+                  "fixture artifact%s) ==",
              TRUING_FAST_DEMO ? "FAST DEMO: a person starts the session and applies the adjustments; acquisition is "
                                 "automatic and SYNTHETIC - this is not a physical wheel result"
                               : (TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
-                                                  : "INTERACTIVE: the session starts and the waits are answered from the web UI"),
+                                                  : (TRUING_REAL_FRONT_END
+                                                          ? "INTERACTIVE with the PHYSICAL INMP441 front end: a person positions the wheel, reads the gauges and plucks each spoke at the station"
+                                                          : "INTERACTIVE: the session starts and the waits are answered from the web UI")),
              TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
                                 "SYNTHETIC runout"
-                              : "manual navigation + manual runout");
+                              : "manual navigation + manual runout",
+             TRUING_REAL_FRONT_END ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the hand pluck "
+                                      "at the station, because no actuator is built"
+                                   : "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source",
+             TRUING_REAL_FRONT_END ? "" : "; the simulated wheel responds through the same influence model");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
@@ -280,15 +286,39 @@ static void demo_task(void *arg)
     truing_fixture_machine_profile(&s.machine);
     s.clock.now_ms = boot_clock_now;
     s.clock.ctx = NULL;
+#if TRUING_REAL_FRONT_END
+    /* Acoustic with the PHYSICAL front end: the INMP441 over I2S, opened ONCE here and drained
+     * continuously by its own core-1 task into a PSRAM ring; every measurement below captures
+     * one bounded window from that ring (SPEC 9.3, 9.4). The sizing is what the acoustic
+     * bring-up proved on target. No excitation actuator exists, so the pluck seam is NULL: the
+     * capture records whatever excitation arrives - the hand pluck at the station - and
+     * NO_ONSET_DETECTED says honestly when none did (SPEC 9.1). */
+    const truing_audio_i2s_config_t icfg = {
+        .dma_frame_num = 240u,      /* 5 ms per descriptor, multiple of 3, 960 B <= 4092 B (SPEC 9.4.1) */
+        .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
+        .pre_trigger_words = (uint32_t)(s.chain.pre_trigger_ms * 48.0f),
+        .ring_words = 48000u,
+    };
+    const char *idetail = NULL;
+    if (!truing_audio_i2s_init(&s.audio, &icfg, &idetail)) {
+        ESP_LOGE(TAG, "I2S front end init failed (%s); no session can measure a spoke",
+                 idetail != NULL ? idetail : "?");
+        vTaskDelete(NULL);
+        return;
+    }
+#else
     /* Acoustic: the real subsystem (onset, spectrum, candidates, interim selection, model) on a
      * synthetic pluck at 460 Hz with a faint noise floor; the fake actuator is "attached". */
     truing_audio_synthetic_init(&s.audio, &s.audio_ctx, 460.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
     truing_pluck_fake_init(&s.pluck, &s.pluck_ctx, true);
+#endif
+    /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h). */
+    truing_pluck_if_t *const pluck_seam = TRUING_REAL_FRONT_END ? NULL : &s.pluck;
     const size_t scratch_bytes = truing_acoustic_real_scratch_bytes(&s.chain);
     s.acoustic_scratch = heap_caps_malloc(scratch_bytes, MALLOC_CAP_SPIRAM);
     const char *adetail = NULL;
     if (s.acoustic_scratch == NULL ||
-        !truing_acoustic_real_init(&s.acoustic, &s.actx, s.clock, &s.chain, &s.tmodel, &s.audio, &s.pluck, s.acoustic_scratch,
+        !truing_acoustic_real_init(&s.acoustic, &s.actx, s.clock, &s.chain, &s.tmodel, &s.audio, pluck_seam, s.acoustic_scratch,
                                    scratch_bytes, &adetail)) {
         ESP_LOGE(TAG, "acoustic subsystem init failed (%s)", adetail != NULL ? adetail : "scratch");
         vTaskDelete(NULL);

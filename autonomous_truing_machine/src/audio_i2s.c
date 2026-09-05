@@ -261,7 +261,9 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     self->capture = i2s_capture;
     self->close = i2s_close;
     self->ctx = c;
-    ESP_LOGI(TAG, "I2S RX enabled: 48 kHz, 24-in-32 mono, dma %u x %u frames (%u B), drain on core %d prio %d, ring %u words in PSRAM",
+    ESP_LOGI(TAG, "I2S RX enabled: 48 kHz, 24-in-32 mono, mic on GPIO bclk=%d ws=%d din=%d "
+                  "(every capture will be zero if this is not the wiring), dma %u x %u frames (%u B), drain on core %d prio %d, ring %u words in PSRAM",
+             BOARD_I2S_MIC_BCLK_GPIO, BOARD_I2S_MIC_WS_GPIO, BOARD_I2S_MIC_DIN_GPIO,
              (unsigned)cfg->dma_desc_num, (unsigned)cfg->dma_frame_num, (unsigned)(cfg->dma_frame_num * 4u), DRAIN_TASK_CORE,
              DRAIN_TASK_PRIORITY, (unsigned)c->ring_cap);
     return true;
