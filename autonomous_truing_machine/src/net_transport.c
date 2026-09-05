@@ -39,6 +39,18 @@ static const char *TAG = "net";
 #define OUTBOUND_SLOTS      12
 #define INBOUND_SLOTS        4
 #define MAX_WS_CLIENTS       4
+/* Every socket the server may hold open, websocket or not: the page, /id, the websocket and
+ * whatever is still in keep-alive. httpd_get_client_list() enumerates ALL of them and fails
+ * outright - not partially - if the caller's array cannot hold every one, so this is the size
+ * that array must be. Sizing it by MAX_WS_CLIENTS instead made the enumeration fail as soon as
+ * a fifth socket existed, which the server is configured to allow, and a failed enumeration
+ * reads as "no clients": every telemetry frame and every command reply was then dropped by
+ * sink_send() while the page sat there connected. */
+/* +3, not +1: a client is not one socket. A browser holding the websocket also fetches the
+ * page and /id, and those linger in keep-alive, so a single tab can hold three. With only one
+ * spare slot the server evicted a live websocket every time anything made an HTTP request,
+ * which is a page that goes dead for no visible reason. */
+#define MAX_OPEN_SOCKETS    (MAX_WS_CLIENTS + 3)
 #define SENDER_STACK      4096
 #define AP_CHANNEL           1
 
@@ -77,9 +89,15 @@ static size_t ws_clients(int *fds, size_t cap)
     if (s_server == NULL) {
         return 0u;
     }
-    int all[MAX_WS_CLIENTS];
-    size_t n = MAX_WS_CLIENTS;
+    int all[MAX_OPEN_SOCKETS];
+    size_t n = MAX_OPEN_SOCKETS;
     if (httpd_get_client_list(s_server, &n, all) != ESP_OK) {
+        /* Not silently: reporting zero clients here disables the whole outbound path, and
+         * that is indistinguishable from nobody being connected. */
+        static uint32_t s_enum_fail;
+        if ((s_enum_fail++ % 64u) == 0u) {
+            ESP_LOGW(TAG, "client enumeration failed (%" PRIu32 " times); telemetry is being dropped", s_enum_fail);
+        }
         return 0u;
     }
     size_t found = 0u;
@@ -486,7 +504,7 @@ bool truing_net_start(void)
     }
 
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
-    hc.max_open_sockets = MAX_WS_CLIENTS + 1;
+    hc.max_open_sockets = MAX_OPEN_SOCKETS;   /* ws_clients() sizes its array by the same number */
     hc.lru_purge_enable = true;
     /* Core 1 is the audio core (SPEC §4.5); the web server belongs with the control
      * work on core 0 so it cannot preempt a capture. */
