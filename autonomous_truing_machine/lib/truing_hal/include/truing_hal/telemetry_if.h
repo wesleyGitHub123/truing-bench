@@ -32,6 +32,7 @@ typedef enum {
     TRUING_EVT_TERMINAL_RESULT,
     TRUING_EVT_NAVIGATION,        /* wheel positioning request / outcome (SPEC §10A) */
     TRUING_EVT_LOG,
+    TRUING_EVT_ACOUSTIC_PHASE,    /* lifecycle INSIDE one acoustic call (SPEC §9.1) */
     TRUING_EVT__COUNT
 } truing_event_kind_t;
 
@@ -39,6 +40,31 @@ typedef enum {
     TRUING_EVT_CHANNEL_TENSION = 0,
     TRUING_EVT_CHANNEL_RUNOUT,
 } truing_event_channel_t;
+
+/* One acoustic measurement is a single call by contract (SPEC §9.1), but from the station it is
+ * two very different things back to back: a window in which a person must pluck, and seconds of
+ * arithmetic during which they must not. Nothing outside the subsystem could tell those apart,
+ * so an operator was shown one card for both and had to guess. These say which is happening.
+ *
+ * Purely observational, best-effort like all telemetry (SPEC §12.2): dropping every one of them
+ * changes no measurement and no timing. The capture window is opened and closed by the firmware
+ * on its own clock; a browser that never hears about it still gets the same result. */
+typedef enum {
+    TRUING_ACOUSTIC_PHASE_LISTENING = 0,   /* the capture window is OPEN: pluck now */
+    TRUING_ACOUSTIC_PHASE_ONSET_DETECTED,  /* an excitation was found in the capture */
+    TRUING_ACOUSTIC_PHASE_ANALYZING,       /* the window is closed; the FFT is running */
+    TRUING_ACOUSTIC_PHASE__COUNT
+} truing_acoustic_phase_t;
+
+/* Where the excitation comes from, as a fact reported by the firmware rather than a guess made
+ * by the page. The actuator case has no implementation yet; carrying it now is what lets one
+ * arrive as a pluck_if implementation plus one wiring line, with no wire or UI change. */
+typedef enum {
+    TRUING_EXCITATION_NONE = 0,   /* no actuator, no station: replayed or bring-up audio */
+    TRUING_EXCITATION_HAND,       /* a person plucks at the station */
+    TRUING_EXCITATION_ACTUATOR,   /* an attached actuator was commanded */
+    TRUING_EXCITATION__COUNT
+} truing_excitation_t;
 
 #define TRUING_EVT_TEXT_MAX 40u
 
@@ -74,6 +100,14 @@ typedef struct {
             uint8_t outcome;         /* truing_nav_outcome_t */
             float   rotation_rad;    /* believed wheel rotation after the operation, or NaN */
         } navigation;
+        struct {
+            uint8_t  phase;            /* truing_acoustic_phase_t */
+            uint8_t  spoke_index;
+            uint8_t  excitation;       /* truing_excitation_t */
+            bool     pluck_commanded;  /* an actuator was fired for this attempt */
+            uint32_t window_ms;        /* LISTENING: how long the window stays open */
+            uint32_t attempt;          /* 1-based, counting consecutive calls for this spoke */
+        } acoustic;
         char text[TRUING_EVT_TEXT_MAX];
     } u;
 } truing_telemetry_event_t;
@@ -107,6 +141,8 @@ bool truing_telemetry_ring_pop(truing_telemetry_ring_ctx_t *ctx, truing_telemetr
 uint16_t truing_telemetry_ring_count(const truing_telemetry_ring_ctx_t *ctx);
 
 const char *truing_event_kind_str(truing_event_kind_t k);
+const char *truing_acoustic_phase_str(truing_acoustic_phase_t p);
+const char *truing_excitation_str(truing_excitation_t e);
 
 #ifdef __cplusplus
 }

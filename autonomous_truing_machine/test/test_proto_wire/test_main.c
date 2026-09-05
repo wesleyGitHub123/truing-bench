@@ -303,6 +303,53 @@ static void test_encode_navigation_event_renders_unvouched_rotation_as_null(void
     TEST_ASSERT_EQUAL_INT(TRUING_JSON_NULL, truing_json_get(&d, "rotation_rad", &v));
 }
 
+/* The acoustic lifecycle on the wire. A page reading these has to be able to tell "pluck now"
+ * from "stop plucking, I am thinking", and to know which spoke and which attempt it is looking
+ * at, from the frame alone. */
+static void test_encode_acoustic_phase_event(void)
+{
+    truing_telemetry_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = TRUING_EVT_ACOUSTIC_PHASE;
+    ev.timestamp_ms = 1234u;
+    ev.cycle_index = 2u;
+    ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_LISTENING;
+    ev.u.acoustic.spoke_index = 7u;
+    ev.u.acoustic.excitation = (uint8_t)TRUING_EXCITATION_HAND;
+    ev.u.acoustic.pluck_commanded = false;
+    ev.u.acoustic.window_ms = 1000u;
+    ev.u.acoustic.attempt = 2u;
+
+    truing_json_doc_t d;
+    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
+    assert_str_field(&d, "t", "event");
+    assert_str_field(&d, "kind", "ACOUSTIC_PHASE");
+    assert_str_field(&d, "phase", "LISTENING");
+    assert_str_field(&d, "excitation", "HAND");
+    TEST_ASSERT_EQUAL_UINT32(7u, (uint32_t)num_field(&d, "spoke_index"));
+    TEST_ASSERT_EQUAL_UINT32(1000u, (uint32_t)num_field(&d, "window_ms"));
+    TEST_ASSERT_EQUAL_UINT32(2u, (uint32_t)num_field(&d, "attempt"));
+    truing_json_value_t v;
+    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "pluck_commanded", &v));
+    TEST_ASSERT_FALSE(v.boolean);
+
+    /* An actuated build says so on the same frame, which is why the page needs no build flag. */
+    ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ANALYZING;
+    ev.u.acoustic.excitation = (uint8_t)TRUING_EXCITATION_ACTUATOR;
+    ev.u.acoustic.pluck_commanded = true;
+    ev.u.acoustic.window_ms = 0u;
+    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
+    assert_str_field(&d, "phase", "ANALYZING");
+    assert_str_field(&d, "excitation", "ACTUATOR");
+    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "pluck_commanded", &v));
+    TEST_ASSERT_TRUE(v.boolean);
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)num_field(&d, "window_ms"));
+
+    ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ONSET_DETECTED;
+    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
+    assert_str_field(&d, "phase", "ONSET_DETECTED");
+}
+
 static void test_encode_log_event_bounds_untermined_text(void)
 {
     /* The event's text field is a fixed array with no guaranteed NUL. */
@@ -619,6 +666,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_encode_measurement_events_name_their_channel);
     RUN_TEST(test_encode_wait_prompt_names_feature_and_station);
     RUN_TEST(test_encode_navigation_event_renders_unvouched_rotation_as_null);
+    RUN_TEST(test_encode_acoustic_phase_event);
     RUN_TEST(test_encode_log_event_bounds_untermined_text);
     RUN_TEST(test_encode_event_drops_rather_than_truncates);
     RUN_TEST(test_encode_state_snapshot);

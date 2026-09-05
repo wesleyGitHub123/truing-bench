@@ -168,6 +168,14 @@ static const char TRUING_WEB_UI_HTML[] =
 ".prog{height:6px;border-radius:3px;background:#0d0f13;overflow:hidden;margin:11px 0 5px}\n"
 ".prog i{display:block;height:100%;border-radius:3px;background:var(--run);\n"
 " transition:width .35s ease}\n"
+/* The listening window drains right to left: the bar is time you have LEFT to pluck, not work
+   already done, so it must not be confused with the run-progress bar above. */
+".lwin{height:10px;border-radius:5px;background:#0d0f13;overflow:hidden;margin:12px 0 6px}\n"
+".lwin i{display:block;height:100%;border-radius:5px;background:var(--warn);\n"
+" transition:width .1s linear}\n"
+".pluck{font:650 19px/1.25 inherit;color:var(--warn);letter-spacing:.01em;margin:2px 0 0}\n"
+".pluck.on{color:var(--ok)}\n"
+".att{font-size:12px;color:var(--warn);margin-top:7px;letter-spacing:.02em}\n"
 ".pcount{display:flex;align-items:baseline;gap:9px;margin:9px 0 0}\n"
 ".pcount b{font:650 30px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;\n"
 " letter-spacing:-.02em}\n"
@@ -315,6 +323,9 @@ static const char TRUING_WEB_UI_HTML[] =
 "var ws=null,snap=null,prov=null,ident=null,seq=0,pending=null,curState=null;\n"
 "var lastRun=null,termPending=null;\n"
 "var nSpokes=0,lastIdx=null,lastMeas=null,busySince=0,tick=null,flash=null,tab='op';\n"
+/* The live acoustic phase, or null when the machine is not inside a measurement. Set only from
+   firmware frames: the browser never decides when the capture window opens or closes. */
+"var phase=null;\n"
 /* Progress through the automated acquisition, counted from the machine's own measurement
    events rather than from a timer: nMeas/nRim only ever move because a result arrived. */
 "var nMeas=0,nRim=0,lastRim=null;\n"
@@ -601,6 +612,8 @@ static const char TRUING_WEB_UI_HTML[] =
 " if(k==='STATE_TRANSITION'){dbg(f.from+' -> '+f.to,'',f.ts_ms);\n"
 "  if(f.to!==curState)busySince=Date.now();\n"
 "  curState=f.to;\n"
+/*  Leaving the acoustic state ends any window that was open, whatever frames went missing. */
+"  if(f.to!=='MEASURE_SPOKE_TENSION')phase=null;\n"
 "  if(f.from==='WAIT_FOR_OPERATOR'&&snap)snap.active_wait=null;\n"
 "  if(f.to==='MEASURE_SPOKE_TENSION')\n"
 "   act('measuring spoke '+(lastIdx===null?'':lastIdx)+'...','t-nav',f.ts_ms);\n"
@@ -613,8 +626,24 @@ static const char TRUING_WEB_UI_HTML[] =
 "  dbg('wait #'+f.wait.wait_id+' '+f.wait.kind+' index '+f.wait.target_index,'t-warn',f.ts_ms);\n"
 "  lastIdx=f.wait.target_index;act(waitLine(f.wait),'t-warn',f.ts_ms);\n"
 "  send({cmd:'GET_CURRENT_STATE'});return;}\n"
+/* The lifecycle inside one acoustic call. The firmware is the only thing that knows when the
+   capture window is open, so the cue is driven entirely by these frames and never by a timer
+   the browser started. Losing them costs the cue and nothing else: render() falls back to the
+   ordinary busy card, and the measurement is unaffected either way. */
+" if(k==='ACOUSTIC_PHASE'){\n"
+"  phase={p:f.phase,idx:f.spoke_index,exc:f.excitation,cmd:f.pluck_commanded,\n"
+"   win:f.window_ms||0,att:f.attempt||1,at:Date.now()};\n"
+"  if(f.phase==='LISTENING'){lastIdx=f.spoke_index;\n"
+"   act((f.excitation==='ACTUATOR'?'plucking spoke ':'PLUCK SPOKE ')+f.spoke_index+\n"
+"    (f.attempt>1?' - attempt '+f.attempt:''),'t-warn',f.ts_ms);}\n"
+"  else if(f.phase==='ONSET_DETECTED')act('pluck detected on spoke '+f.spoke_index,'t-good',f.ts_ms);\n"
+/*  The analysis clock starts when the analysis does, not when the state was entered: the
+    seconds shown have to be the seconds the operator is actually waiting through. */
+"  else if(f.phase==='ANALYZING')busySince=Date.now();\n"
+"  dbg('acoustic '+f.phase+' spoke '+f.spoke_index+' attempt '+f.attempt,'t-nav',f.ts_ms);\n"
+"  render();return;}\n"
 " if(k==='MEASUREMENT_RESULT'){\n"
-"  if(f.channel==='TENSION'){lastMeas=f;\n"
+"  if(f.channel==='TENSION'){lastMeas=f;phase=null;\n"
 "   if(f.index+1>nMeas)nMeas=f.index+1;\n"
 "   act('spoke '+f.index+' measured: '+f.selected_frequency_hz+' Hz, '+f.tension_n+' N'+\n"
 "    (f.status==='valid'?'':' - '+f.status),\n"
@@ -642,9 +671,15 @@ static const char TRUING_WEB_UI_HTML[] =
 " return 'position spoke '+w.target_index+' at the '+w.station+' station';}\n"
 
 "function startTick(){if(tick)return;\n"
-" tick=setInterval(function(){var e=el('elapsed');\n"
-"  if(!e){clearInterval(tick);tick=null;return;}\n"
-"  e.textContent=((Date.now()-busySince)/1000).toFixed(1)+' s elapsed';},100);}\n"
+" tick=setInterval(function(){var e=el('elapsed'),b=el('lbar'),r=el('lrem');\n"
+"  if(!e&&!b){clearInterval(tick);tick=null;return;}\n"
+"  if(e)e.textContent=((Date.now()-busySince)/1000).toFixed(1)+' s elapsed';\n"
+/*  The bar drains: it is time LEFT to pluck. Anchored to the frame's arrival, so a late frame
+    shows a correspondingly shorter window rather than a full one that lies. */
+"  if(b&&phase&&phase.win){var gone=Date.now()-phase.at;\n"
+"   b.style.width=Math.max(0,100-100*gone/phase.win).toFixed(1)+'%';\n"
+"   if(r)r.textContent=Math.max(0,(phase.win-gone)/1000).toFixed(1)+' s left';}\n"
+"  },100);}\n"
 "function stopTick(){if(tick){clearInterval(tick);tick=null;}}\n"
 
 /* ---- operator view --------------------------------------------------------------------- */
@@ -695,6 +730,31 @@ static const char TRUING_WEB_UI_HTML[] =
 "    w.expected_intent==='CONFIRM_ADJUSTMENT_DONE'?'Adjustment applied':'Positioned');\n"
 "   cb.onclick=function(){submit(w.expected_intent,w.wait_id);};a.appendChild(cb);}\n"
 "  return;}\n"
+
+/* The acoustic phases, when the firmware has told us one. This replaces the generic measuring
+   card only while a phase is live; without these frames everything below is exactly as it was,
+   which is what makes the cue a bonus rather than a dependency. */
+" if(phase&&s&&s.session_active&&curState==='MEASURE_SPOKE_TENSION'){\n"
+"  var act1=phase.exc==='ACTUATOR';stopTick();\n"
+"  if(phase.p==='LISTENING'){c.className='card wait';\n"
+"   put(p,'p','head w',act1?'Plucking spoke '+phase.idx:'Pluck spoke '+phase.idx+' now');\n"
+"   put(p,'p','sub',act1?'The actuator was commanded; the machine is listening.'\n"
+"    :'The microphone is listening. One firm pluck, then keep still.');\n"
+"   var lb=put(p,'div','lwin');lb.id='lwinbox';put(lb,'i').id='lbar';\n"
+"   var rr=put(p,'div','el','');rr.id='lrem';\n"
+"   if(phase.att>1)put(p,'div','att','Attempt '+phase.att+' - the last one was not heard');\n"
+"   put(p,'div','enum','ACOUSTIC LISTENING');startTick();return;}\n"
+"  if(phase.p==='ONSET_DETECTED'){c.className='card good';\n"
+"   put(p,'p','head g','Pluck detected');\n"
+"   put(p,'p','sub','Spoke '+phase.idx+' was heard. Working out the frequency now.');\n"
+"   put(p,'div','pluck on','OK - stop plucking');\n"
+"   put(p,'div','enum','ACOUSTIC ONSET_DETECTED');return;}\n"
+"  if(phase.p==='ANALYZING'){c.className='card busy';\n"
+"   put(p,'p','head b','Analysing spoke '+phase.idx);\n"
+"   put(p,'p','sub','The window is closed. Do not pluck again until asked.');\n"
+"   put(put(p,'div','shim'),'i');\n"
+"   var e2=put(p,'div','el','0.0 s elapsed');e2.id='elapsed';\n"
+"   put(p,'div','enum','ACOUSTIC ANALYZING');startTick();return;}}\n"
 
 " var b3=BUSY[curState];\n"
 " if(b3&&s&&s.session_active){c.className='card busy';\n"

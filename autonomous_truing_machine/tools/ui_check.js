@@ -578,7 +578,79 @@ sent = [];
 byId['b-abort'].onclick();
 ok(sent.length === 1 && sent[0].cmd === 'ABORT', 'Abort mid-acquisition sends ABORT', JSON.stringify(sent[0]));
 
+// ---- the acoustic measurement lifecycle -----------------------------------------------------
+// One acoustic call is a window the operator must pluck into and then seconds of arithmetic they
+// must not. The page used to show one card for both, so the only way to learn when to pluck was
+// to guess. These pin that the two now look different, and that losing the frames costs the cue
+// and nothing else.
+IDENT.mode = 'interactive+inmp441'; IDENT.acquisition = 'manual';
+IDENT.acquisition_selectable = false; IDENT.real_front_end = true; IDENT.acoustic_demo_spokes = 0;
+sandbox.loadIdent();
+const PH = (x) => Object.assign({
+  t: 'event', kind: 'ACOUSTIC_PHASE', ts_ms: 5000, cycle_index: 1, phase: 'LISTENING',
+  spoke_index: 7, excitation: 'HAND', pluck_commanded: false, window_ms: 1000, attempt: 1,
+}, x);
+
+sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
+ok(txt('statusbody').indexOf('Capturing and analysing') >= 0,
+  'with no phase frame the ordinary measuring card is what shows');
+
+sandbox.handle(PH({}));
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0,
+  'LISTENING tells the operator to pluck, and which spoke');
+ok(byId['status'].className.indexOf('wait') >= 0,
+  'the listening card is styled as something asked of you, not as the machine working');
+ok(txt('statusbody').indexOf('ACOUSTIC LISTENING') >= 0, 'the card names the phase it is in');
+ok(txt('statusbody').indexOf('Attempt') < 0, 'a first attempt is not labelled as a retry');
+
+// The retry the orchestrator does silently: same state, no transition, so this frame is the
+// only thing that can tell the operator to pluck again.
+sandbox.handle(PH({ ts_ms: 6600, attempt: 2 }));
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a retry re-opens the pluck cue');
+ok(txt('statusbody').indexOf('Attempt 2') >= 0,
+  'the retry says which attempt it is - nothing else reports this');
+ok(txt('statusbody').indexOf('not heard') >= 0, 'and says why there is another attempt');
+
+sandbox.handle(PH({ ts_ms: 7700, phase: 'ONSET_DETECTED', window_ms: 0 }));
+ok(txt('statusbody').indexOf('Pluck detected') >= 0, 'ONSET_DETECTED confirms the pluck landed');
+ok(txt('statusbody').indexOf('stop plucking') >= 0, 'and says to stop');
+ok(byId['status'].className.indexOf('good') >= 0, 'the confirmation reads as success');
+ok(txt('statusbody').indexOf('ACOUSTIC ONSET_DETECTED') >= 0
+   && txt('statusbody').indexOf('ACOUSTIC LISTENING') < 0,
+  'the listening card is replaced once the window has closed, not stacked under it');
+
+sandbox.handle(PH({ ts_ms: 7750, phase: 'ANALYZING', window_ms: 0 }));
+ok(txt('statusbody').indexOf('Analysing spoke 7') >= 0, 'ANALYZING names the work being done');
+ok(txt('statusbody').indexOf('Do not pluck again') >= 0,
+  'and tells the operator the window is shut');
+ok(txt('statusbody').indexOf('elapsed') >= 0, 'the analysis shows honest elapsed time');
+
+// A result ends the lifecycle: the cue must not linger over the next thing.
+sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: 7, ts_ms: 9900,
+  status: 'suspect', reason: 'PROVISIONAL_MODE_ID', tension_n: 1000, selected_frequency_hz: 460 });
+ok(txt('statusbody').indexOf('Pluck spoke') < 0, 'a result clears the pluck cue');
+
+// So does leaving the state, however many frames went missing on the way.
+sandbox.handle(PH({ ts_ms: 10000 }));
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a fresh window re-arms the cue');
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 10100,
+  from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
+sandbox.handle(S({ current_state: 'POSITION', session_active: true, active_wait: null }));
+ok(txt('statusbody').indexOf('Pluck spoke') < 0,
+  'leaving the acoustic state ends the window even if its closing frames were dropped');
+
+// An actuated build says so on the frame, so the page never has to guess from a build flag.
+sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
+sandbox.handle(PH({ ts_ms: 11000, excitation: 'ACTUATOR', pluck_commanded: true }));
+ok(txt('statusbody').indexOf('Plucking spoke 7') >= 0,
+  'an actuator build says the machine is plucking, not the operator');
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0,
+  'and does not ask a person to do what the actuator just did');
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 11500,
+  from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
+
 IDENT.mode = 'interactive'; IDENT.acquisition = 'manual'; IDENT.acquisition_selectable = false;
+IDENT.real_front_end = false;
 sandbox.loadIdent();
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');

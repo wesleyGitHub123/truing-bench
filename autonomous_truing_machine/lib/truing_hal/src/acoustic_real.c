@@ -11,6 +11,40 @@ static size_t align8(size_t v)
     return (v + 7u) & ~(size_t)7u;
 }
 
+/* One acoustic call is two things to the person at the station - a window to pluck into and then
+ * seconds of arithmetic - and until now it looked like one. These say which is running. Dropping
+ * every one of them changes nothing: the window opens and closes on the firmware's clock. */
+static void emit_phase(truing_acoustic_real_ctx_t *c, uint8_t cycle_index, truing_acoustic_phase_t phase,
+                       uint8_t spoke_index, uint32_t window_ms)
+{
+    if (c->observer == NULL) {
+        return;
+    }
+    truing_telemetry_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = TRUING_EVT_ACOUSTIC_PHASE;
+    ev.timestamp_ms = truing_clock_now_ms(&c->clock);
+    ev.cycle_index = cycle_index;
+    ev.u.acoustic.phase = (uint8_t)phase;
+    ev.u.acoustic.spoke_index = spoke_index;
+    ev.u.acoustic.pluck_commanded = c->diag.pluck_commanded;
+    /* Reported from what is actually wired, not from a build flag: an attached actuator that
+     * answers available() is the ACTUATOR case, and its absence means a hand at the station. */
+    ev.u.acoustic.excitation = (uint8_t)(c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck)
+                                             ? TRUING_EXCITATION_ACTUATOR
+                                             : TRUING_EXCITATION_HAND);
+    ev.u.acoustic.window_ms = window_ms;
+    ev.u.acoustic.attempt = c->attempt;
+    c->observer(c->observer_ctx, &ev);
+}
+
+/* The window the operator actually has: the pre-trigger is already in the ring when the call
+ * starts, so only capture_ms is time they can still pluck into. */
+static uint32_t listen_window_ms(const truing_chain_profile_t *chain)
+{
+    return (uint32_t)(chain->capture_ms + 0.5f);
+}
+
 /* The DSP working set is megabytes of double-precision arrays streamed out of PSRAM, and its
  * cost depends on where that block starts: measured on the DevKitC-1, moving the base by 20
  * bytes off a cache-line boundary costs 30% of the per-pluck time (Hilbert 2,078 -> 3,110 ms),
@@ -77,7 +111,7 @@ static void fill_rejected(truing_tension_estimate_t *out, truing_reason_t reason
 }
 
 static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, uint32_t n_words, uint8_t cycle_index,
-                    truing_tension_estimate_t *out)
+                    uint8_t spoke_index, truing_tension_estimate_t *out)
 {
     const uint32_t now = truing_clock_now_ms(&c->clock);
     const truing_source_impl_t src = self->source_impl;
@@ -98,6 +132,10 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     d->onsets = on.n_onsets;
     d->onset_sample = on.onset_sample[0];
     d->onset_threshold = on.threshold;
+    /* The honest moment the pluck is known to have landed. It is only knowable here, at the end
+     * of the window: onset detection runs over the finished capture, so the station learns its
+     * pluck was heard AFTER the window closed, never during it. */
+    emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_ONSET_DETECTED, spoke_index, 0u);
     if (c->cancel_requested) {
         c->cancel_requested = false;
         truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, src);
@@ -112,6 +150,9 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
         return;
     }
     d->window = w;
+    /* Everything past here is seconds of FFT on megabytes of doubles. Saying so is what stops
+     * the operator plucking again into a window that is already shut. */
+    emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_ANALYZING, spoke_index, 0u);
     /* Layers 2 + interim 3. */
     truing_dsp_event_t ev;
     if (!truing_dsp_analyze_window(&c->dsp, c->samples, &w, &c->params, &ev)) {
@@ -193,7 +234,6 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
 static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
                          uint8_t cycle_index, truing_tension_estimate_t *out)
 {
-    (void)spoke_id;
     (void)wheel_geometry;   /* a damping ritual targeting a neighbour would resolve it here (SPEC 9.1); none is implemented */
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
     if (out == NULL) {
@@ -204,6 +244,17 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
         return;
     }
     c->calls++;
+    /* Consecutive calls for the same spoke in the same cycle are the orchestrator's retries
+     * (SPEC §7.4), so this is the attempt number the station cares about. Any other spoke, or a
+     * new cycle, starts again at one. */
+    if (c->attempt_valid && c->attempt_spoke == spoke_id && c->attempt_cycle == cycle_index) {
+        c->attempt++;
+    } else {
+        c->attempt = 1u;
+        c->attempt_spoke = spoke_id;
+        c->attempt_cycle = cycle_index;
+        c->attempt_valid = true;
+    }
     memset(&c->diag, 0, sizeof(c->diag));
     c->diag.f1_hz = NAN;
     c->diag.f2_hz = NAN;
@@ -225,6 +276,10 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
     if (c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck) && c->chain->excitation_pulse_ms > 0.0f) {
         c->diag.pluck_commanded = c->pluck->fire(c->pluck, c->chain->excitation_pulse_ms);
     }
+    /* Last thing before the window opens, so the cue reaches the station while it is still open
+     * rather than describing something already over. Emitted AFTER any actuator was commanded,
+     * so pluck_commanded on this frame is the truth for this attempt. */
+    emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_LISTENING, spoke_id, listen_window_ms(c->chain));
     const uint32_t t0 = truing_clock_now_ms(&c->clock);
     uint32_t got = 0u;
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
@@ -247,8 +302,18 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
         return;
     }
     const uint32_t t1 = truing_clock_now_ms(&c->clock);
-    analyze(self, c, got, cycle_index, out);
+    analyze(self, c, got, cycle_index, spoke_id, out);
     c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
+}
+
+void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx)
+{
+    if (self == NULL || self->ctx == NULL) {
+        return;
+    }
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    c->observer = fn;
+    c->observer_ctx = observer_ctx;
 }
 
 static void real_cancel(truing_acoustic_if_t *self)
@@ -285,7 +350,8 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
     c->diag.n_captured = n;
     c->diag.capture_result = TRUING_AUDIO_OK;
     const uint32_t t1 = truing_clock_now_ms(&c->clock);
-    analyze(self, c, n, cycle_index, out);
+    /* No spoke and no window: this path replays words that were captured elsewhere. */
+    analyze(self, c, n, cycle_index, 0u, out);
     c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
 }
 

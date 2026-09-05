@@ -382,6 +382,56 @@ nothing.
 **Credentials are derived from the board's MAC** and logged at boot. A checked-in
 passphrase would be a secret published to everyone who can read the source.
 
+## The acoustic measurement lifecycle, and why it is telemetry rather than a wait
+
+One call into the acoustic subsystem is one estimate out (SPEC §9.1), and that contract is
+unchanged. But from the station that single call is two very different things back to back: a
+**~1 s window the operator must pluck into**, then **~2–3 s of FFT they must not**. Nothing
+outside the subsystem could tell those apart, so the page showed one *Measuring* card for both
+and the only way to learn when to pluck was to guess. Worse, the orchestrator's bounded retry
+(SPEC §7.4) re-opens a fresh window **without changing state**, so a failed attempt emitted no
+`STATE_TRANSITION` and the operator was never told to try again.
+
+That is an observability gap, not a wording problem. Mid-measurement the demo task is inside
+`real_measure` for the whole four seconds, so even `GET_CURRENT_STATE` cannot be answered —
+commands are serviced between orchestrator steps, and the measurement *is* a step.
+
+`acoustic_real` therefore emits three best-effort events through an **optional observer**, wired
+by the composition root exactly the way the pluck seam is:
+
+| phase | emitted | means |
+|---|---|---|
+| `LISTENING` | immediately before `capture()` | the window is open — pluck now |
+| `ONSET_DETECTED` | after the onset pass, before the FFT | the pluck was heard |
+| `ANALYZING` | before `truing_dsp_analyze_window` | the window is shut; seconds of arithmetic |
+
+**Why an observer and not `acoustic_if.h`.** The generic interface is the orchestrator's contract
+and it stays a one-call contract. Only the application knows there is a transport to push to, so
+only the application wires this.
+
+**Why the net sink and not the telemetry ring.** The ring is drained *between* orchestrator
+steps. A `LISTENING` event posted to it would arrive after the window it announces had already
+closed — it would tell the operator to pluck into a window that ended four seconds ago, which is
+worse than silence. The observer enqueues straight onto the transport's zero-tick queue instead.
+
+**What it does not do.** The window is fixed-length and cannot end early on a pluck: onset
+detection runs over the finished capture, so `ONSET_DETECTED` necessarily arrives at window
+*end*, not when the string was struck. Early exit would be a DSP redesign. And every one of these
+frames is droppable by the §12.2 contract — `test_the_estimate_is_identical_with_and_without_an_observer`
+pins that a build with no observer measures identically, and the page falls back to the ordinary
+measuring card when frames go missing. Capture timing never depends on the browser.
+
+**Attempt numbers come from the subsystem, not the orchestrator.** Consecutive calls for the same
+spoke in the same cycle *are* the retries, so `acoustic_real` counts them and the station can say
+"attempt 2" without the orchestrator having to publish its own retry bookkeeping.
+
+**The future actuator is already in the payload.** `excitation` is reported as `HAND` or
+`ACTUATOR` from what is actually wired — an attached `pluck_if` that answers `available()` — and
+`pluck_commanded` says whether it fired. Today the page renders "Pluck spoke 7 now"; an actuated
+build renders "Plucking spoke 7" off the same frames, with no wire or UI change. That integration
+is a new `pluck_if` implementation plus one wiring line. It also buys a diagnostic nothing else
+gives: "commanded, and nothing vibrated" is distinguishable from "no excitation arrived".
+
 ### SPEC 9.4 capture under WiFi load — what was actually tested
 
 Deferred from 1f, which had no WiFi stack to load the capture with. Measured on the

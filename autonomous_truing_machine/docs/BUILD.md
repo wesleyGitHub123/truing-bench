@@ -192,7 +192,16 @@ with the **physical INMP441 front end**. The microphone is opened once at boot a
 continuously by its own core-1 task into a PSRAM ring; each spoke measurement captures one
 bounded window (~1.2 s) of real audio and the existing DSP runs on it. No plucker is built,
 so the operator plucks by hand at the station during the capture window — a spoke nobody
-plucked is reported as `NO_ONSET_DETECTED`, never invented. Every estimate is still `suspect`
+plucked is reported as `NO_ONSET_DETECTED`, never invented.
+
+The page tells you **when** to pluck. A measurement is one call by contract, but the station
+sees it as three phases, driven by firmware events and never by a browser timer:
+**Pluck spoke N now** with a draining window bar → **Pluck detected** → **Analysing**. A
+silent attempt re-opens the window and the card says *Attempt 2*, which is the orchestrator's
+bounded retry (SPEC §7.4) made visible — it changes no state, so nothing else reports it. The
+frames are best-effort: lose them and the ordinary measuring card is what shows, and the
+measurement is identical. See `docs/IMPLEMENTATION_NOTES.md`, "The acoustic measurement
+lifecycle". Every estimate is still `suspect`
 / `PROVISIONAL_MODE_ID`: a real front end means the samples are real, not that mode
 identification or tension accuracy is validated. It is exclusive with self-play — the
 auto-operator has no hands — and `GET /id` reports it as `"mode":"interactive+inmp441"`.

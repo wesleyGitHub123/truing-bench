@@ -210,6 +210,31 @@ static void service_wire(void)
     }
 }
 
+/* The acoustic phase events go STRAIGHT out of the wire session and deliberately not through
+ * the telemetry ring, and the reason is the entire point of them.
+ *
+ * The ring is drained by this task between orchestrator steps, and one acoustic measurement IS
+ * a step: the task sits inside real_measure for the whole capture and the seconds of FFT after
+ * it. A LISTENING event posted to the ring would therefore be delivered after the window it
+ * announces had already closed - it would tell the operator to pluck into a window that ended
+ * four seconds ago, which is worse than saying nothing.
+ *
+ * This runs on the measuring task, inside the measurement, so it only enqueues: net_transport's
+ * outbound queue is zero-tick and drops when full (SPEC 12.2). A dropped phase frame costs the
+ * page a cue and costs the measurement nothing. */
+static void acoustic_phase_observer(void *ctx, const truing_telemetry_event_t *ev)
+{
+    (void)ctx;
+    if (s.wire_up) {
+        (void)truing_wire_session_send_event(&s.session, ev);
+    }
+    /* Short on purpose: this is on the path to opening the capture window. */
+    ESP_LOGI(TAG, "[%6" PRIu32 " ms] acoustic %s spoke %u attempt %" PRIu32 "%s", ev->timestamp_ms,
+             truing_acoustic_phase_str((truing_acoustic_phase_t)ev->u.acoustic.phase),
+             (unsigned)ev->u.acoustic.spoke_index, ev->u.acoustic.attempt,
+             ev->u.acoustic.phase == (uint8_t)TRUING_ACOUSTIC_PHASE_LISTENING ? " - PLUCK NOW" : "");
+}
+
 static void drain_telemetry(void)
 {
     truing_telemetry_event_t ev;
@@ -327,6 +352,9 @@ static void demo_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+    /* Wired by the composition root, which is the only place that knows there is a transport to
+     * push to. The orchestrator's contract with the acoustic subsystem is unchanged. */
+    truing_acoustic_real_set_observer(&s.acoustic, acoustic_phase_observer, NULL);
     /* THE fast-demo substitution, and the only one. Both implementations already exist and
      * both already declare what they are; picking between them here - before
      * truing_orch_init() - is what makes the whole session honest downstream.

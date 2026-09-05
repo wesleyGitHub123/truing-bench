@@ -35,6 +35,7 @@
 #include "truing_hal/audio_source_if.h"
 #include "truing_hal/clock_if.h"
 #include "truing_hal/pluck_if.h"
+#include "truing_hal/telemetry_if.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,16 @@ typedef struct {
     bool     pluck_commanded;
 } truing_acoustic_real_diag_t;
 
+/* Told, as it happens, which part of a measurement is running. Deliberately NOT on
+ * acoustic_if.h: the orchestrator's contract with the acoustic subsystem is one call in, one
+ * estimate out (SPEC §9.1), and that stays exactly as it was. This is a side channel wired the
+ * same way the pluck seam is, by whoever composes the system, and only the application does.
+ *
+ * Called ON the measuring task, inside the measurement. It must not block and must not touch
+ * the acoustic subsystem; an implementation that enqueues and returns is the only correct
+ * shape. Nothing checks the return, because nothing may depend on it (SPEC §13.3). */
+typedef void (*truing_acoustic_observer_fn)(void *ctx, const truing_telemetry_event_t *event);
+
 typedef struct {
     truing_clock_if_t                  clock;
     const truing_chain_profile_t      *chain;
@@ -77,6 +88,16 @@ typedef struct {
     uint32_t                           calls;
     uint32_t                           estimates;
     uint32_t                           rejections;
+    /* Phase observation (optional; NULL means the subsystem is silent as before). */
+    truing_acoustic_observer_fn        observer;
+    void                              *observer_ctx;
+    /* The orchestrator retries by calling again with the same spoke, so consecutive calls for
+     * one spoke in one cycle ARE the attempts. Counting them here is what lets the station say
+     * "attempt 2" without the orchestrator having to report its own retry bookkeeping. */
+    uint8_t                            attempt_spoke;
+    uint8_t                            attempt_cycle;
+    uint32_t                           attempt;
+    bool                               attempt_valid;
 } truing_acoustic_real_ctx_t;
 
 /* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace).
@@ -93,6 +114,10 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
                                const truing_chain_profile_t *chain, const truing_tension_model_profile_t *profile,
                                truing_audio_source_if_t *source, truing_pluck_if_t *pluck, void *scratch, size_t scratch_bytes,
                                const char **detail);
+/* Attach (or, with NULL, detach) the phase observer. Wired by the composition root after init,
+ * never by the orchestrator. Safe to leave unset: the subsystem then emits nothing at all. */
+void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx);
+
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */
 void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_t *words, uint32_t n_words,

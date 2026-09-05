@@ -84,6 +84,15 @@ size_t truing_wire_encode_event(const truing_telemetry_event_t *ev, char *buf, s
     case TRUING_EVT_TERMINAL_RESULT:
         truing_json_str(&w, "result", truing_terminal_str(ev->u.terminal));
         break;
+    case TRUING_EVT_ACOUSTIC_PHASE:
+        truing_json_str(&w, "phase", truing_acoustic_phase_str((truing_acoustic_phase_t)ev->u.acoustic.phase));
+        truing_json_u32(&w, "spoke_index", ev->u.acoustic.spoke_index);
+        truing_json_str(&w, "excitation", truing_excitation_str((truing_excitation_t)ev->u.acoustic.excitation));
+        truing_json_bool(&w, "pluck_commanded", ev->u.acoustic.pluck_commanded);
+        /* Only LISTENING has a window; the others carry 0 and the page must not draw a bar. */
+        truing_json_u32(&w, "window_ms", ev->u.acoustic.window_ms);
+        truing_json_u32(&w, "attempt", ev->u.acoustic.attempt);
+        break;
     case TRUING_EVT_NAVIGATION:
         truing_json_str(&w, "target_kind", truing_nav_target_kind_str((truing_nav_target_kind_t)ev->u.navigation.target_kind));
         truing_json_u32(&w, "index", ev->u.navigation.index);

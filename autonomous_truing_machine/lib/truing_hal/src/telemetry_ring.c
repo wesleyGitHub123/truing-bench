@@ -5,8 +5,26 @@
 
 static const char *const k_kind_str[TRUING_EVT__COUNT] = {
     "UNSET", "STATE_TRANSITION", "WAIT_ISSUED", "INTENT_REJECTED", "MEASUREMENT_RESULT",
-    "TERMINAL_RESULT", "NAVIGATION", "LOG",
+    "TERMINAL_RESULT", "NAVIGATION", "LOG", "ACOUSTIC_PHASE",
 };
+
+static const char *const k_phase_str[TRUING_ACOUSTIC_PHASE__COUNT] = {
+    "LISTENING", "ONSET_DETECTED", "ANALYZING",
+};
+
+static const char *const k_excitation_str[TRUING_EXCITATION__COUNT] = {
+    "NONE", "HAND", "ACTUATOR",
+};
+
+const char *truing_acoustic_phase_str(truing_acoustic_phase_t p)
+{
+    return (unsigned)p < TRUING_ACOUSTIC_PHASE__COUNT ? k_phase_str[p] : "?";
+}
+
+const char *truing_excitation_str(truing_excitation_t e)
+{
+    return (unsigned)e < TRUING_EXCITATION__COUNT ? k_excitation_str[e] : "?";
+}
 
 const char *truing_event_kind_str(truing_event_kind_t k)
 {
