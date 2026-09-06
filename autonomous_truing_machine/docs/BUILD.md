@@ -58,6 +58,26 @@ pio device monitor -p COM4 -b 115200
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_provision -t upload
 ```
 
+## How much to verify, and when
+
+Build the cheapest thing that covers what changed. Measured costs on the development PC:
+the native suite is **45 s**, `ui_check` is **3 s**, one warm image is **5–100 s**, and a
+sweep of all ten release images is **8–11 minutes**.
+
+The full sweep is a **release gate, not a commit gate**. It earns its cost when the board
+profile changes, when `platformio.ini` changes, or before tagging — because those are the
+only things that vary across the matrix. The eleven ESP images differ along exactly two
+axes, the board-profile header and the `src/build_mode.h` flags, so a change touching
+neither is proven by one build per board.
+
+A one-file change does not earn a ten-image sweep. When it is unclear which images are
+affected, build the five flag variants on one board plus one build on the other; escalate
+to the whole matrix only for the reasons above.
+
+The full tier ladder, including the three-second flag-matrix syntax check that catches an
+illegal `build_mode.h` combination without building anything, is in `DEV_NOTES.md`. It
+is kept there rather than duplicated here so there is one operational source.
+
 ## Flashing the Nano ESP32
 
 The Nano needs a different route from the DevKit and the difference is not
@@ -71,8 +91,10 @@ table, so a merged image handed to DFU alternate 0 does not land at flash offset
 
 The working route is a raw esptool write over ROM download mode:
 
-1. Put the board in ROM download mode by hand: jumper **B1 → GND**, press
-   **RESET**, release, then remove the jumper. The LED goes solid purple.
+1. **No jumper is needed.** esptool enters download mode by itself over the native
+   USB-Serial/JTAG with `--before default_reset`; this has been verified repeatedly on
+   2026-09-05. Keep the **B1 → GND** + **RESET** jumper procedure for the genuine
+   emergency: an image so broken the chip cannot get far enough to present its USB device.
 2. Write all three regions:
 
 ```bash
@@ -83,11 +105,15 @@ esptool.py --chip esp32s3 --port COM5 --before default_reset --after hard_reset 
 
    (the three files are under `.pio/build/nano_esp32/`; `esptool` needs
    `intelhex` installed in the PlatformIO penv.)
-3. **Physically unplug and replug the USB cable.** This step is mandatory and is
-   the one that is easy to skip. Download mode entered through USB-Serial/JTAG is
-   latched, and neither `--after hard_reset` nor the RESET button clears it; only
-   a real power cycle does. Without it the board stays in download mode and looks
-   like a failed flash.
+3. **Check that it booted, and replug if it did not.** Download mode entered through
+   USB-Serial/JTAG can latch, and when it does neither `--after hard_reset` nor the RESET
+   button clears it — only a real power cycle. This is **intermittent**: most flashes boot
+   straight into the new image, and some do not, so verify rather than assume either way.
+
+   Three `Hash of data verified.` lines mean the write succeeded, **not** that the board is
+   running. Read `COM5` afterwards: output means it booted; silence, with no AP on the air,
+   means download mode. Confirm with `--before no_reset chip_id` — if esptool connects
+   without resetting anything, the chip is parked in the ROM bootloader. Unplug and replug.
 
 Then the console is on `COM5` at 115200 and the board runs the same image as the
 DevKit.
