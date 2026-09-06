@@ -42,7 +42,13 @@ SEQ_HEADER = "X-Truing-Capture-Seq"
 def get(url, timeout):
     req = urllib.request.Request(url, headers={"Connection": "close"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read(), r.headers.get(SEQ_HEADER)
+        seq = r.headers.get(SEQ_HEADER)
+        # Kept short deliberately: a malformed header once arrived as the entire response body
+        # (the board was handing httpd a pointer to a dead stack buffer) and the resulting
+        # error message was a wall of JSON that said nothing about what was wrong.
+        if seq is not None and not re.fullmatch(r"\d{1,10}", seq.strip()):
+            raise SystemExit("%s returned a %s header that is not a number: %.40r" % (url, SEQ_HEADER, seq))
+        return r.read(), (seq.strip() if seq else None)
 
 
 def fetch_bundle(host, timeout):
@@ -54,6 +60,9 @@ def fetch_bundle(host, timeout):
         raise SystemExit("board speaks schema %r, this tool speaks %r" % (meta.get("schema"), SCHEMA))
     pcm, seq_b = get(base + "/debug/capture.pcm", timeout)
     _, seq_c = get(base + "/debug/capture.json", timeout)
+    if None in (seq_a, seq_b, seq_c):
+        raise SystemExit("the board did not report %s; it cannot be told whether the capture "
+                         "changed mid-download" % SEQ_HEADER)
     if not (seq_a == seq_b == seq_c):
         raise SystemExit(
             "the board measured again while this was downloading (seq %s -> %s -> %s); "

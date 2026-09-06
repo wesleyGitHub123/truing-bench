@@ -164,6 +164,18 @@ static float tol_for(float expected)
     return t < 1e-4f ? 1e-4f : t;
 }
 
+/* NaN has no JSON form, and printf spells it differently on every platform - MinGW writes
+ * `1.#QNAN0`, which is not a number any JSON reader will take. A rejected measurement has no
+ * frequency and no tension, and `null` is what that means. */
+static void observed_f32(FILE *f, const char *key, float v, const char *tail)
+{
+    if (isfinite(v)) {
+        fprintf(f, "  \"%s\": %.6f%s\n", key, (double)v, tail);
+    } else {
+        fprintf(f, "  \"%s\": null%s\n", key, tail);
+    }
+}
+
 static void write_observed(const char *dir, const char *name, const truing_acoustic_real_diag_t *d,
                            const truing_tension_estimate_t *e)
 {
@@ -188,9 +200,9 @@ static void write_observed(const char *dir, const char *name, const truing_acous
     fprintf(f, "  \"expect_n_fft\": %u,\n", (unsigned)d->n_fft);
     fprintf(f, "  \"expect_n_strong_peaks\": %u,\n", (unsigned)d->n_strong_peaks);
     fprintf(f, "  \"expect_n_peaks_in_band\": %u,\n", (unsigned)d->n_peaks_in_band);
-    fprintf(f, "  \"expect_f1_hz\": %.6f,\n", (double)d->f1_hz);
-    fprintf(f, "  \"expect_snr_db\": %.6f,\n", (double)d->snr_db);
-    fprintf(f, "  \"expect_tension_n\": %.6f\n", (double)e->tension_n);
+    observed_f32(f, "expect_f1_hz", d->f1_hz, ",");
+    observed_f32(f, "expect_snr_db", d->snr_db, ",");
+    observed_f32(f, "expect_tension_n", e->tension_n, "");
     fprintf(f, "}\n");
     fclose(f);
 }

@@ -384,7 +384,11 @@ static esp_err_t acq_post_handler(httpd_req_t *req)
  * all three agree. A dump that loses a race is discarded rather than silently half-and-half. */
 static void capture_seq_header(httpd_req_t *req, uint32_t seq)
 {
-    char v[16];
+    /* httpd_resp_set_hdr stores the POINTER, not the string: the value must outlive the
+     * response. A stack buffer here produced a header pointing into freed stack that the JSON
+     * body then wrote over, so the client received the body as the header value. Static is
+     * safe because the server runs one task and finishes a response before starting the next. */
+    static char v[16];
     (void)snprintf(v, sizeof(v), "%" PRIu32, seq);
     (void)httpd_resp_set_hdr(req, "X-Truing-Capture-Seq", v);
 }
