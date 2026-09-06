@@ -19,6 +19,7 @@
 
 #include "truing/limits.h"
 #include "truing/model_ids.h"
+#include "truing/sha256.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -256,6 +257,16 @@ typedef enum {
 truing_cfg_check_t truing_wheel_class_config_check(const truing_wheel_class_config_t *cfg, const char **field);
 truing_cfg_check_t truing_solver_config_check(const truing_solver_config_t *cfg, const char **field);
 truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, const char **field);
+
+/* Identity of the acoustic chain configuration, as a SHA-256 over every field in declaration
+ * order (each field hashed on its own, so struct padding cannot enter the digest and two
+ * compilers agree). Deterministic on host and target.
+ *
+ * It exists for evidence: a capture taken off a board is only reproducible against the DSP
+ * configuration that produced it, and replaying it under different constants yields a
+ * different answer with nothing to indicate why. Recording this digest alongside the samples
+ * turns that silent divergence into a refusal. A zeroed digest is written for a NULL profile. */
+void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TRUING_SHA256_DIGEST_BYTES]);
 truing_cfg_check_t truing_tension_model_profile_check(const truing_tension_model_profile_t *p,
                                                       uint32_t *missing_fields, const char **field);
 truing_cfg_check_t truing_tension_model_profile_compatible(const truing_tension_model_profile_t *p,

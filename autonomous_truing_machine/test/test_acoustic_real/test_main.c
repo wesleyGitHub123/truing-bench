@@ -89,6 +89,95 @@ static void test_synthetic_pluck_yields_a_provisional_estimate_through_all_four_
            (double)e.tension_n, (double)ctx.diag.l_eff_m);
 }
 
+/* ---- capture evidence (SPEC §12.5) --------------------------------------------------------
+ *
+ * The claim the whole capture->fixture->replay seam rests on: the words a measurement is
+ * handed out ARE the words it analysed, so replaying them reproduces that measurement exactly
+ * rather than approximately. If this ever stops holding, every fixture taken off a board stops
+ * being evidence about the board, and there is no way to notice from the fixture itself. */
+static void test_capture_evidence_replays_to_the_same_measurement(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 465.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+
+    /* Nothing measured yet: there is nothing to hand out, and it says so rather than
+     * handing out an uninitialised buffer. */
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_FALSE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_acoustic_real_capture_seq(&a));
+
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 5u, &g_wheel, 2u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT32(1u, v.seq);
+    TEST_ASSERT_EQUAL_UINT32(ctx.diag.n_captured, v.n_words);
+    TEST_ASSERT_TRUE(v.n_words > 0u);
+    TEST_ASSERT_EQUAL_PTR(ctx.words, v.words);
+    /* the dump says which measurement it is evidence of, and what that measurement concluded */
+    TEST_ASSERT_EQUAL_UINT8(5u, v.spoke_id);
+    TEST_ASSERT_EQUAL_UINT8(2u, v.cycle_index);
+    TEST_ASSERT_EQUAL_UINT32(1u, v.attempt);
+    TEST_ASSERT_EQUAL_INT(e.meta.status, v.status);
+    TEST_ASSERT_EQUAL_INT(e.meta.reason_code, v.reason);
+
+    /* Take the evidence away exactly as a dump would, then replay it. */
+    const uint32_t n = v.n_words;
+    int32_t *words = (int32_t *)malloc((size_t)n * sizeof(int32_t));
+    TEST_ASSERT_NOT_NULL(words);
+    memcpy(words, v.words, (size_t)n * sizeof(int32_t));
+    const truing_acoustic_real_diag_t d0 = v.diag;
+
+    /* A retry on the same spoke overwrites the buffer, which is why seq exists. */
+    truing_acoustic_measure(&a, 5u, &g_wheel, 2u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT32(2u, v.seq);
+    TEST_ASSERT_EQUAL_UINT32(2u, v.attempt);
+
+    truing_audio_source_if_t rsrc;
+    truing_audio_buffer_ctx_t rctx;
+    truing_audio_buffer_init(&rsrc, &rctx, words, n, NULL);
+    truing_acoustic_if_t b;
+    truing_acoustic_real_ctx_t bctx;
+    void *bscratch = malloc(g_scratch_bytes);
+    TEST_ASSERT_NOT_NULL(bscratch);
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&b, &bctx, g_clock, &g_chain, &g_profile, &rsrc, NULL, bscratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t re;
+    truing_acoustic_real_analyze_words(&b, words, n, 2u, &re);
+    const truing_acoustic_real_diag_t *d1 = &bctx.diag;
+
+    /* Segmentation, gating and spectrum reproduce exactly — same code, same bytes. */
+    TEST_ASSERT_EQUAL_UINT32(d0.n_captured, d1->n_captured);
+    TEST_ASSERT_EQUAL_UINT32(d0.onsets, d1->onsets);
+    TEST_ASSERT_EQUAL_UINT32(d0.onset_sample, d1->onset_sample);
+    TEST_ASSERT_EQUAL_UINT32(d0.window.start_sample, d1->window.start_sample);
+    TEST_ASSERT_EQUAL_UINT32(d0.window.n_samples, d1->window.n_samples);
+    TEST_ASSERT_EQUAL_UINT32(d0.n_fft, d1->n_fft);
+    TEST_ASSERT_EQUAL_UINT32(d0.n_strong_peaks, d1->n_strong_peaks);
+    TEST_ASSERT_EQUAL_UINT32(d0.n_peaks_in_band, d1->n_peaks_in_band);
+    TEST_ASSERT_EQUAL_FLOAT(d0.f1_hz, d1->f1_hz);
+    TEST_ASSERT_EQUAL_FLOAT(d0.snr_db, d1->snr_db);
+    /* and so does the conclusion drawn from them */
+    TEST_ASSERT_EQUAL_INT(e.meta.status, re.meta.status);
+    TEST_ASSERT_EQUAL_INT(e.meta.reason_code, re.meta.reason_code);
+    TEST_ASSERT_EQUAL_FLOAT(e.tension_n, re.tension_n);
+    /* the replay itself is a capture, and is labelled as one */
+    TEST_ASSERT_EQUAL_UINT32(1u, truing_acoustic_real_capture_seq(&b));
+
+    /* A subsystem that is not this implementation has nothing to show. */
+    truing_acoustic_if_t sim;
+    truing_acoustic_synthetic_ctx_t simctx;
+    truing_acoustic_synthetic_init(&sim, &simctx, g_clock, 32u, TRUING_TENSION_MODEL_IDEAL_STRING, 1u);
+    TEST_ASSERT_FALSE(truing_acoustic_real_last_capture(&sim, &v));
+
+    free(bscratch);
+    free(words);
+}
+
 /* ---- phase observation -------------------------------------------------------------------
  *
  * One acoustic call is a window to pluck into and then seconds of arithmetic, and from outside
@@ -488,6 +577,7 @@ static void test_workflow_with_real_acoustic_layers_reaches_converged_geometric_
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_capture_evidence_replays_to_the_same_measurement);
     RUN_TEST(test_synthetic_pluck_yields_a_provisional_estimate_through_all_four_layers);
     RUN_TEST(test_status_rules_calibration_cancel_overrun_silence_format);
     RUN_TEST(test_phase_events_report_the_measurement_lifecycle_in_order);

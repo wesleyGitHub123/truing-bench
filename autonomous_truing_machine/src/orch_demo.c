@@ -134,6 +134,30 @@ bool truing_demo_acquisition_is_automatic(void)
     return s.acq_automatic;
 }
 
+/* SPEC §12.5. Read on the HTTP task while the orchestrator may be measuring: the view is a
+ * snapshot of the bookkeeping plus a pointer into the live capture buffer, and the sequence
+ * number is how the reader finds out whether that buffer changed underneath it. Deliberately
+ * no lock — a debug dump must not be able to stall a measurement (SPEC §13.3). */
+bool truing_demo_last_capture(truing_acoustic_capture_view_t *out)
+{
+    return truing_acoustic_real_last_capture(&s.acoustic, out);
+}
+
+uint32_t truing_demo_capture_seq(void)
+{
+    return truing_acoustic_real_capture_seq(&s.acoustic);
+}
+
+truing_source_impl_t truing_demo_acoustic_source(void)
+{
+    return s.acoustic.source_impl;
+}
+
+const truing_chain_profile_t *truing_demo_chain_profile(void)
+{
+    return &s.chain;
+}
+
 bool truing_demo_request_acquisition(bool automatic, const char **detail)
 {
     if (!TRUING_FAST_DEMO) {

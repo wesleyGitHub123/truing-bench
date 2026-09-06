@@ -234,8 +234,8 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     c->estimates++;
 }
 
-static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
-                         uint8_t cycle_index, truing_tension_estimate_t *out)
+static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
+                        uint8_t cycle_index, truing_tension_estimate_t *out)
 {
     (void)wheel_geometry;   /* a damping ritual targeting a neighbour would resolve it here (SPEC 9.1); none is implemented */
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
@@ -285,6 +285,7 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
     emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_LISTENING, spoke_id, listen_window_ms(c->chain));
     const uint32_t t0 = truing_clock_now_ms(&c->clock);
     uint32_t got = 0u;
+    c->capture_seq++;   /* the buffer is about to change under any reader (SPEC §12.5) */
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
     c->diag.capture_result = r;
     c->diag.n_captured = got;
@@ -307,6 +308,64 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
     const uint32_t t1 = truing_clock_now_ms(&c->clock);
     analyze(self, c, got, cycle_index, spoke_id, out);
     c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
+}
+
+/* Records which measurement produced the words now sitting in the capture buffer, so a dump
+ * can say what it is evidence OF. Purely a record of what already happened: measure_run() has
+ * returned, `out` is final, and nothing downstream reads any of this (SPEC §13.3). */
+static void note_outcome(truing_acoustic_real_ctx_t *c, uint8_t spoke_id, uint8_t cycle_index,
+                         const truing_tension_estimate_t *out)
+{
+    if (c == NULL || out == NULL) {
+        return;
+    }
+    c->last_spoke = spoke_id;
+    c->last_cycle = cycle_index;
+    c->last_attempt = c->attempt;
+    c->last_status = out->meta.status;
+    c->last_reason = out->meta.reason_code;
+}
+
+static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
+                         uint8_t cycle_index, truing_tension_estimate_t *out)
+{
+    measure_run(self, spoke_id, wheel_geometry, cycle_index, out);
+    if (self != NULL && out != NULL) {
+        note_outcome((truing_acoustic_real_ctx_t *)self->ctx, spoke_id, cycle_index, out);
+    }
+}
+
+bool truing_acoustic_real_last_capture(const truing_acoustic_if_t *self, truing_acoustic_capture_view_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return false;
+    }
+    const truing_acoustic_real_ctx_t *c = (const truing_acoustic_real_ctx_t *)self->ctx;
+    if (c->capture_seq == 0u || c->words == NULL || c->diag.n_captured == 0u) {
+        return false;
+    }
+    out->words = c->words;
+    out->n_words = c->diag.n_captured;
+    out->seq = c->capture_seq;
+    out->spoke_id = c->last_spoke;
+    out->cycle_index = c->last_cycle;
+    out->attempt = c->last_attempt;
+    out->status = c->last_status;
+    out->reason = c->last_reason;
+    out->diag = c->diag;
+    return true;
+}
+
+uint32_t truing_acoustic_real_capture_seq(const truing_acoustic_if_t *self)
+{
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return 0u;
+    }
+    return ((const truing_acoustic_real_ctx_t *)self->ctx)->capture_seq;
 }
 
 void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx)
@@ -349,6 +408,7 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
         return;
     }
     const uint32_t n = n_words < c->n_capture ? n_words : c->n_capture;
+    c->capture_seq++;   /* replay overwrites the same buffer a dump would be reading */
     memcpy(c->words, words, (size_t)n * sizeof(int32_t));
     c->diag.n_captured = n;
     c->diag.capture_result = TRUING_AUDIO_OK;
@@ -356,6 +416,7 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
     /* No spoke and no window: this path replays words that were captured elsewhere. */
     analyze(self, c, n, cycle_index, 0u, out);
     c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
+    note_outcome(c, 0u, cycle_index, out);
 }
 
 bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *ctx, truing_clock_if_t clock,

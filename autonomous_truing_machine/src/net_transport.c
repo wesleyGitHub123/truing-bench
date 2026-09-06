@@ -20,6 +20,7 @@
 #include "esp_timer.h"
 #include "build_mode.h"
 #include "firmware_version.h"
+#include "truing_proto/json.h"
 #include "truing_proto/wire.h"
 #include "web_ui.h"
 
@@ -366,6 +367,136 @@ static esp_err_t acq_post_handler(httpd_req_t *req)
 }
 #endif
 
+/* ---- SPEC §12.5 debug channel: dump internals -------------------------------------------
+ *
+ * GET /debug/capture.json   what the last acoustic measurement was and what it concluded
+ * GET /debug/capture.pcm    the samples it concluded that from, exactly as captured
+ *
+ * A bad pluck is unrepeatable - the next one is a different pluck - so the only way to work
+ * on one is to keep its samples. These two hand them over; tools/capture_fetch.py turns them
+ * into a fixture and test_acoustic_replay pushes that fixture back through the same layers on
+ * a host. Nothing here is on any control path: no measurement waits on it, no result depends
+ * on whether anyone ever asks, and a session that is never dumped behaves identically
+ * (SPEC §13.3).
+ *
+ * The buffer being read is the live one, so both responses carry X-Truing-Capture-Seq. The
+ * client reads the metadata, the samples and the metadata again, and keeps the bundle only if
+ * all three agree. A dump that loses a race is discarded rather than silently half-and-half. */
+static void capture_seq_header(httpd_req_t *req, uint32_t seq)
+{
+    char v[16];
+    (void)snprintf(v, sizeof(v), "%" PRIu32, seq);
+    (void)httpd_resp_set_hdr(req, "X-Truing-Capture-Seq", v);
+}
+
+static esp_err_t capture_meta_handler(httpd_req_t *req)
+{
+    truing_acoustic_capture_view_t v;
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (!truing_demo_last_capture(&v)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"nothing captured yet\"}");
+    }
+    capture_seq_header(req, v.seq);
+
+    uint8_t digest[TRUING_SHA256_DIGEST_BYTES];
+    truing_chain_profile_digest(truing_demo_chain_profile(), digest);
+
+    /* The writer, not snprintf: a NaN has no JSON form and it writes null, which is what an
+     * unmeasured frequency actually means. Hand-formatting these has produced `nan` in a
+     * JSON document before. */
+    char body[1024];
+    truing_json_writer_t w;
+    truing_json_init(&w, body, sizeof(body));
+    truing_json_obj_open(&w, NULL);
+    truing_json_str(&w, "schema", "truing.acoustic.capture/1");
+    truing_json_u32(&w, "seq", v.seq);
+    truing_json_u32(&w, "n_words", v.n_words);
+    truing_json_u32(&w, "sample_rate_hz", TRUING_AUDIO_SAMPLE_RATE_HZ);
+    truing_json_str(&w, "pcm_format", "int32 LE, sample24 << 8 (I2S 24-in-32)");
+    truing_json_hex(&w, "chain_digest", digest, sizeof(digest));
+    /* Provenance: which board, which build, and above all whether these words came off a
+     * microphone or out of the synthetic source (SPEC §6.2). */
+    truing_json_str(&w, "source", truing_source_impl_str(truing_demo_acoustic_source()));
+    truing_json_str(&w, "board", BOARD_NAME);
+    truing_json_str(&w, "build", TRUING_BUILD_REV);
+    truing_json_str(&w, "ui", TRUING_UI_HASH);
+    truing_json_str(&w, "mode", TRUING_BUILD_MODE_STR);
+    truing_json_u32(&w, "uptime_s", (uint32_t)(esp_timer_get_time() / 1000000));
+    /* Which measurement this is evidence of, and what it concluded. */
+    truing_json_u32(&w, "spoke_id", v.spoke_id);
+    truing_json_u32(&w, "cycle_index", v.cycle_index);
+    truing_json_u32(&w, "attempt", v.attempt);
+    truing_json_str(&w, "status", truing_status_str(v.status));
+    truing_json_str(&w, "reason", truing_reason_str(v.reason));
+    truing_json_bool(&w, "pluck_commanded", v.diag.pluck_commanded);
+    truing_json_str(&w, "capture_result", truing_audio_result_str(v.diag.capture_result));
+    /* The board's own diagnostics, written with the expect_ prefix the replay harness reads:
+     * a fixture built from this is a host/target parity check on identical bytes. */
+    truing_json_str(&w, "expect_origin", "board");
+    truing_json_str(&w, "expect_status", truing_status_str(v.status));
+    truing_json_str(&w, "expect_reason", truing_reason_str(v.reason));
+    truing_json_u32(&w, "expect_onsets", v.diag.onsets);
+    truing_json_u32(&w, "expect_onset_sample", v.diag.onset_sample);
+    truing_json_u32(&w, "expect_window_start_sample", v.diag.window.start_sample);
+    truing_json_u32(&w, "expect_window_n_samples", v.diag.window.n_samples);
+    truing_json_str(&w, "expect_window_truncated_by", truing_window_truncation_str(v.diag.window.truncated_by));
+    truing_json_u32(&w, "expect_n_fft", v.diag.n_fft);
+    truing_json_u32(&w, "expect_n_strong_peaks", v.diag.n_strong_peaks);
+    truing_json_u32(&w, "expect_n_peaks_in_band", v.diag.n_peaks_in_band);
+    truing_json_f32(&w, "expect_f1_hz", v.diag.f1_hz, 6u);
+    truing_json_f32(&w, "expect_snr_db", v.diag.snr_db, 6u);
+    truing_json_f32(&w, "f2_hz", v.diag.f2_hz, 6u);
+    truing_json_f32(&w, "l_eff_m", v.diag.l_eff_m, 6u);
+    truing_json_f32(&w, "onset_threshold", v.diag.onset_threshold, 8u);
+    truing_json_u32(&w, "capture_us", v.diag.capture_us);
+    truing_json_u32(&w, "analysis_us", v.diag.analysis_us);
+    truing_json_obj_close(&w);
+    size_t len = 0u;
+    if (!truing_json_finish(&w, &len)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"capture metadata did not fit\"}");
+    }
+    return httpd_resp_send(req, body, len);
+}
+
+static esp_err_t capture_pcm_handler(httpd_req_t *req)
+{
+    truing_acoustic_capture_view_t v;
+    no_store(req);
+    if (!truing_demo_last_capture(&v)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"nothing captured yet\"}");
+    }
+    capture_seq_header(req, v.seq);
+    httpd_resp_set_type(req, "application/octet-stream");
+    /* Chunked, because the capture is a couple of hundred kilobytes and the HTTP task's stack
+     * is not. Between chunks the measuring task may start another capture into this very
+     * buffer; when it does, the transfer is abandoned mid-stream so the client sees a broken
+     * response rather than two halves of different plucks spliced together. */
+    const uint8_t *p = (const uint8_t *)v.words;
+    size_t remaining = (size_t)v.n_words * sizeof(int32_t);
+    while (remaining > 0u) {
+        const size_t chunk = remaining > 4096u ? 4096u : remaining;
+        if (truing_demo_capture_seq() != v.seq) {
+            ESP_LOGW(TAG, "capture dump abandoned: a new measurement overwrote the buffer");
+            return ESP_FAIL;
+        }
+        if (httpd_resp_send_chunk(req, (const char *)p, chunk) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        p += chunk;
+        remaining -= chunk;
+    }
+    if (truing_demo_capture_seq() != v.seq) {
+        ESP_LOGW(TAG, "capture dump abandoned at the end: the buffer changed during the transfer");
+        return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[384];
@@ -518,9 +649,19 @@ bool truing_net_start(void)
     static const httpd_uri_t ws_uri = {
         .uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true,
     };
+    static const httpd_uri_t cap_meta_uri = { .uri = "/debug/capture.json", .method = HTTP_GET,
+                                              .handler = capture_meta_handler };
+    static const httpd_uri_t cap_pcm_uri = { .uri = "/debug/capture.pcm", .method = HTTP_GET,
+                                             .handler = capture_pcm_handler };
     (void)httpd_register_uri_handler(s_server, &ui_uri);
     (void)httpd_register_uri_handler(s_server, &id_uri);
     (void)httpd_register_uri_handler(s_server, &ws_uri);
+    /* Checked, unlike the three above: an unregistered debug URL answers 404, which reads
+     * exactly like "nothing captured yet" from the client end. */
+    if (httpd_register_uri_handler(s_server, &cap_meta_uri) != ESP_OK ||
+        httpd_register_uri_handler(s_server, &cap_pcm_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "capture dump endpoints not registered; /debug/capture.* will 404");
+    }
 #if TRUING_FAST_DEMO
     /* Only this image serves it at all. */
     static const httpd_uri_t acq_uri = { .uri = "/demo/acquisition", .method = HTTP_GET,

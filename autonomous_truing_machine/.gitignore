@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Replay diagnostics written by test_acoustic_replay; promote with tools/capture_accept.py
+test/fixtures/acoustic/captures/*.observed.json

@@ -247,6 +247,74 @@ truing_cfg_check_t truing_solver_config_check(const truing_solver_config_t *cfg,
     return TRUING_CFG_OK;
 }
 
+/* Each field hashed separately and little-endian, so neither struct padding nor a compiler's
+ * layout choices reach the digest: the same profile hashes identically on the ESP32 and on the
+ * host, which is the only reason the digest can be used to compare them. */
+static void digest_u32(truing_sha256_t *s, uint32_t v)
+{
+    const uint8_t b[4] = { (uint8_t)(v & 0xffu), (uint8_t)((v >> 8) & 0xffu),
+                           (uint8_t)((v >> 16) & 0xffu), (uint8_t)((v >> 24) & 0xffu) };
+    truing_sha256_update(s, b, sizeof(b));
+}
+
+static void digest_f32(truing_sha256_t *s, float v)
+{
+    uint32_t u = 0u;
+    memcpy(&u, &v, sizeof(u));
+    digest_u32(s, u);
+}
+
+void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TRUING_SHA256_DIGEST_BYTES])
+{
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, TRUING_SHA256_DIGEST_BYTES);
+    if (p == NULL) {
+        return;
+    }
+    truing_sha256_t s;
+    truing_sha256_init(&s);
+    /* Tagged, so a future change of what goes into the digest cannot be mistaken for a
+     * change of configuration. */
+    truing_sha256_update(&s, (const uint8_t *)"truing.chain_profile/1", 22u);
+    digest_u32(&s, p->chain_id);
+    digest_u32(&s, (uint32_t)p->transducer);
+    digest_u32(&s, p->sample_rate_hz);
+    digest_u32(&s, (uint32_t)p->bit_depth);
+    digest_f32(&s, p->noise_floor_dbfs);
+    digest_f32(&s, p->preflight_min_snr_db);
+    digest_f32(&s, p->preflight_max_noise_floor_dbfs);
+    digest_f32(&s, p->f1_band_lo_hz);
+    digest_f32(&s, p->f1_band_hi_hz);
+    digest_f32(&s, p->window_ms);
+    digest_f32(&s, p->gate_start_ms);
+    digest_f32(&s, p->capture_ms);
+    digest_f32(&s, p->pre_trigger_ms);
+    digest_f32(&s, p->excitation_pulse_ms);
+    digest_f32(&s, p->measurement_min_snr_db);
+    digest_f32(&s, p->onset_frame_ms);
+    digest_f32(&s, p->onset_hop_ms);
+    digest_f32(&s, p->onset_threshold_rel);
+    digest_f32(&s, p->onset_threshold_abs);
+    digest_f32(&s, p->onset_refractory_s);
+    digest_f32(&s, p->decay_floor_db);
+    digest_f32(&s, p->decay_smoothing_ms);
+    digest_f32(&s, p->next_onset_margin_ms);
+    digest_f32(&s, p->min_window_ms);
+    digest_f32(&s, p->zero_pad_factor);
+    digest_f32(&s, p->search_band_lo_hz);
+    digest_f32(&s, p->search_band_hi_hz);
+    digest_f32(&s, p->prominence_db);
+    digest_f32(&s, p->max_peak_depth_db);
+    digest_u32(&s, (uint32_t)p->max_peaks);
+    digest_f32(&s, p->f2_ratio_lo);
+    digest_f32(&s, p->f2_ratio_hi);
+    digest_f32(&s, p->snr_noise_offset_lo_hz);
+    digest_f32(&s, p->snr_noise_offset_hi_hz);
+    truing_sha256_final(&s, out);
+}
+
 truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, const char **field)
 {
     set_field(field, "");

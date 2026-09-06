@@ -98,6 +98,13 @@ typedef struct {
     uint8_t                            attempt_cycle;
     uint32_t                           attempt;
     bool                               attempt_valid;
+    /* Capture evidence, written on the measuring task and read by whoever dumps it. */
+    uint32_t                           capture_seq;
+    uint8_t                            last_spoke;
+    uint8_t                            last_cycle;
+    uint32_t                           last_attempt;
+    truing_status_t                    last_status;
+    truing_reason_t                    last_reason;
 } truing_acoustic_real_ctx_t;
 
 /* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace).
@@ -122,6 +129,40 @@ void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoust
  * golden tests use. Identical to measure() after the capture step. */
 void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_t *words, uint32_t n_words,
                                         uint8_t cycle_index, truing_tension_estimate_t *out);
+
+/* ---- Capture evidence (SPEC §12.5 debug channel: "dump internals") -----------------------
+ *
+ * What the last measurement actually captured, exactly as the front end delivered it: int32
+ * little-endian words with the 24-bit sample in the upper bits. That is the same
+ * representation the golden fixtures carry, which is the point — a capture taken off a real
+ * board replays through truing_acoustic_real_analyze_words() with no conversion, so a
+ * failure seen once on the bench becomes a fixture that fails the same way on the host.
+ *
+ * Strictly observational. Nothing here participates in a measurement, no measurement waits
+ * on it, and a system that never asks behaves identically (SPEC §13.3).
+ *
+ * `words` is the live capture buffer, not a copy — this subsystem allocates one and reuses
+ * it. `seq` changes whenever a measurement begins overwriting it, so a reader samples seq,
+ * reads, samples again: unchanged means it read one whole capture rather than the tail of
+ * one and the head of the next. There is no lock, and adding one would put the reader in a
+ * position to stall a measurement. */
+typedef struct {
+    const int32_t *words;        /* NULL until something has been captured */
+    uint32_t       n_words;      /* valid words in the buffer (diag.n_captured) */
+    uint32_t       seq;          /* 0 = nothing captured yet */
+    uint8_t        spoke_id;     /* 0 for the analyze_words() replay path */
+    uint8_t        cycle_index;
+    uint32_t       attempt;
+    truing_status_t status;      /* the outcome these words produced */
+    truing_reason_t reason;
+    truing_acoustic_real_diag_t diag;
+} truing_acoustic_capture_view_t;
+
+/* False when there is nothing to show (never measured, or not this implementation). */
+bool truing_acoustic_real_last_capture(const truing_acoustic_if_t *self, truing_acoustic_capture_view_t *out);
+
+/* The sequence number alone, for the before/after check around a long read. */
+uint32_t truing_acoustic_real_capture_seq(const truing_acoustic_if_t *self);
 
 #ifdef __cplusplus
 }

@@ -10,7 +10,29 @@
 
 #include <stdbool.h>
 
+#include "truing/config.h"
+#include "truing_hal/acoustic_real.h"
+
 void truing_orch_demo_start(void);
+
+/* ---- capture evidence (SPEC §12.5 debug channel) ---------------------------------------
+ *
+ * The samples behind the last acoustic measurement, so a pluck that went wrong on the bench
+ * can leave the board as a file and be replayed on a host (test/test_acoustic_replay). The
+ * composition root owns the acoustic subsystem, so it is the only place that can hand them
+ * out; the orchestrator's contract is untouched and nothing in the control path is aware
+ * this exists.
+ *
+ * False before anything has been measured. Whether the words came from a microphone or from
+ * the synthetic source is not the caller's guess to make - `view.words` is accompanied by the
+ * subsystem's source_impl through truing_demo_acoustic_source(), and the dump records it. */
+bool truing_demo_last_capture(truing_acoustic_capture_view_t *out);
+uint32_t truing_demo_capture_seq(void);
+truing_source_impl_t truing_demo_acoustic_source(void);
+
+/* The acoustic chain configuration the measurement ran under. Its digest is what lets a
+ * stored capture refuse replay under different DSP constants. NULL before start-up. */
+const truing_chain_profile_t *truing_demo_chain_profile(void);
 
 /* ---- acquisition path (FAST DEMO image only) ------------------------------------------
  * Which implementations satisfy navigation and runout for the NEXT session:

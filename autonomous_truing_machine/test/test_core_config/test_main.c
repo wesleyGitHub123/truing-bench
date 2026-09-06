@@ -142,6 +142,50 @@ static void test_chain_profile_enforces_fixed_audio_format(void)
     TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_UNSET, truing_chain_profile_check(&c, &field));
 }
 
+/* The digest is what lets a stored capture refuse to be replayed under DSP constants other
+ * than the ones that produced it (SPEC §9.5: those constants are configuration). It is only
+ * worth anything if it moves when any of them moves. */
+static void test_chain_profile_digest_identifies_the_configuration(void)
+{
+    truing_chain_profile_t a, b;
+    truing_fixture_chain_profile_inmp441(&a);
+    truing_fixture_chain_profile_inmp441(&b);
+    uint8_t da[TRUING_SHA256_DIGEST_BYTES], db[TRUING_SHA256_DIGEST_BYTES];
+    truing_chain_profile_digest(&a, da);
+    truing_chain_profile_digest(&b, db);
+    TEST_ASSERT_EQUAL_MEMORY(da, db, sizeof(da));
+
+    /* Every field participates: walk the ones a bench session actually touches. */
+    float *const tunable[] = { &b.window_ms,        &b.gate_start_ms,   &b.capture_ms,
+                               &b.pre_trigger_ms,   &b.min_window_ms,   &b.zero_pad_factor,
+                               &b.onset_threshold_rel, &b.onset_threshold_abs,
+                               &b.onset_frame_ms,   &b.onset_hop_ms,    &b.decay_floor_db,
+                               &b.prominence_db,    &b.max_peak_depth_db,
+                               &b.f1_band_lo_hz,    &b.f1_band_hi_hz,
+                               &b.search_band_lo_hz, &b.search_band_hi_hz,
+                               &b.measurement_min_snr_db };
+    for (size_t i = 0; i < sizeof(tunable) / sizeof(tunable[0]); ++i) {
+        const float saved = *tunable[i];
+        *tunable[i] = saved * 1.01f + 0.001f;
+        truing_chain_profile_digest(&b, db);
+        TEST_ASSERT_FALSE_MESSAGE(memcmp(da, db, sizeof(da)) == 0, "a changed DSP constant left the digest unmoved");
+        *tunable[i] = saved;
+    }
+    b.max_peaks = (uint8_t)(a.max_peaks + 1u);
+    truing_chain_profile_digest(&b, db);
+    TEST_ASSERT_FALSE(memcmp(da, db, sizeof(da)) == 0);
+    b.max_peaks = a.max_peaks;
+    truing_chain_profile_digest(&b, db);
+    TEST_ASSERT_EQUAL_MEMORY(da, db, sizeof(da));
+
+    uint8_t zero[TRUING_SHA256_DIGEST_BYTES];
+    memset(zero, 0xAA, sizeof(zero));
+    truing_chain_profile_digest(NULL, zero);
+    for (size_t i = 0; i < sizeof(zero); ++i) {
+        TEST_ASSERT_EQUAL_UINT8(0u, zero[i]);
+    }
+}
+
 static void test_tension_model_profile_completeness(void)
 {
     truing_tension_model_profile_t p;
@@ -235,6 +279,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_solver_config_rules);
     RUN_TEST(test_pair_rule_rim_angles_equal_spokes);
     RUN_TEST(test_chain_profile_enforces_fixed_audio_format);
+    RUN_TEST(test_chain_profile_digest_identifies_the_configuration);
     RUN_TEST(test_tension_model_profile_completeness);
     RUN_TEST(test_tension_model_profile_compatibility);
     RUN_TEST(test_machine_profile_station_geometry);
