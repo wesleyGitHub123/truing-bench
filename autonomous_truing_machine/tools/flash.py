@@ -30,6 +30,9 @@ Tool paths resolve from $USERPROFILE by default (this workspace's convention - P
 reliable here) but every one of them can be overridden, so this isn't tied to one account:
 
     TRUING_PIO, TRUING_PYTHON, TRUING_ESPTOOL, TRUING_BUILD_DIR
+
+esptool is chosen by running it, not by trusting a path: PlatformIO keeps several versions
+side by side and the newest is not necessarily importable in its own venv. See resolve_esptool.
 """
 import argparse
 import os
@@ -60,6 +63,45 @@ def resolve_tool(env_var, which_name, fallback_relative):
         return candidate
     raise SystemExit("cannot find %s - set %s explicitly (looked on PATH and at %s)"
                      % (which_name or env_var, env_var, candidate))
+
+
+def resolve_esptool(python):
+    """Pick an esptool.py that actually RUNS, not merely one that exists.
+
+    PlatformIO keeps several side by side and installs newer ones without removing the
+    pinned build-time copy: this machine has tool-esptoolpy (4.9.0), @1.40501.0 (4.5.1, the
+    one espressif32@6.10.0 builds with) and @src-... (4.6.2). The unversioned directory sorts
+    first and is the obvious default, but 4.9.0 imports `intelhex`, which the PlatformIO venv
+    does not have - so the obvious default died with ModuleNotFoundError AFTER a successful
+    build, which reads like a board fault and is not one. Probe each candidate's `version`
+    subcommand and take the first that answers; a mismatch between the flashing tool and the
+    building tool is a far smaller problem than not flashing at all.
+    """
+    if os.environ.get("TRUING_ESPTOOL"):
+        return os.environ["TRUING_ESPTOOL"]
+    home = os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    packages = os.path.join(home, ".platformio", "packages")
+    names = sorted(n for n in (os.listdir(packages) if os.path.isdir(packages) else [])
+                   if n == "tool-esptoolpy" or n.startswith("tool-esptoolpy@"))
+    tried = []
+    for name in names:
+        candidate = os.path.join(packages, name, "esptool.py")
+        if not os.path.exists(candidate):
+            continue
+        try:
+            r = subprocess.run([python, candidate, "version"],
+                               capture_output=True, text=True, timeout=30)
+        except Exception as e:                                  # noqa: BLE001 - report and move on
+            tried.append("%s (%s)" % (name, e))
+            continue
+        if r.returncode == 0:
+            if name != "tool-esptoolpy":
+                print("using esptool from %s (the default one does not run here)" % name)
+            return candidate
+        first = (r.stderr or r.stdout or "").strip().splitlines()
+        tried.append("%s (%s)" % (name, first[-1] if first else "exit %d" % r.returncode))
+    raise SystemExit("no working esptool.py under %s - set TRUING_ESPTOOL explicitly.\ntried: %s"
+                     % (packages, "; ".join(tried) or "nothing named tool-esptoolpy*"))
 
 
 def board_for_env(env):
@@ -261,8 +303,7 @@ def main():
         # PlatformIO-managed one, which every board/flashing note in docs/DEV_NOTES.md assumes, is
         # what TRUING_PYTHON should point at if this default is ever wrong.
         python = resolve_tool("TRUING_PYTHON", None, [".platformio", "penv", "Scripts", "python.exe"])
-        esptool = resolve_tool("TRUING_ESPTOOL", None,
-                               [".platformio", "packages", "tool-esptoolpy", "esptool.py"])
+        esptool = resolve_esptool(python)
 
     if not args.verify_only:
         if not args.no_build:
