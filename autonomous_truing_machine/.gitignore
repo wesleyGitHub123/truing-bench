@@ -11,6 +11,9 @@ test/fixtures/acoustic/captures/*.observed.json
 # Promote the few that become regression fixtures; the rest stay local.
 test/fixtures/acoustic/captures/_campaign/
 
+# WAV exports from tools/capture_wav.py -- derived from the bundles, never the source of truth
+test/fixtures/acoustic/captures/_wav/
+
 # Python tooling (tools/) byte-compiles here
 __pycache__/
 *.pyc
