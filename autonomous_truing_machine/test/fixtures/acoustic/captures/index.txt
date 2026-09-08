@@ -2,3 +2,4 @@
 # Written by tools/capture_fetch.py; edit by hand only to remove one.
 golden_ts03_e2
 nano_ambient_ambiguous
+nano_handpluck_provisional
