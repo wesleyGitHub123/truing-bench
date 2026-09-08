@@ -670,12 +670,17 @@ static const char TRUING_WEB_UI_HTML[] =
 " if(k==='ACOUSTIC_PHASE'){\n"
 "  phase={p:f.phase,idx:f.spoke_index,exc:f.excitation,cmd:f.pluck_commanded,\n"
 "   win:f.window_ms||0,att:f.attempt||1,at:Date.now()};\n"
+/*  ARMED is the pluck cue, not a warm-up. Measured over 49 captures on this chain: striking
+    during this lead, so the window opens on an already-ringing spoke, clears the SNR gate
+    47% of the time against 12.5% for striking once the window is open. The attack transient
+    is broadband - inside the analysis window it saturates the peak list and buries the
+    fundamental. The quiet ring-down is the part worth recording. */
 "  if(f.phase==='ARMED'){lastIdx=f.spoke_index;\n"
-"   act('get ready - spoke '+f.spoke_index+(f.attempt>1?' (attempt '+f.attempt+')':'')+\n"
-"    ' - window opens shortly','t-warn',f.ts_ms);}\n"
+"   act('PLUCK SPOKE '+f.spoke_index+' now'+(f.attempt>1?' - attempt '+f.attempt:''),\n"
+"    't-warn',f.ts_ms);}\n"
 "  else if(f.phase==='LISTENING'){lastIdx=f.spoke_index;\n"
-"   act((f.excitation==='ACTUATOR'?'plucking spoke ':'PLUCK SPOKE ')+f.spoke_index+\n"
-"    (f.attempt>1?' - attempt '+f.attempt:''),'t-warn',f.ts_ms);}\n"
+"   act((f.excitation==='ACTUATOR'?'plucking spoke ':'recording spoke ')+f.spoke_index+\n"
+"    (f.excitation==='ACTUATOR'?'':' - hands off'),'t-nav',f.ts_ms);}\n"
 /*  ONSET_DETECTED means only that the detector picked a sample in the finished capture, not
     that a good pluck landed - the peak/SNR gates run AFTER it. Say what is true. */
 "  else if(f.phase==='ONSET_DETECTED')\n"
@@ -779,18 +784,22 @@ static const char TRUING_WEB_UI_HTML[] =
    which is what makes the cue a bonus rather than a dependency. */
 " if(phase&&s&&s.session_active&&curState==='MEASURE_SPOKE_TENSION'){\n"
 "  var act1=phase.exc==='ACTUATOR';stopTick();\n"
+/*  ARMED asks for the pluck; LISTENING asks for silence. That is the opposite of what this
+    page said before 2026-09-08, and the campaign in captures/_campaign is why. */
 "  if(phase.p==='ARMED'){c.className='card wait';\n"
-"   put(p,'p','head w','Get ready - spoke '+phase.idx);\n"
-"   put(p,'p','sub','The capture window opens in a moment. Hand to the spoke, but do not '+\n"
-"    'pluck until it says Pluck now.');\n"
+"   put(p,'p','head w','Pluck spoke '+phase.idx+' now');\n"
+"   put(p,'p','sub','One firm pluck, while this bar runs down. The machine records just '+\n"
+"    'after it, and it needs the spoke already ringing - a pluck struck into the open '+\n"
+"    'window is mostly rejected.');\n"
 "   var ab=put(p,'div','lwin');ab.id='lwinbox';put(ab,'i').id='lbar';\n"
 "   var ar=put(p,'div','el','');ar.id='lrem';\n"
 "   if(phase.att>1)put(p,'div','att','Attempt '+phase.att+' - the last one was not heard');\n"
 "   put(p,'div','enum','ACOUSTIC ARMED');startTick();return;}\n"
-"  if(phase.p==='LISTENING'){c.className='card wait';\n"
-"   put(p,'p','head w',act1?'Plucking spoke '+phase.idx:'Pluck spoke '+phase.idx+' now');\n"
+"  if(phase.p==='LISTENING'){c.className=act1?'card wait':'card busy';\n"
+"   put(p,'p','head '+(act1?'w':'b'),act1?'Plucking spoke '+phase.idx\n"
+"    :'Recording spoke '+phase.idx+' - hands off');\n"
 "   put(p,'p','sub',act1?'The actuator was commanded; the machine is listening.'\n"
-"    :'The microphone is listening. One firm pluck, then keep still.');\n"
+"    :'Capturing the ring-down. Do not pluck now and do not touch the wheel.');\n"
 "   var lb=put(p,'div','lwin');lb.id='lwinbox';put(lb,'i').id='lbar';\n"
 "   var rr=put(p,'div','el','');rr.id='lrem';\n"
 "   if(phase.att>1)put(p,'div','att','Attempt '+phase.att+' - the last one was not heard');\n"

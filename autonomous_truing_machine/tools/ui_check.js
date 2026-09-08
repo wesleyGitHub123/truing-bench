@@ -595,27 +595,34 @@ sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true,
 ok(txt('statusbody').indexOf('Capturing and analysing') >= 0,
   'with no phase frame the ordinary measuring card is what shows');
 
-// ARMED precedes LISTENING: the fixed-length window cannot end early on a pluck, so the operator
-// has to be counted in before it opens or the first attempt is spent reacting.
+// ARMED is the pluck cue and LISTENING asks for silence -- the opposite of what this page said
+// before 2026-09-08. 49 captures on this chain: striking during the ARMED lead, so the window
+// opens on an already-ringing spoke, cleared the SNR gate 47% of the time against 12.5% for
+// striking into the open window, whose broadband attack saturates the peak list.
 sandbox.handle(PH({ ts_ms: 4800, phase: 'ARMED', window_ms: 2500 }));
-ok(txt('statusbody').indexOf('Get ready') >= 0, 'ARMED warns the operator the window is coming');
-ok(txt('statusbody').indexOf('do not pluck') >= 0 || txt('statusbody').indexOf('not pluck') >= 0,
-  'ARMED says not to pluck yet');
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0, 'ARMED is not the pluck cue itself');
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'ARMED is the pluck cue');
+ok(txt('statusbody').indexOf('already ringing') >= 0,
+  'and says why it wants the pluck before the window');
+ok(txt('statusbody').indexOf('Get ready') < 0, 'ARMED no longer tells the operator to wait');
 ok(txt('statusbody').indexOf('ACOUSTIC ARMED') >= 0, 'the armed card names its phase');
-ok(feedText('act').indexOf('get ready - spoke 7') >= 0, 'the log gets a get-ready line for the spoke');
+ok(feedText('act').indexOf('PLUCK SPOKE 7 now') >= 0, 'the log carries the pluck cue on ARMED');
 
 sandbox.handle(PH({}));
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0,
-  'LISTENING tells the operator to pluck, and which spoke');
-ok(byId['status'].className.indexOf('wait') >= 0,
-  'the listening card is styled as something asked of you, not as the machine working');
+ok(txt('statusbody').indexOf('Recording spoke 7') >= 0 &&
+   txt('statusbody').indexOf('hands off') >= 0,
+  'LISTENING says it is recording and asks for hands off');
+ok(txt('statusbody').indexOf('Do not pluck now') >= 0,
+  'and explicitly says not to pluck into the open window');
+ok(byId['status'].className.indexOf('wait') < 0,
+  'the listening card is styled as the machine working, not as something asked of you');
 ok(txt('statusbody').indexOf('ACOUSTIC LISTENING') >= 0, 'the card names the phase it is in');
 ok(txt('statusbody').indexOf('Attempt') < 0, 'a first attempt is not labelled as a retry');
+ok(feedText('act').indexOf('recording spoke 7 - hands off') >= 0,
+  'the log says recording, not pluck, once the window is open');
 
-// The retry the orchestrator does silently: same state, no transition, so this frame is the
-// only thing that can tell the operator to pluck again.
-sandbox.handle(PH({ ts_ms: 6600, attempt: 2 }));
+// The retry the orchestrator does silently: same state, no transition, so the ARMED frame of
+// the next attempt is the only thing that can tell the operator to pluck again.
+sandbox.handle(PH({ ts_ms: 6600, phase: 'ARMED', window_ms: 2500, attempt: 2 }));
 ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a retry re-opens the pluck cue');
 ok(txt('statusbody').indexOf('Attempt 2') >= 0,
   'the retry says which attempt it is - nothing else reports this');
@@ -645,7 +652,7 @@ sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', ind
 ok(txt('statusbody').indexOf('Pluck spoke') < 0, 'a result clears the pluck cue');
 
 // So does leaving the state, however many frames went missing on the way.
-sandbox.handle(PH({ ts_ms: 10000 }));
+sandbox.handle(PH({ ts_ms: 10000, phase: 'ARMED', window_ms: 2500 }));
 ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a fresh window re-arms the cue');
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 10100,
   from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
