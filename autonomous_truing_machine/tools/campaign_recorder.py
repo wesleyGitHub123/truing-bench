@@ -147,6 +147,11 @@ def main():
             name = "%s_sp%s_a%s_seq%d" % (args.pass_, meta.get("spoke_id"), meta.get("attempt"), s)
             note = "campaign pass %s. %s" % (args.pass_, args.note) if args.note else "campaign pass %s" % args.pass_
             doc = write_bundle(name, meta, pcm, note, args.out)
+            # an index.txt so tools/sweep_dsp (and capture_fetch's own replay) can enumerate
+            # the harvest without a directory listing, same convention as the checked-in dir
+            idx = os.path.join(args.out, "index.txt")
+            with open(idx, "a", encoding="utf-8") as fh:
+                fh.write(name + "\n")
             kept += 1
             log("   kept %s  %s/%s  snr=%s f1=%s onset=%s" % (
                 name, doc.get("status"), doc.get("reason"),
