@@ -7,6 +7,10 @@
 # Replay diagnostics written by test_acoustic_replay; promote with tools/capture_accept.py
 test/fixtures/acoustic/captures/*.observed.json
 
+# Raw campaign harvest from tools/campaign_recorder.py -- dozens of ~230 KB bundles.
+# Promote the few that become regression fixtures; the rest stay local.
+test/fixtures/acoustic/captures/_campaign/
+
 # Python tooling (tools/) byte-compiles here
 __pycache__/
 *.pyc
