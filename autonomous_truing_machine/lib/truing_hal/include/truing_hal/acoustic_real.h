@@ -91,6 +91,11 @@ typedef struct {
     /* Phase observation (optional; NULL means the subsystem is silent as before). */
     truing_acoustic_observer_fn        observer;
     void                              *observer_ctx;
+    /* Optional lead-in before the capture window opens (SPEC §9.1 is one call; this is
+     * internal to it). 0 or a NULL delay_fn: behave exactly as before. */
+    uint32_t                           pluck_lead_ms;
+    void                             (*delay_fn)(void *ctx, uint32_t ms);
+    void                              *delay_ctx;
     /* The orchestrator retries by calling again with the same spoke, so consecutive calls for
      * one spoke in one cycle ARE the attempts. Counting them here is what lets the station say
      * "attempt 2" without the orchestrator having to report its own retry bookkeeping. */
@@ -124,6 +129,14 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
 /* Attach (or, with NULL, detach) the phase observer. Wired by the composition root after init,
  * never by the orchestrator. Safe to leave unset: the subsystem then emits nothing at all. */
 void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx);
+
+/* Give the station a lead-in before each hand-pluck window: an ARMED phase event is emitted
+ * and `delay_fn(delay_ctx, lead_ms)` performs the wait (vTaskDelay on target) before LISTENING.
+ * Skipped when an actuator did the excitation - nobody to count in - and a no-op when lead_ms
+ * is 0 or delay_fn is NULL, which is how host tests and replay keep the old timing. Wired by
+ * the composition root after init, like the observer. */
+void truing_acoustic_real_set_pluck_lead(truing_acoustic_if_t *self, uint32_t lead_ms,
+                                         void (*delay_fn)(void *ctx, uint32_t ms), void *delay_ctx);
 
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */

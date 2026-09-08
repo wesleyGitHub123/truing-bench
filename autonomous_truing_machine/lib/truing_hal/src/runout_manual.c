@@ -86,6 +86,17 @@ static truing_status_t manual_tare(truing_runout_if_t *self, truing_reason_t *re
     return TRUING_STATUS_VALID;
 }
 
+static void manual_reset_session(truing_runout_if_t *self)
+{
+    truing_runout_manual_ctx_t *ctx = (truing_runout_manual_ctx_t *)self->ctx;
+    if (ctx != NULL) {
+        /* A SUBMIT_RUNOUT that an ABORT interrupted before read_snapshot() consumed it would
+         * otherwise be handed to the next session's matching rim index as a VALID reading
+         * (SPEC §10.2). `tared` is physical setup and stays. */
+        ctx->pending = false;
+    }
+}
+
 void truing_runout_manual_init(truing_runout_if_t *self, truing_runout_manual_ctx_t *ctx, truing_clock_if_t clock)
 {
     if (self == NULL || ctx == NULL) {
@@ -99,6 +110,7 @@ void truing_runout_manual_init(truing_runout_if_t *self, truing_runout_manual_ct
     self->read_snapshot = manual_snapshot;
     self->stream_samples = manual_stream;
     self->tare = manual_tare;
+    self->reset_session = manual_reset_session;
     self->ctx = ctx;
 }
 

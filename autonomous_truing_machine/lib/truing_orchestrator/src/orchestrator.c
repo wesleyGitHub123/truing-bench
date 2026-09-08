@@ -374,6 +374,13 @@ static void begin_session(truing_orchestrator_t *o, uint32_t artifact_id, const 
     o->terminal = TRUING_TERMINAL_NONE;
     o->terminal_reason = TRUING_REASON_NONE;
     truing_wheel_state_begin_cycle(&o->wheel_state, 1u);
+    /* A session boundary must also clear latched request state in the acquisition HAL: an
+     * ABORT at a positioning wait leaves an unconsumed cancel / manual entry that would
+     * otherwise answer this session's first measurement (SPEC §7.4 / §10.2 / §12.3). */
+    truing_acoustic_reset_session(o->deps.acoustic);
+    truing_runout_reset_session(o->deps.runout);
+    memset(o->remeasure_spoke, 0, sizeof(o->remeasure_spoke));
+    memset(o->remeasure_rim, 0, sizeof(o->remeasure_rim));
     memset(&o->admission, 0, sizeof(o->admission));
     memset(&o->plan, 0, sizeof(o->plan));
     memset(&o->verification, 0, sizeof(o->verification));

@@ -9,7 +9,7 @@ static const char *const k_kind_str[TRUING_EVT__COUNT] = {
 };
 
 static const char *const k_phase_str[TRUING_ACOUSTIC_PHASE__COUNT] = {
-    "LISTENING", "ONSET_DETECTED", "ANALYZING",
+    "LISTENING", "ONSET_DETECTED", "ANALYZING", "ARMED",
 };
 
 static const char *const k_excitation_str[TRUING_EXCITATION__COUNT] = {

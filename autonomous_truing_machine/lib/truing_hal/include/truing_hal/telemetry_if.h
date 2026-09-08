@@ -53,6 +53,11 @@ typedef enum {
     TRUING_ACOUSTIC_PHASE_LISTENING = 0,   /* the capture window is OPEN: pluck now */
     TRUING_ACOUSTIC_PHASE_ONSET_DETECTED,  /* an excitation was found in the capture */
     TRUING_ACOUSTIC_PHASE_ANALYZING,       /* the window is closed; the FFT is running */
+    /* Optional lead-in before LISTENING: the window is NOT open yet. The capture is
+     * fixed-length and cannot end early on a pluck, so without this the operator gets no
+     * warning and the cue has to cross the network before the ~1 s window closes. window_ms
+     * carries the lead. Appended last so LISTENING/ONSET_DETECTED/ANALYZING keep their values. */
+    TRUING_ACOUSTIC_PHASE_ARMED,
     TRUING_ACOUSTIC_PHASE__COUNT
 } truing_acoustic_phase_t;
 

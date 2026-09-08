@@ -27,6 +27,11 @@ static void stub_cancel(truing_acoustic_if_t *self)
     (void)self;
 }
 
+static void stub_reset_session(truing_acoustic_if_t *self)
+{
+    (void)self;   /* nothing latched */
+}
+
 void truing_acoustic_stub_init(truing_acoustic_if_t *self, truing_acoustic_stub_ctx_t *ctx, truing_clock_if_t clock)
 {
     if (self == NULL || ctx == NULL) {
@@ -38,6 +43,7 @@ void truing_acoustic_stub_init(truing_acoustic_if_t *self, truing_acoustic_stub_
     self->source_impl = TRUING_SOURCE_SYNTHETIC;
     self->measure_spoke_tension = stub_measure;
     self->request_cancel = stub_cancel;
+    self->reset_session = stub_reset_session;
     self->ctx = ctx;
 }
 
@@ -61,5 +67,12 @@ void truing_acoustic_request_cancel(truing_acoustic_if_t *self)
 {
     if (self != NULL && self->request_cancel != NULL) {
         self->request_cancel(self);
+    }
+}
+
+void truing_acoustic_reset_session(truing_acoustic_if_t *self)
+{
+    if (self != NULL && self->reset_session != NULL) {
+        self->reset_session(self);
     }
 }

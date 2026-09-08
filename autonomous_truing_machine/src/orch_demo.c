@@ -259,6 +259,16 @@ static void acoustic_phase_observer(void *ctx, const truing_telemetry_event_t *e
              ev->u.acoustic.phase == (uint8_t)TRUING_ACOUSTIC_PHASE_LISTENING ? " - PLUCK NOW" : "");
 }
 
+#if TRUING_REAL_FRONT_END
+/* The ARMED lead-in wait. Runs on the measuring task, inside the measurement; the acoustic HAL
+ * hands it out as a function pointer so it never links FreeRTOS itself. */
+static void pluck_lead_delay(void *ctx, uint32_t ms)
+{
+    (void)ctx;
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
+#endif
+
 static void drain_telemetry(void)
 {
     truing_telemetry_event_t ev;
@@ -379,6 +389,14 @@ static void demo_task(void *arg)
     /* Wired by the composition root, which is the only place that knows there is a transport to
      * push to. The orchestrator's contract with the acoustic subsystem is unchanged. */
     truing_acoustic_real_set_observer(&s.acoustic, acoustic_phase_observer, NULL);
+#if TRUING_REAL_FRONT_END
+    /* The capture window cannot end early on a pluck, so the person at the station needs to be
+     * counted in BEFORE it opens or they spend the first attempt reacting. 2.5 s: long enough
+     * to read the cue over WiFi and get a hand to the spoke, short enough that a bounded
+     * 3-spoke pass stays under a minute. The wait itself is FreeRTOS; the HAL takes it as a
+     * function pointer so it never links the RTOS. */
+    truing_acoustic_real_set_pluck_lead(&s.acoustic, 2500u, pluck_lead_delay, NULL);
+#endif
     /* THE fast-demo substitution, and the only one. Both implementations already exist and
      * both already declare what they are; picking between them here - before
      * truing_orch_init() - is what makes the whole session honest downstream.

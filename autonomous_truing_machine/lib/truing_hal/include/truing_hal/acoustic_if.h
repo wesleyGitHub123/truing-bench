@@ -9,6 +9,12 @@
  * sensor+actuator composite, not a passive sensor. Cancellation (ABORT) is
  * delivered as a cooperative request; the implementation returns at its next
  * internal safe point.
+ *
+ * reset_session() clears any latched request state (a cancel that no measurement
+ * consumed, attempt bookkeeping) so a stale one-shot cannot cross a session
+ * boundary. It does NOT re-open the front end or touch capture evidence. The
+ * orchestrator calls it from begin_session(); an implementation with nothing
+ * latched leaves it empty.
  */
 #ifndef TRUING_HAL_ACOUSTIC_IF_H
 #define TRUING_HAL_ACOUSTIC_IF_H
@@ -33,6 +39,8 @@ struct truing_acoustic_if {
                                   const truing_wheel_class_config_t *wheel_geometry,
                                   uint8_t cycle_index, truing_tension_estimate_t *out);
     void (*request_cancel)(truing_acoustic_if_t *self);
+    /* Clear latched request state at a session boundary (may be NULL: nothing to clear). */
+    void (*reset_session)(truing_acoustic_if_t *self);
     void *ctx;
 };
 
@@ -41,6 +49,9 @@ void truing_acoustic_measure(truing_acoustic_if_t *self, uint8_t spoke_id,
                              const truing_wheel_class_config_t *wheel_geometry,
                              uint8_t cycle_index, truing_tension_estimate_t *out);
 void truing_acoustic_request_cancel(truing_acoustic_if_t *self);
+/* Discard any cancel that no measurement consumed, plus attempt bookkeeping, so it cannot
+ * leak into the next session. No-op when the interface or its hook is absent. */
+void truing_acoustic_reset_session(truing_acoustic_if_t *self);
 
 /* ---- Stub: capability absent -------------------------------------------------- */
 typedef struct {

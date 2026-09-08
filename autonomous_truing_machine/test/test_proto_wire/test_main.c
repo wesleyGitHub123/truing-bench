@@ -348,6 +348,13 @@ static void test_encode_acoustic_phase_event(void)
     ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ONSET_DETECTED;
     reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
     assert_str_field(&d, "phase", "ONSET_DETECTED");
+
+    /* ARMED precedes LISTENING and carries the lead-in (before the window opens) in window_ms. */
+    ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ARMED;
+    ev.u.acoustic.window_ms = 2500u;
+    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
+    assert_str_field(&d, "phase", "ARMED");
+    TEST_ASSERT_EQUAL_UINT32(2500u, (uint32_t)num_field(&d, "window_ms"));
 }
 
 static void test_encode_log_event_bounds_untermined_text(void)

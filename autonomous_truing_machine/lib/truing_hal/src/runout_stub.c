@@ -46,6 +46,11 @@ static truing_status_t stub_tare(truing_runout_if_t *self, truing_reason_t *reas
     return TRUING_STATUS_UNAVAILABLE;
 }
 
+static void stub_reset_session(truing_runout_if_t *self)
+{
+    (void)self;   /* nothing latched */
+}
+
 void truing_runout_stub_init(truing_runout_if_t *self, truing_runout_stub_ctx_t *ctx, truing_clock_if_t clock)
 {
     if (self == NULL || ctx == NULL) {
@@ -59,6 +64,7 @@ void truing_runout_stub_init(truing_runout_if_t *self, truing_runout_stub_ctx_t 
     self->read_snapshot = stub_snapshot;
     self->stream_samples = stub_stream;
     self->tare = stub_tare;
+    self->reset_session = stub_reset_session;
     self->ctx = ctx;
 }
 
@@ -103,4 +109,11 @@ truing_status_t truing_runout_tare(truing_runout_if_t *self, truing_reason_t *re
         return TRUING_STATUS_UNAVAILABLE;
     }
     return self->tare(self, reason_out);
+}
+
+void truing_runout_reset_session(truing_runout_if_t *self)
+{
+    if (self != NULL && self->reset_session != NULL) {
+        self->reset_session(self);
+    }
 }

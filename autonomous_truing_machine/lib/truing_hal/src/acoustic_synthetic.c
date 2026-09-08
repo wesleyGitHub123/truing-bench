@@ -84,6 +84,16 @@ static void synthetic_cancel(truing_acoustic_if_t *self)
     }
 }
 
+static void synthetic_reset_session(truing_acoustic_if_t *self)
+{
+    truing_acoustic_synthetic_ctx_t *ctx = (truing_acoustic_synthetic_ctx_t *)self->ctx;
+    if (ctx != NULL) {
+        /* A cancel that no measurement consumed must not answer the next session's first
+         * spoke (SPEC §7.4 / §12.3). The call counters are observability, left untouched. */
+        ctx->cancel_requested = false;
+    }
+}
+
 void truing_acoustic_synthetic_init(truing_acoustic_if_t *self, truing_acoustic_synthetic_ctx_t *ctx,
                                     truing_clock_if_t clock, uint8_t n_spokes, truing_tension_model_t model_name,
                                     uint16_t model_version)
@@ -106,6 +116,7 @@ void truing_acoustic_synthetic_init(truing_acoustic_if_t *self, truing_acoustic_
     self->source_impl = TRUING_SOURCE_SYNTHETIC;
     self->measure_spoke_tension = synthetic_measure;
     self->request_cancel = synthetic_cancel;
+    self->reset_session = synthetic_reset_session;
     self->ctx = ctx;
 }
 

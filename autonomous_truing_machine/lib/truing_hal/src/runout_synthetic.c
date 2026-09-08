@@ -84,6 +84,11 @@ static truing_status_t syn_tare(truing_runout_if_t *self, truing_reason_t *reaso
     return TRUING_STATUS_VALID;
 }
 
+static void syn_reset_session(truing_runout_if_t *self)
+{
+    (void)self;   /* a table lookup latches nothing between sessions; tare is physical setup */
+}
+
 void truing_runout_synthetic_init(truing_runout_if_t *self, truing_runout_synthetic_ctx_t *ctx,
                                   truing_clock_if_t clock, uint8_t n_rim_angles)
 {
@@ -103,6 +108,7 @@ void truing_runout_synthetic_init(truing_runout_if_t *self, truing_runout_synthe
     self->read_snapshot = syn_snapshot;
     self->stream_samples = syn_stream;
     self->tare = syn_tare;
+    self->reset_session = syn_reset_session;
     self->ctx = ctx;
 }
 

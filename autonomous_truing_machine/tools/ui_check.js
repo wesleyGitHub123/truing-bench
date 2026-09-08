@@ -595,6 +595,16 @@ sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true,
 ok(txt('statusbody').indexOf('Capturing and analysing') >= 0,
   'with no phase frame the ordinary measuring card is what shows');
 
+// ARMED precedes LISTENING: the fixed-length window cannot end early on a pluck, so the operator
+// has to be counted in before it opens or the first attempt is spent reacting.
+sandbox.handle(PH({ ts_ms: 4800, phase: 'ARMED', window_ms: 2500 }));
+ok(txt('statusbody').indexOf('Get ready') >= 0, 'ARMED warns the operator the window is coming');
+ok(txt('statusbody').indexOf('do not pluck') >= 0 || txt('statusbody').indexOf('not pluck') >= 0,
+  'ARMED says not to pluck yet');
+ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0, 'ARMED is not the pluck cue itself');
+ok(txt('statusbody').indexOf('ACOUSTIC ARMED') >= 0, 'the armed card names its phase');
+ok(feedText('act').indexOf('get ready - spoke 7') >= 0, 'the log gets a get-ready line for the spoke');
+
 sandbox.handle(PH({}));
 ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0,
   'LISTENING tells the operator to pluck, and which spoke');
@@ -611,10 +621,14 @@ ok(txt('statusbody').indexOf('Attempt 2') >= 0,
   'the retry says which attempt it is - nothing else reports this');
 ok(txt('statusbody').indexOf('not heard') >= 0, 'and says why there is another attempt');
 
+// ONSET_DETECTED means only that the detector picked a sample in the finished capture; the
+// peak/SNR gates run after it, so a rejection can still follow. The card must not read as success.
 sandbox.handle(PH({ ts_ms: 7700, phase: 'ONSET_DETECTED', window_ms: 0 }));
-ok(txt('statusbody').indexOf('Pluck detected') >= 0, 'ONSET_DETECTED confirms the pluck landed');
-ok(txt('statusbody').indexOf('stop plucking') >= 0, 'and says to stop');
-ok(byId['status'].className.indexOf('good') >= 0, 'the confirmation reads as success');
+ok(txt('statusbody').indexOf('Window closed') >= 0, 'ONSET_DETECTED says the window has closed');
+ok(txt('statusbody').indexOf('may still be a rejection') >= 0,
+  'and does not promise the pluck was good');
+ok(txt('statusbody').indexOf('Pluck detected') < 0, 'it does not claim a confirmed detection');
+ok(byId['status'].className.indexOf('good') < 0, 'and is not styled as success');
 ok(txt('statusbody').indexOf('ACOUSTIC ONSET_DETECTED') >= 0
    && txt('statusbody').indexOf('ACOUSTIC LISTENING') < 0,
   'the listening card is replaced once the window has closed, not stacked under it');
@@ -648,6 +662,48 @@ ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0,
   'and does not ask a person to do what the actuator just did');
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 11500,
   from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
+
+// ---- a rejected measurement says WHY, in the log, not only in a card the next spoke overwrites --
+sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
+sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: 4, ts_ms: 12000,
+  status: 'rejected', reason: 'AMBIGUOUS_PEAK', tension_n: null, selected_frequency_hz: null });
+sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: 5, ts_ms: 12100,
+  status: 'unavailable', reason: 'VALUE_OUT_OF_RANGE', tension_n: null, selected_frequency_hz: null });
+let feed = feedText('act');
+ok(feed.indexOf('spoke 4 measured') >= 0 && feed.indexOf('rejected') >= 0
+   && feed.indexOf('Ambiguous peak') >= 0,
+  'a rejected tension line carries the reason, translated, in the activity log');
+ok(feed.indexOf('spoke 5 measured') >= 0 && feed.indexOf('Not enough signal') >= 0,
+  'VALUE_OUT_OF_RANGE now has a translation and is shown (it had neither before)');
+// A rejected runout must not read green either.
+sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'RUNOUT', index: 2, ts_ms: 12200,
+  status: 'unavailable', reason: 'SENSOR_TIMEOUT', lateral_mm: null, radial_mm: null });
+feed = feedText('act');
+ok(feed.indexOf('rim 2 read') >= 0 && feed.indexOf('Sensor timeout') >= 0,
+  'a rejected runout line carries its reason and is not hard-coded to success styling');
+
+// ---- an aborted terminal is not styled or logged as success -------------------------------
+// Each feed row is <div><span.ts><span.CLS text></div>; the second span carries the class.
+const rowCls = (id) => { const r = byId[id].children; return r.length ? (r[r.length - 1].children[1] || {}).className : ''; };
+sandbox.handle({ t: 'event', kind: 'TERMINAL_RESULT', ts_ms: 13000, result: 'ABORT_OPERATOR' });
+ok(feedText('act').indexOf('run finished: ABORT_OPERATOR') >= 0, 'the abort is logged');
+ok(rowCls('act') === 't-bad', 'an aborted run is not logged in the success colour');
+sandbox.handle({ t: 'event', kind: 'TERMINAL_RESULT', ts_ms: 13100, result: 'CONVERGED_GEOMETRIC_ONLY' });
+ok(rowCls('act') === 't-good', 'a converged run still reads as success');
+
+// ---- every reason the firmware can emit has an operator translation -----------------------
+// Mirrors k_reason_str in lib/truing_core/src/status.c (NONE needs no entry). If the firmware
+// grows a reason, this fails until the page learns to say it.
+const REASONS = [
+  'NO_ONSET_DETECTED', 'ONSET_COUNT_MISMATCH', 'LOW_SNR', 'AMBIGUOUS_PEAK', 'FREQ_OUT_OF_RANGE',
+  'NO_F2_PARTNER', 'PROVISIONAL_MODE_ID', 'MODEL_REJECTED', 'SENSOR_TIMEOUT', 'VALUE_OUT_OF_RANGE',
+  'NOT_IMPLEMENTED', 'CALIBRATION_MISSING', 'STALE_MEASUREMENT', 'PARTIAL_WHEEL_STATE',
+  'ARTIFACT_INVALID', 'STALE_INTENT', 'REQUIRES_ARTIFACT_REGENERATION',
+  'MEAN_TENSION_MODEL_UNAVAILABLE', 'TENSION_NOT_VERIFICATION_GRADE', 'CANCELLED',
+  'WHEEL_REFERENCE_LOST', 'CAPTURE_OVERRUN',
+];
+const missing = REASONS.filter(r => !(sandbox.REASON && sandbox.REASON[r]));
+ok(missing.length === 0, 'every firmware reason code has a page translation', missing.join(', '));
 
 IDENT.mode = 'interactive'; IDENT.acquisition = 'manual'; IDENT.acquisition_selectable = false;
 IDENT.real_front_end = false;

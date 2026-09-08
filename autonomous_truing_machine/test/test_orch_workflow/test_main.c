@@ -790,6 +790,101 @@ static void test_abort_and_parameter_rules_at_a_wait(void)
     TEST_ASSERT_EQUAL_UINT32(2u, prov.session_id);
 }
 
+/* ABORT calls request_cancel on the acoustic HAL to unwind an in-flight measurement, but at a
+ * positioning wait there is none, so the cancel stays latched. begin_session() must discard it,
+ * or the next session's FIRST spoke returns CANCELLED before its LISTENING cue is emitted and
+ * the retry guard (which excludes CANCELLED) never runs — the operator sees a spoke silently
+ * skipped. TENSION_ABSENT so REMEASURE_GAPS cannot mask it; manual navigation so there is a
+ * wait to abort at. */
+static void test_abort_at_a_wait_does_not_carry_a_cancel_into_the_next_session(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build(&g, lat, 1.0f);
+    g.cctx.n_mt_identified = false;   /* TENSION_ABSENT: nothing repairs a skipped tension row */
+    rig_reinit(&g, 0u);
+    bring_to_ready(&g);
+    truing_reason_t reason;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+
+    truing_orch_step_t s = TRUING_ORCH_ADVANCED;
+    while (s == TRUING_ORCH_ADVANCED) {
+        s = truing_orch_step(&g.orch);
+    }
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_WAITING_OPERATOR, s);
+    truing_orch_snapshot_t snap;
+    truing_orch_snapshot(&g.orch, &snap);
+    TEST_ASSERT_EQUAL_INT(TRUING_WAIT_POSITION_TO_SPOKE, snap.active_wait.kind);
+    TEST_ASSERT_EQUAL_UINT8(0u, snap.active_wait.target_index);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.actx.calls);            /* spoke 0 not measured yet */
+    TEST_ASSERT_EQUAL_UINT32(0u, g.actx.cancelled_calls);
+
+    truing_intent_t abort;
+    memset(&abort, 0, sizeof(abort));
+    abort.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &abort, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, truing_orch_step(&g.orch));
+    truing_orch_snapshot(&g.orch, &snap);
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, snap.last_result);
+
+    TEST_ASSERT_TRUE(truing_orch_reset_to_ready(&g.orch));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 4000u));
+    truing_orch_snapshot(&g.orch, &snap);
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY, snap.last_result);
+
+    /* The decisive assertion: no measurement in session 2 was answered from session 1's cancel. */
+    TEST_ASSERT_EQUAL_UINT32(0u, g.actx.cancelled_calls);
+    truing_cycle_provenance_t prov;
+    truing_orch_provenance(&g.orch, &prov);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, prov.spoke_status[0]);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_PROVISIONAL_MODE_ID, prov.spoke_reason[0]);
+}
+
+/* The same defect on the runout side, and worse: a SUBMIT_RUNOUT the operator entered just
+ * before aborting stays latched in runout_manual, and the next session's matching rim index
+ * reads it back as a VALID measurement it never took. begin_session() must clear it. */
+static void test_abort_after_a_runout_entry_does_not_carry_into_the_next_session(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build(&g, lat, 1.0f);
+    bring_to_ready(&g);
+    truing_reason_t reason;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+
+    truing_orch_step_t s = TRUING_ORCH_ADVANCED;
+    bool submitted = false;
+    for (uint32_t i = 0; i < 6000u && !submitted; ++i) {
+        s = truing_orch_step(&g.orch);
+        if (s != TRUING_ORCH_WAITING_OPERATOR) {
+            continue;
+        }
+        truing_orch_snapshot_t snap;
+        truing_intent_t intent;
+        truing_orch_snapshot(&g.orch, &snap);
+        TEST_ASSERT_TRUE(truing_auto_operator_answer(&g.op, &snap, &intent));
+        TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &intent, NULL));
+        if (snap.active_wait.kind == TRUING_WAIT_ENTER_RUNOUT) {
+            submitted = true;   /* the entry is now latched, waiting for read_snapshot() */
+        }
+    }
+    TEST_ASSERT_TRUE(submitted);
+    TEST_ASSERT_TRUE(g.rctx.pending);
+
+    /* ABORT before the next step can consume the entry. */
+    truing_intent_t abort;
+    memset(&abort, 0, sizeof(abort));
+    abort.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &abort, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, truing_orch_step(&g.orch));
+    TEST_ASSERT_TRUE(g.rctx.pending);   /* the abort did not consume it */
+
+    TEST_ASSERT_TRUE(truing_orch_reset_to_ready(&g.orch));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+    TEST_ASSERT_FALSE(g.rctx.pending);   /* begin_session() discarded the stale entry */
+}
+
 static void test_state_within_tolerance_skips_apply_and_does_not_remeasure(void)
 {
     rig_build(&g, NULL, 1.0f);   /* a true wheel */
@@ -832,6 +927,8 @@ int main(int argc, char **argv)
     RUN_TEST(test_unsafe_adjustment_aborts_before_any_apply);
     RUN_TEST(test_no_progress_and_max_cycles_aborts);
     RUN_TEST(test_abort_and_parameter_rules_at_a_wait);
+    RUN_TEST(test_abort_at_a_wait_does_not_carry_a_cancel_into_the_next_session);
+    RUN_TEST(test_abort_after_a_runout_entry_does_not_carry_into_the_next_session);
     RUN_TEST(test_state_within_tolerance_skips_apply_and_does_not_remeasure);
     return UNITY_END();
 }

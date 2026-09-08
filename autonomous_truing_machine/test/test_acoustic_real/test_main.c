@@ -370,6 +370,45 @@ static void test_a_cancelled_measurement_emits_no_phase_at_all(void)
     src.close(&src);
 }
 
+/* A session boundary must discard latched request state that no measurement consumed. An
+ * ABORT at a positioning wait sets cancel_requested with nothing to consume it; without
+ * reset_session it answers the next session's first measurement as CANCELLED - no pluck cue,
+ * no retries (the demo-image spoke-0 skip). reset_session also drops attempt_valid, so the
+ * next session's first pluck is "attempt 1", not a continuation of the last one. This is the
+ * acoustic_real half of the orchestrator begin_session() regression in test_orch_workflow. */
+static void test_reset_session_discards_state_no_measurement_consumed(void)
+{
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL,
+                                               g_scratch, g_scratch_bytes, &detail));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+    truing_tension_estimate_t e;
+
+    /* session 1: two consecutive calls for spoke 0 / cycle 1 - the second is retry "attempt 2" */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(2u, g_obs.ev[g_obs.n - 1u].u.acoustic.attempt);
+
+    /* the session ends at a wait: an ABORT sets the cancel flag and nothing consumes it */
+    truing_acoustic_request_cancel(&a);
+    truing_acoustic_reset_session(&a);
+
+    /* session 2's first call for the same spoke/cycle: a real result, not the stale cancel,
+     * and numbered attempt 1 rather than a continuation */
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_NOT_EQUAL(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_obs.ev[0].u.acoustic.attempt);
+    src.close(&src);
+}
+
 static void test_status_rules_calibration_cancel_overrun_silence_format(void)
 {
     truing_audio_source_if_t src;
@@ -585,6 +624,7 @@ int main(void)
     RUN_TEST(test_an_attached_actuator_is_reported_as_the_excitation);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);
     RUN_TEST(test_a_cancelled_measurement_emits_no_phase_at_all);
+    RUN_TEST(test_reset_session_discards_state_no_measurement_consumed);
     RUN_TEST(test_workflow_with_real_acoustic_layers_reaches_converged_geometric_only);
     return UNITY_END();
 }

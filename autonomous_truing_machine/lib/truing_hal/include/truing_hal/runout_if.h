@@ -55,6 +55,9 @@ struct truing_runout_if {
     truing_status_t (*stream_samples)(truing_runout_if_t *self, truing_runout_stream_cb_t cb, void *user,
                                       uint32_t max_samples, truing_reason_t *reason_out);
     truing_status_t (*tare)(truing_runout_if_t *self, truing_reason_t *reason_out);
+    /* Clear a submitted-but-unread manual entry at a session boundary (may be NULL). A tare
+     * is physical setup, not per-session, and is deliberately NOT cleared here. */
+    void (*reset_session)(truing_runout_if_t *self);
     void *ctx;
 };
 
@@ -65,6 +68,9 @@ void            truing_runout_read_snapshot(truing_runout_if_t *self, uint8_t ri
 truing_status_t truing_runout_stream_samples(truing_runout_if_t *self, truing_runout_stream_cb_t cb, void *user,
                                              uint32_t max_samples, truing_reason_t *reason_out);
 truing_status_t truing_runout_tare(truing_runout_if_t *self, truing_reason_t *reason_out);
+/* Discard a SUBMIT_RUNOUT that no read_snapshot() consumed, so it cannot be read as this
+ * session's measurement for that rim index. No-op when the interface or its hook is absent. */
+void            truing_runout_reset_session(truing_runout_if_t *self);
 
 /* ---- Stub: no capability ----------------------------------------------------- */
 typedef struct {

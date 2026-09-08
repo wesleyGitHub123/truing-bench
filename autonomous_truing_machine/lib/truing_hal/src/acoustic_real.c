@@ -279,6 +279,19 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     if (c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck) && c->chain->excitation_pulse_ms > 0.0f) {
         c->diag.pluck_commanded = c->pluck->fire(c->pluck, c->chain->excitation_pulse_ms);
     }
+    /* A person at the station otherwise gets no warning at all: the window is fixed-length and
+     * cannot end early on a pluck, so a cue arriving with LISTENING is already racing the ~1 s
+     * close. ARMED gives them a lead-in. Skipped when an actuator did the excitation (nobody to
+     * count in) and when no lead is configured (host tests, replay: timing unchanged). */
+    if (c->pluck_lead_ms > 0u && c->delay_fn != NULL && !c->diag.pluck_commanded) {
+        emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_ARMED, spoke_id, c->pluck_lead_ms);
+        c->delay_fn(c->delay_ctx, c->pluck_lead_ms);
+        if (c->cancel_requested) {
+            c->cancel_requested = false;
+            truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, self->source_impl);
+            return;
+        }
+    }
     /* Last thing before the window opens, so the cue reaches the station while it is still open
      * rather than describing something already over. Emitted AFTER any actuator was commanded,
      * so pluck_commanded on this frame is the truth for this attempt. */
@@ -378,12 +391,41 @@ void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoust
     c->observer_ctx = observer_ctx;
 }
 
+void truing_acoustic_real_set_pluck_lead(truing_acoustic_if_t *self, uint32_t lead_ms,
+                                         void (*delay_fn)(void *ctx, uint32_t ms), void *delay_ctx)
+{
+    if (self == NULL || self->ctx == NULL) {
+        return;
+    }
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    c->pluck_lead_ms = lead_ms;
+    c->delay_fn = delay_fn;
+    c->delay_ctx = delay_ctx;
+}
+
 static void real_cancel(truing_acoustic_if_t *self)
 {
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
     if (c != NULL) {
         c->cancel_requested = true;
     }
+}
+
+static void real_reset_session(truing_acoustic_if_t *self)
+{
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    if (c == NULL) {
+        return;
+    }
+    /* An ABORT at a positioning wait sets cancel_requested with no measurement in flight to
+     * consume it; left alone it makes the next session's first spoke return CANCELLED before
+     * the LISTENING cue is even emitted (SPEC §7.4 / §12.3). */
+    c->cancel_requested = false;
+    /* Attempt numbering keys on spoke+cycle and both repeat across sessions, so a stale
+     * attempt_valid would show the new session's first pluck as "attempt 2". */
+    c->attempt_valid = false;
+    /* The capture buffer, its seq and the last-outcome fields are evidence of the last
+     * measurement (SPEC §12.5) and deliberately survive the boundary. */
 }
 
 void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_t *words, uint32_t n_words,
@@ -433,6 +475,7 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
     self->source_impl = TRUING_SOURCE_REAL;
     self->measure_spoke_tension = real_measure;
     self->request_cancel = real_cancel;
+    self->reset_session = real_reset_session;
     self->ctx = ctx;
     ctx->clock = clock;
     ctx->chain = chain;
