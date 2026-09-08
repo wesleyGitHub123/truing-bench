@@ -13,3 +13,5 @@ autonomous_truing_machine/managed_components/
 Thumbs.db
 .DS_Store
 *.swp
+# --- Claude Code: repo settings are committed, local overrides are not ---
+.claude/settings.local.json
