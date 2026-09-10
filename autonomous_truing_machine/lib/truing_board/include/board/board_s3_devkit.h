@@ -39,6 +39,9 @@
 
 /* Excitation actuator output (reserved for the acoustic subsystem). */
 #define BOARD_PLUCK_ACTUATOR_GPIO      15
+/* 1 once a solenoid is physically wired to that pin. The DevKit has none; while 0 the pluck
+ * seam is absent and the operator plucks at the station (see board_nano_esp32.h). */
+#define BOARD_PLUCK_ACTUATOR_PRESENT   0
 
 /* Status indication. The DevKitC-1 has only an addressable RGB LED (WS2812 on GPIO38). */
 #define BOARD_HAS_PLAIN_STATUS_LED     0

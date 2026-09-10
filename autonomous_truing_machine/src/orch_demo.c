@@ -39,6 +39,12 @@ static const char *TAG = "orch_demo";
  * type-checked in every build; the dead one folds away. */
 #include "build_mode.h"
 
+/* Every board profile must state whether a solenoid is wired to the actuator pin; an undefined
+ * macro would silently preprocess as 0 and hide a profile that simply forgot it. */
+#ifndef BOARD_PLUCK_ACTUATOR_PRESENT
+#error "board profile does not define BOARD_PLUCK_ACTUATOR_PRESENT (0 or 1)"
+#endif
+
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
 static struct {
     truing_wheel_class_config_t wheel;
@@ -340,9 +346,13 @@ static void demo_task(void *arg)
              TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
                                 "SYNTHETIC runout"
                               : "manual navigation + manual runout",
-             TRUING_REAL_FRONT_END ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the actuator "
-                                      "pulse on its reserved GPIO when a solenoid is wired, otherwise the hand pluck at the station"
-                                   : "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source",
+             !TRUING_REAL_FRONT_END
+                     ? "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source"
+                     : (BOARD_PLUCK_ACTUATOR_PRESENT
+                                ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the "
+                                  "solenoid pulse on its reserved GPIO"
+                                : "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the "
+                                  "hand pluck at the station, no actuator wired"),
              TRUING_REAL_FRONT_END ? "" : "; the simulated wheel responds through the same influence model");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
@@ -355,9 +365,10 @@ static void demo_task(void *arg)
     /* Acoustic with the PHYSICAL front end: the INMP441 over I2S, opened ONCE here and drained
      * continuously by its own core-1 task into a PSRAM ring; every measurement below captures
      * one bounded window from that ring (SPEC 9.3, 9.4). The sizing is what the acoustic
-     * bring-up proved on target. The excitation actuator is wired below on its reserved GPIO;
-     * with no solenoid attached the capture records whatever excitation arrives - the hand
-     * pluck at the station - and NO_ONSET_DETECTED says honestly when none did (SPEC 9.1). */
+     * bring-up proved on target. The excitation actuator seam is wired below only if the board
+     * profile declares a solenoid present; otherwise the capture records whatever excitation
+     * arrives - the hand pluck at the station - and NO_ONSET_DETECTED says honestly when none
+     * did (SPEC 9.1). */
     const truing_audio_i2s_config_t icfg = {
         .dma_frame_num = 240u,      /* 5 ms per descriptor, multiple of 3, 960 B <= 4092 B (SPEC 9.4.1) */
         .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
@@ -372,15 +383,18 @@ static void demo_task(void *arg)
         return;
     }
     /* The excitation actuator on its reserved GPIO (SPEC 4.3: a pin number exists only in the
-     * board profile). bringup_acoustic exercises this exact init on every boot, so this adds no
-     * new electrical behaviour; whether a solenoid is physically wired to the pin is a property
-     * of the machine, not of this build. With nothing attached the pulse is commanded into the
-     * pin and the hand-pluck fallback remains the excitation - and B2 benches the solenoid
-     * before any acoustic number from it is trusted. */
+     * board profile). Wired into the acoustic subsystem ONLY when the board profile says a
+     * solenoid is physically attached - gpio_config() succeeding is not evidence of one, and a
+     * bare pin makes gpio_fire() return true for nothing, which would skip the ARMED lead-in
+     * and tell the operator "the actuator was commanded" while they pluck by hand (SPEC 17.3).
+     * bringup_acoustic still probes this GPIO on every boot; that is a self-test, not an
+     * excitation into a measurement. B2 benches the solenoid before its numbers are trusted. */
+#if BOARD_PLUCK_ACTUATOR_PRESENT
     if (!truing_pluck_gpio_init(&s.pluck, &s.pluck_gpio_ctx, BOARD_PLUCK_ACTUATOR_GPIO)) {
         ESP_LOGW(TAG, "pluck actuator GPIO init failed (%d); excitation falls back to the hand pluck",
                  BOARD_PLUCK_ACTUATOR_GPIO);
     }
+#endif
 #else
     /* Acoustic: the real subsystem (onset, spectrum, candidates, interim selection, model) on a
      * synthetic pluck at 460 Hz with a faint noise floor; the fake actuator is "attached". */
@@ -388,8 +402,10 @@ static void demo_task(void *arg)
     truing_pluck_fake_init(&s.pluck, &s.pluck_ctx, true);
 #endif
     /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h).
-     * Real front end: the GPIO actuator when it configured, else NULL - a seam that cannot
-     * command is absent, and the hand-pluck fallback is the excitation (see emit_phase). */
+     * Real front end: the GPIO actuator only if the board says one is wired AND it configured;
+     * otherwise NULL - an absent seam is what makes the ARMED lead-in run and the excitation
+     * report HAND (see emit_phase). With BOARD_PLUCK_ACTUATOR_PRESENT 0, pluck_gpio_ctx was
+     * never initialised, so .configured is false and this is NULL. */
     truing_pluck_if_t *const pluck_seam = TRUING_REAL_FRONT_END
                                               ? (s.pluck_gpio_ctx.configured ? &s.pluck : NULL)
                                               : &s.pluck;

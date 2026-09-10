@@ -43,6 +43,10 @@
 
 /* Excitation actuator on D6. */
 #define BOARD_PLUCK_ACTUATOR_GPIO      9
+/* 1 once a solenoid is physically wired to that pin. While 0, the composition root leaves the
+ * pluck seam absent: the operator plucks at the station and the ARMED lead-in counts them in.
+ * bring-up still probes the GPIO regardless -- that is a self-test, not an excitation. */
+#define BOARD_PLUCK_ACTUATOR_PRESENT   0
 
 /* Yellow built-in LED on D13 (GPIO48), active-high. */
 #define BOARD_HAS_PLAIN_STATUS_LED     1
