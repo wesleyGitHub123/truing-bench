@@ -8,10 +8,21 @@ again, refusing anything whose X-Truing-Capture-Seq moved in between (the same g
 tools/capture_fetch.py uses). Each attempt lands as its own bundle.
 
     python tools/campaign_recorder.py --pass A --note "pluck ~0.5s before the window opens"
+    python tools/campaign_recorder.py                      # ad-hoc: label defaults to the start time
 
-Writes <out>/<pass>_sp<N>_a<M>_seq<S>.{pcm,json} and appends nothing to index.txt -- a
-campaign is 20-45 bundles at ~230 KB and does not belong in git. Promote the few that become
-regression fixtures with tools/capture_fetch.py (or by hand + capture_accept.py) afterwards.
+--pass is optional. Give it a short technique label (A / B / C ...) when you are running a
+structured campaign; omit it for a one-off session and the bundles are labelled with the
+minute the recorder started (e.g. 20260910-2153). Either way every bundle also carries three
+plain string fields so a directory of them sorts and filters without parsing filenames:
+
+    campaign_label     what you passed to --pass, or the start-time label
+    campaign_session   the recorder's start timestamp, identical across one run -- the key to
+                       "every capture from the session I did at 21:53" even when --pass varied
+    note               campaign_label plus whatever you passed to --note, in your words
+
+Writes <out>/<label>_sp<N>_a<M>_seq<S>.{pcm,json}. A campaign is 20-45 bundles at ~230 KB and
+does not belong in git; promote the few that become regression fixtures with
+tools/capture_fetch.py (or by hand + capture_accept.py) afterwards.
 
 Run from autonomous_truing_machine/ with this machine joined to the board's AP. One --pass per
 technique; restart the tool between passes. Ctrl-C to stop; the frame log it prints is meant
@@ -28,6 +39,7 @@ sessions rather than reaching for the 3rd attempt.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -56,7 +68,9 @@ def log(m):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--pass", dest="pass_", required=True, help="technique label for this run, e.g. A / B / C")
+    p.add_argument("--pass", dest="pass_", default=None,
+                   help="technique label, e.g. A / B / C. Omit for an ad-hoc session -- "
+                        "bundles are then labelled with the recorder's start time.")
     p.add_argument("--note", default="", help="what this pass is testing, in your words")
     p.add_argument("--host", default=DEFAULT_HOST)
     p.add_argument("--out", default=DEFAULT_OUT, help="bundle directory (default test/fixtures/acoustic/captures/_campaign)")
@@ -65,11 +79,22 @@ def main():
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+
+    # One timestamp, taken once, used for both the session key and (when --pass is absent) the
+    # bundle label. Minute resolution: it is a filename token and it has to stay readable.
+    session = time.strftime("%Y%m%d-%H%M")
+    label = args.pass_ if args.pass_ else session
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,40}", label):
+        raise SystemExit("--pass must be 1-40 chars of letters, digits, . _ - (got %r)" % label)
+
     try:
         ws = WS(args.host, 80, "/ws")
     except OSError as e:
         raise SystemExit("could not reach %s (%s). Joined to the board's AP?" % (args.host, e))
-    log("campaign recorder attached  pass=%s  out=%s" % (args.pass_, args.out))
+    log("campaign recorder attached  label=%s  session=%s  out=%s" % (label, session, args.out))
+    if not args.pass_:
+        log("no --pass given: bundles labelled with the start time; categorise by the "
+            "campaign_session field or your --note")
     log("passive: sends only GET_CURRENT_STATE; harvests on every MEASUREMENT_RESULT")
 
     seen_seq = set()
@@ -144,8 +169,12 @@ def main():
                 log("   seq %d source=%r -- not the mic; skipped" % (s, meta.get("source")))
                 continue
 
-            name = "%s_sp%s_a%s_seq%d" % (args.pass_, meta.get("spoke_id"), meta.get("attempt"), s)
-            note = "campaign pass %s. %s" % (args.pass_, args.note) if args.note else "campaign pass %s" % args.pass_
+            name = "%s_sp%s_a%s_seq%d" % (label, meta.get("spoke_id"), meta.get("attempt"), s)
+            kind = "campaign pass %s" % label if args.pass_ else "ad-hoc session %s" % session
+            note = "%s. %s" % (kind, args.note) if args.note else kind
+            # Categorisation keys that do not depend on parsing the filename. Strings only --
+            # write_bundle rejects anything the flat capture schema cannot hold.
+            meta = dict(meta, campaign_label=label, campaign_session=session)
             doc = write_bundle(name, meta, pcm, note, args.out)
             # an index.txt so tools/sweep_dsp (and capture_fetch's own replay) can enumerate
             # the harvest without a directory listing, same convention as the checked-in dir
@@ -160,7 +189,7 @@ def main():
         log("stopped by operator")
     finally:
         ws.close()
-    log("pass %s: %d bundles in %s" % (args.pass_, kept, args.out))
+    log("%s: %d bundles in %s" % (label, kept, args.out))
 
 
 if __name__ == "__main__":
