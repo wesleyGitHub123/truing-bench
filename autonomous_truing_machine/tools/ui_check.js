@@ -667,6 +667,13 @@ ok(txt('statusbody').indexOf('Plucking spoke 7') >= 0,
   'an actuator build says the machine is plucking, not the operator');
 ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0,
   'and does not ask a person to do what the actuator just did');
+// The "plucking" claim needs the command to have gone out: an ACTUATOR frame without
+// pluck_commanded is a failed fire, and the page must fall back to the hand-pluck wording.
+sandbox.handle(PH({ ts_ms: 11200, excitation: 'ACTUATOR', pluck_commanded: false }));
+ok(txt('statusbody').indexOf('Plucking spoke 7') < 0,
+  'an attached-but-uncommanded actuator must not claim the machine is plucking');
+ok(txt('statusbody').indexOf('hands off') >= 0,
+  'a failed fire renders the hand-pluck wording, not a false actuator claim');
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 11500,
   from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
 

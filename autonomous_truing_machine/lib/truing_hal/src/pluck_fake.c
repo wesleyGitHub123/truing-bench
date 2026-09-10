@@ -12,7 +12,9 @@ static bool fake_available(truing_pluck_if_t *self)
 static bool fake_fire(truing_pluck_if_t *self, float pulse_ms)
 {
     truing_pluck_fake_ctx_t *c = (truing_pluck_fake_ctx_t *)self->ctx;
-    if (c == NULL || !c->attached) {
+    /* Same edge-case contract as pluck_gpio: a non-positive width is refused, not clipped -
+     * excitation_pulse_ms == 0 is the chain profile's own "no actuator commanded". */
+    if (c == NULL || !c->attached || !(pulse_ms > 0.0f)) {
         return false;
     }
     if (c->fail_next) {

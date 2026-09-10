@@ -28,11 +28,14 @@ static void emit_phase(truing_acoustic_real_ctx_t *c, uint8_t cycle_index, truin
     ev.u.acoustic.phase = (uint8_t)phase;
     ev.u.acoustic.spoke_index = spoke_index;
     ev.u.acoustic.pluck_commanded = c->diag.pluck_commanded;
-    /* Reported from what is actually wired, not from a build flag: an attached actuator that
-     * answers available() is the ACTUATOR case, and its absence means a hand at the station. */
-    ev.u.acoustic.excitation = (uint8_t)(c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck)
-                                             ? TRUING_EXCITATION_ACTUATOR
-                                             : TRUING_EXCITATION_HAND);
+    /* Reported from what actually happened this attempt, not from what is wired: an attached
+     * actuator whose fire() failed did NOT command anything, and the ARMED lead-in re-enables
+     * for exactly that case - so HAND is true of everything downstream, not just of the label.
+     * Deriving this from available() instead would let a wired-but-failing actuator put "the
+     * actuator was commanded" on the page while nothing happened (SPEC §17.3: a silent wrong
+     * answer). An actuator that fired is the ACTUATOR case; everything else is a hand. */
+    ev.u.acoustic.excitation = (uint8_t)(c->diag.pluck_commanded ? TRUING_EXCITATION_ACTUATOR
+                                                                 : TRUING_EXCITATION_HAND);
     ev.u.acoustic.window_ms = window_ms;
     ev.u.acoustic.attempt = c->attempt;
     c->observer(c->observer_ctx, &ev);

@@ -296,6 +296,9 @@ static void test_an_attached_actuator_is_reported_as_the_excitation(void)
     truing_pluck_if_t pl;
     truing_pluck_fake_ctx_t pctx;
     truing_pluck_fake_init(&pl, &pctx, true);
+    /* the seam's identity fields - previously unasserted anywhere */
+    TEST_ASSERT_EQUAL_STRING("pluck_fake", pl.impl_name);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, pl.source_impl);
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
@@ -308,6 +311,92 @@ static void test_an_attached_actuator_is_reported_as_the_excitation(void)
     /* Commanded BEFORE the window opens, so the LISTENING frame already knows it fired. */
     TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.pluck_commanded);
     TEST_ASSERT_EQUAL_UINT32(1u, pctx.fires);
+    src.close(&src);
+}
+
+/* The rest of the actuator seam's contract, tested before the solenoid exists: zero pulse width
+ * commands nothing, a fire() failure is reported as what it is (a hand at the station - which is
+ * also what the firmware then does, since the ARMED lead-in re-enables for that attempt), and an
+ * absent actuator leaves the hand-pluck path fully intact. fail_next has existed since the fake
+ * was written; this is the first thing that has ever exercised it. */
+static void lead_delay_count(void *ctx, uint32_t ms)
+{
+    (void)ms;
+    (*(unsigned *)ctx)++;
+}
+
+static void test_the_excitation_claims_stay_honest_without_a_working_actuator(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_pluck_if_t pl;
+    truing_pluck_fake_ctx_t pctx;
+    truing_pluck_fake_init(&pl, &pctx, true);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    truing_tension_estimate_t e;
+
+    /* pulse width zero is the chain profile's own "no actuator commanded" (config.h): even an
+     * attached, working actuator is never fired, and the excitation is the hand. */
+    g_chain.excitation_pulse_ms = 0.0f;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
+    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.pluck_commanded);
+    src.close(&src);
+
+    /* a fire() that reports failure must not let anything claim the actuator was commanded */
+    truing_fixture_chain_profile_inmp441(&g_chain);   /* setUp's copy was mutated above */
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+    pctx.fail_next = true;
+    unsigned leads = 0u;
+    truing_acoustic_real_set_pluck_lead(&a, 50u, lead_delay_count, &leads);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);   /* the pulse was never commanded */
+    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.pluck_commanded);
+    /* the frame says a hand is the excitation, and the ARMED lead-in really ran for it */
+    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_ARMED, g_obs.ev[0].u.acoustic.phase);
+    TEST_ASSERT_EQUAL_UINT32(1u, leads);
+    /* and the next attempt commands normally again: the failure was one-shot */
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(1u, pctx.fires);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_ACTUATOR, g_obs.ev[0].u.acoustic.excitation);
+    TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.pluck_commanded);
+    src.close(&src);
+}
+
+static void test_an_absent_actuator_keeps_the_hand_pluck_path(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_pluck_if_t pl;
+    truing_pluck_fake_ctx_t pctx;
+    truing_pluck_fake_init(&pl, &pctx, false);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+    unsigned leads = 0u;
+    truing_acoustic_real_set_pluck_lead(&a, 50u, lead_delay_count, &leads);
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_ARMED, g_obs.ev[0].u.acoustic.phase);
+    TEST_ASSERT_EQUAL_UINT32(1u, leads);   /* the operator was counted in */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
     src.close(&src);
 }
 
@@ -718,6 +807,8 @@ int main(void)
     RUN_TEST(test_phase_events_report_the_measurement_lifecycle_in_order);
     RUN_TEST(test_a_silent_capture_reports_listening_but_never_an_onset);
     RUN_TEST(test_an_attached_actuator_is_reported_as_the_excitation);
+    RUN_TEST(test_the_excitation_claims_stay_honest_without_a_working_actuator);
+    RUN_TEST(test_an_absent_actuator_keeps_the_hand_pluck_path);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);
     RUN_TEST(test_a_cancelled_measurement_emits_no_phase_at_all);
     RUN_TEST(test_the_capture_view_survives_an_aborted_attempt);

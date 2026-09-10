@@ -11,6 +11,8 @@
 
 #include "artifact_store.h"
 #include "audio_i2s.h"
+#include "board/board_profile.h"
+#include "pluck_gpio.h"
 #include "firmware_version.h"
 #include "net_transport.h"
 #include "truing_proto/session.h"
@@ -51,6 +53,7 @@ static struct {
     truing_audio_synthetic_ctx_t audio_ctx;
     truing_pluck_if_t pluck;
     truing_pluck_fake_ctx_t pluck_ctx;
+    truing_pluck_gpio_ctx_t pluck_gpio_ctx;   /* real front end: the reserved actuator GPIO */
     void *acoustic_scratch;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
@@ -337,8 +340,8 @@ static void demo_task(void *arg)
              TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
                                 "SYNTHETIC runout"
                               : "manual navigation + manual runout",
-             TRUING_REAL_FRONT_END ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the hand pluck "
-                                      "at the station, because no actuator is built"
+             TRUING_REAL_FRONT_END ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the actuator "
+                                      "pulse on its reserved GPIO when a solenoid is wired, otherwise the hand pluck at the station"
                                    : "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source",
              TRUING_REAL_FRONT_END ? "" : "; the simulated wheel responds through the same influence model");
     truing_fixture_wheel_class_sym32(&s.wheel);
@@ -352,9 +355,9 @@ static void demo_task(void *arg)
     /* Acoustic with the PHYSICAL front end: the INMP441 over I2S, opened ONCE here and drained
      * continuously by its own core-1 task into a PSRAM ring; every measurement below captures
      * one bounded window from that ring (SPEC 9.3, 9.4). The sizing is what the acoustic
-     * bring-up proved on target. No excitation actuator exists, so the pluck seam is NULL: the
-     * capture records whatever excitation arrives - the hand pluck at the station - and
-     * NO_ONSET_DETECTED says honestly when none did (SPEC 9.1). */
+     * bring-up proved on target. The excitation actuator is wired below on its reserved GPIO;
+     * with no solenoid attached the capture records whatever excitation arrives - the hand
+     * pluck at the station - and NO_ONSET_DETECTED says honestly when none did (SPEC 9.1). */
     const truing_audio_i2s_config_t icfg = {
         .dma_frame_num = 240u,      /* 5 ms per descriptor, multiple of 3, 960 B <= 4092 B (SPEC 9.4.1) */
         .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
@@ -368,14 +371,28 @@ static void demo_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+    /* The excitation actuator on its reserved GPIO (SPEC 4.3: a pin number exists only in the
+     * board profile). bringup_acoustic exercises this exact init on every boot, so this adds no
+     * new electrical behaviour; whether a solenoid is physically wired to the pin is a property
+     * of the machine, not of this build. With nothing attached the pulse is commanded into the
+     * pin and the hand-pluck fallback remains the excitation - and B2 benches the solenoid
+     * before any acoustic number from it is trusted. */
+    if (!truing_pluck_gpio_init(&s.pluck, &s.pluck_gpio_ctx, BOARD_PLUCK_ACTUATOR_GPIO)) {
+        ESP_LOGW(TAG, "pluck actuator GPIO init failed (%d); excitation falls back to the hand pluck",
+                 BOARD_PLUCK_ACTUATOR_GPIO);
+    }
 #else
     /* Acoustic: the real subsystem (onset, spectrum, candidates, interim selection, model) on a
      * synthetic pluck at 460 Hz with a faint noise floor; the fake actuator is "attached". */
     truing_audio_synthetic_init(&s.audio, &s.audio_ctx, 460.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
     truing_pluck_fake_init(&s.pluck, &s.pluck_ctx, true);
 #endif
-    /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h). */
-    truing_pluck_if_t *const pluck_seam = TRUING_REAL_FRONT_END ? NULL : &s.pluck;
+    /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h).
+     * Real front end: the GPIO actuator when it configured, else NULL - a seam that cannot
+     * command is absent, and the hand-pluck fallback is the excitation (see emit_phase). */
+    truing_pluck_if_t *const pluck_seam = TRUING_REAL_FRONT_END
+                                              ? (s.pluck_gpio_ctx.configured ? &s.pluck : NULL)
+                                              : &s.pluck;
     const size_t scratch_bytes = truing_acoustic_real_scratch_bytes(&s.chain);
     s.acoustic_scratch = heap_caps_malloc(scratch_bytes, MALLOC_CAP_SPIRAM);
     const char *adetail = NULL;

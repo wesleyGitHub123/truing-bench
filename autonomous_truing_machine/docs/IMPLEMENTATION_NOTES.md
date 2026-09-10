@@ -434,12 +434,13 @@ measuring card when frames go missing. Capture timing never depends on the brows
 spoke in the same cycle *are* the retries, so `acoustic_real` counts them and the station can say
 "attempt 2" without the orchestrator having to publish its own retry bookkeeping.
 
-**The future actuator is already in the payload.** `excitation` is reported as `HAND` or
-`ACTUATOR` from what is actually wired — an attached `pluck_if` that answers `available()` — and
-`pluck_commanded` says whether it fired. Today the page renders "Pluck spoke 7 now"; an actuated
-build renders "Plucking spoke 7" off the same frames, with no wire or UI change. That integration
-is a new `pluck_if` implementation plus one wiring line. It also buys a diagnostic nothing else
-gives: "commanded, and nothing vibrated" is distinguishable from "no excitation arrived".
+**The actuator is wired, and the payload tells the truth about it.** `excitation` is reported as
+`HAND` or `ACTUATOR` from what actually happened this attempt — `pluck_commanded` is set by the
+`fire()` call at the seam — and the page needs both before it says "Plucking spoke N": an
+actuator that is wired but whose `fire()` failed reports `HAND`, and the ARMED lead-in runs for
+that attempt, so every frame agrees with what the operator should do. The real front end wires
+the GPIO actuator (`pluck_gpio`, `BOARD_PLUCK_ACTUATOR_GPIO`) in `orch_demo.c`; with no solenoid
+attached the pulse is commanded into the pin and the hand pluck stays the excitation.
 
 ### SPEC 9.4 capture under WiFi load — what was actually tested
 

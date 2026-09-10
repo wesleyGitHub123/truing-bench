@@ -10,6 +10,7 @@
 #include "truing_hal/acoustic_if.h"
 #include "truing_hal/clock_if.h"
 #include "truing_hal/intent_source_if.h"
+#include "truing_hal/pluck_if.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
 
@@ -274,12 +275,44 @@ static void test_session_header_flags_non_real_implementations(void)
     TEST_ASSERT_TRUE(unix_ms == (1700000000000LL - 12000LL + 5000LL));
 }
 
+/* The fake actuator is the seam every self-play and host run commands through; its failure
+ * injection existed from the start and is what lets the acoustic tests script a failed fire. */
+static void test_pluck_fake_counts_commands_and_reports_failures(void)
+{
+    truing_pluck_if_t pl;
+    truing_pluck_fake_ctx_t ctx;
+
+    truing_pluck_fake_init(&pl, &ctx, false);
+    TEST_ASSERT_EQUAL_STRING("pluck_fake", pl.impl_name);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, pl.source_impl);
+    TEST_ASSERT_FALSE(pl.available(&pl));    /* detached: nothing is attached and ready */
+    TEST_ASSERT_FALSE(pl.fire(&pl, 20.0f));  /* and nothing is commanded into the void */
+    TEST_ASSERT_EQUAL_UINT32(0u, ctx.fires);
+
+    truing_pluck_fake_init(&pl, &ctx, true);
+    TEST_ASSERT_TRUE(pl.available(&pl));
+    TEST_ASSERT_TRUE(pl.fire(&pl, 12.5f));
+    TEST_ASSERT_EQUAL_UINT32(1u, ctx.fires);
+    TEST_ASSERT_EQUAL_FLOAT(12.5f, ctx.last_pulse_ms);
+    /* fail_next: a one-shot failure injection - the next command goes through again */
+    ctx.fail_next = true;
+    TEST_ASSERT_FALSE(pl.fire(&pl, 12.5f));
+    TEST_ASSERT_EQUAL_UINT32(1u, ctx.fires);
+    TEST_ASSERT_TRUE(pl.fire(&pl, 20.0f));
+    TEST_ASSERT_EQUAL_UINT32(2u, ctx.fires);
+    TEST_ASSERT_EQUAL_FLOAT(20.0f, ctx.last_pulse_ms);
+    /* a non-positive width is refused, not clipped */
+    TEST_ASSERT_FALSE(pl.fire(&pl, 0.0f));
+    TEST_ASSERT_EQUAL_UINT32(2u, ctx.fires);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     UNITY_BEGIN();
     RUN_TEST(test_fake_clock);
+    RUN_TEST(test_pluck_fake_counts_commands_and_reports_failures);
     RUN_TEST(test_acoustic_stub_returns_status_not_a_number);
     RUN_TEST(test_acoustic_synthetic_is_provisional_and_storable);
     RUN_TEST(test_runout_stub_reports_every_capability_absent);

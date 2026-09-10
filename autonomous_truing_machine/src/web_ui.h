@@ -679,8 +679,11 @@ static const char TRUING_WEB_UI_HTML[] =
 "   act('PLUCK SPOKE '+f.spoke_index+' now'+(f.attempt>1?' - attempt '+f.attempt:''),\n"
 "    't-warn',f.ts_ms);}\n"
 "  else if(f.phase==='LISTENING'){lastIdx=f.spoke_index;\n"
-"   act((f.excitation==='ACTUATOR'?'plucking spoke ':'recording spoke ')+f.spoke_index+\n"
-"    (f.excitation==='ACTUATOR'?'':' - hands off'),'t-nav',f.ts_ms);}\n"
+/*  'Plucking' claims a command went out, and pluck_commanded is the truth of that claim: an
+    actuator that is wired but whose fire() failed must fall back to the hand-pluck wording -
+    exactly as the firmware does, by running the ARMED lead-in for that attempt. */
+"   act((f.excitation==='ACTUATOR'&&f.pluck_commanded?'plucking spoke ':'recording spoke ')+f.spoke_index+\n"
+"    (f.excitation==='ACTUATOR'&&f.pluck_commanded?'':' - hands off'),'t-nav',f.ts_ms);}\n"
 /*  ONSET_DETECTED means only that the detector picked a sample in the finished capture, not
     that a good pluck landed - the peak/SNR gates run AFTER it. Say what is true. */
 "  else if(f.phase==='ONSET_DETECTED')\n"
@@ -783,7 +786,9 @@ static const char TRUING_WEB_UI_HTML[] =
    card only while a phase is live; without these frames everything below is exactly as it was,
    which is what makes the cue a bonus rather than a dependency. */
 " if(phase&&s&&s.session_active&&curState==='MEASURE_SPOKE_TENSION'){\n"
-"  var act1=phase.exc==='ACTUATOR';stopTick();\n"
+/*  'Plucking' is a claim about a command that went out: excitation says what is wired,
+    pluck_commanded says whether it fired. The page says "plucking" only on both. */
+"  var act1=phase.exc==='ACTUATOR'&&phase.cmd;stopTick();\n"
 /*  ARMED asks for the pluck; LISTENING asks for silence. That is the opposite of what this
     page said before 2026-09-08, and the campaign in captures/_campaign is why. */
 "  if(phase.p==='ARMED'){c.className='card wait';\n"
