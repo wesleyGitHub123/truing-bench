@@ -1,0 +1,2316 @@
+{
+ "meta": {
+  "captured_at": "2026-09-10T20:35:10+0800",
+  "host": "192.168.4.1",
+  "board": "arduino-nano-esp32",
+  "build": "454b28b",
+  "ui": "b83beeb6",
+  "mode": "fastdemo+inmp441",
+  "acquisition": "auto",
+  "started_here": true,
+  "n_frames": 230
+ },
+ "frames": [
+  {
+   "t": "ack",
+   "seq": 1,
+   "cmd_kind": "INTENT",
+   "intent": "START_TRUING",
+   "accepted": true,
+   "wire": "OK",
+   "verdict": "ACCEPT",
+   "reason": "NONE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8600542,
+   "cycle_index": 1,
+   "from": "READY",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8600564,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8600566,
+   "cycle_index": 1,
+   "target_kind": "spoke",
+   "index": 0,
+   "angle_rad": 0.0,
+   "station": "acoustic",
+   "outcome": "DONE",
+   "rotation_rad": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8600566,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "MEASURE_SPOKE_TENSION"
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8600573,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8603078,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8604165,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8605904,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8607230,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 0,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8607732,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8610233,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8611325,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8613065,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8614424,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 0,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8614926,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8617427,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8618525,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8620266,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 0,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8621617,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 0,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8621617,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 0,
+   "status": "unavailable",
+   "reason": "VALUE_OUT_OF_RANGE",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8621617,
+   "cycle_index": 1,
+   "from": "MEASURE_SPOKE_TENSION",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8621632,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8621647,
+   "cycle_index": 1,
+   "target_kind": "spoke",
+   "index": 1,
+   "angle_rad": 0.0,
+   "station": "acoustic",
+   "outcome": "DONE",
+   "rotation_rad": 6.08684
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8621647,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "MEASURE_SPOKE_TENSION"
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8621654,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8624159,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8625245,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8626984,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8628379,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 1,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8628881,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8631382,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8632445,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8634185,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8635550,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 1,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8636052,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8638553,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8639645,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8641386,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 1,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8642760,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 1,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8642760,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 1,
+   "status": "unavailable",
+   "reason": "VALUE_OUT_OF_RANGE",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8642760,
+   "cycle_index": 1,
+   "from": "MEASURE_SPOKE_TENSION",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8642776,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8642791,
+   "cycle_index": 1,
+   "target_kind": "spoke",
+   "index": 2,
+   "angle_rad": 0.0,
+   "station": "acoustic",
+   "outcome": "DONE",
+   "rotation_rad": 5.89049
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8642791,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "MEASURE_SPOKE_TENSION"
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8642797,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8645302,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8646365,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8648108,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 1
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8649480,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 2,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8649982,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8652483,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8653565,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8655305,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 2
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8656642,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 2,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8657144,
+   "cycle_index": 1,
+   "phase": "ARMED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 2500,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8659645,
+   "cycle_index": 1,
+   "phase": "LISTENING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 1000,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8660726,
+   "cycle_index": 1,
+   "phase": "ONSET_DETECTED",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "ACOUSTIC_PHASE",
+   "ts_ms": 8662468,
+   "cycle_index": 1,
+   "phase": "ANALYZING",
+   "spoke_index": 2,
+   "excitation": "HAND",
+   "pluck_commanded": false,
+   "window_ms": 0,
+   "attempt": 3
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663833,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 2,
+   "status": "rejected",
+   "reason": "AMBIGUOUS_PEAK",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663833,
+   "cycle_index": 1,
+   "channel": "TENSION",
+   "index": 2,
+   "status": "unavailable",
+   "reason": "VALUE_OUT_OF_RANGE",
+   "tension_n": null,
+   "selected_frequency_hz": null
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663833,
+   "cycle_index": 1,
+   "from": "MEASURE_SPOKE_TENSION",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663849,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663864,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 0,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 1.5708
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663864,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663869,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 0,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663869,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663883,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663890,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 1,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 1.37445
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663890,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663895,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 1,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663895,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663909,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663915,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 2,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 1.1781
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663915,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663921,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 2,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663921,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663935,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663941,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 3,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.98175
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663941,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663946,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 3,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663946,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663960,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663967,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 4,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.7854
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663967,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663972,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 4,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663972,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663986,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8663992,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 5,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.58905
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663992,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8663998,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 5,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8663998,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664012,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664018,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 6,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.3927
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664018,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664024,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 6,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664024,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664037,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664044,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 7,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.19635
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664044,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664049,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 7,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664049,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664063,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664069,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 8,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664069,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664075,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 8,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664075,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664089,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664095,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 9,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 6.08684
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664095,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664100,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 9,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664100,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664114,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664120,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 10,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 5.89049
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664120,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664126,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 10,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664126,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664140,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664146,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 11,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 5.69414
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664146,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664151,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 11,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664151,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664165,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664171,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 12,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 5.49779
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664171,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664177,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 12,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664177,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664191,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664197,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 13,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 5.30144
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664197,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664202,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 13,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664202,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664216,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664222,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 14,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 5.10509
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664222,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664228,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 14,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664228,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664242,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664248,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 15,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 4.90874
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664248,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664254,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 15,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664254,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664267,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664274,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 16,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 4.71239
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664274,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664279,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 16,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664279,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664293,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664299,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 17,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 4.51604
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664299,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664305,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 17,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664305,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664319,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664325,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 18,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 4.31969
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664325,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664330,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 18,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664330,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664344,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664350,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 19,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 4.12334
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664350,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664356,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 19,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664356,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664370,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664376,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 20,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 3.92699
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664376,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664382,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 20,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664382,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664395,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664402,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 21,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 3.73064
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664402,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664407,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 21,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664407,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664421,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664427,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 22,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 3.53429
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664427,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664433,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 22,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664433,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664447,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664453,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 23,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 3.33794
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664453,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664458,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 23,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664458,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664472,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664478,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 24,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 3.14159
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664478,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664484,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 24,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": -0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664484,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664498,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664504,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 25,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 2.94524
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664504,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664510,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 25,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664510,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664523,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664530,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 26,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 2.74889
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664530,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664535,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 26,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664535,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664549,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664555,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 27,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 2.55254
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664555,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664561,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 27,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664561,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664574,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664581,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 28,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 2.35619
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664581,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664586,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 28,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664586,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664600,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664606,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 29,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 2.15985
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664606,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664612,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 29,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": 0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664612,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664625,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664632,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 30,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 1.9635
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664632,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664637,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 30,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664637,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664651,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "POSITION"
+  },
+  {
+   "t": "event",
+   "kind": "NAVIGATION",
+   "ts_ms": 8664657,
+   "cycle_index": 1,
+   "target_kind": "rim_index",
+   "index": 31,
+   "angle_rad": 0.0,
+   "station": "runout",
+   "outcome": "DONE",
+   "rotation_rad": 1.76715
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664657,
+   "cycle_index": 1,
+   "from": "POSITION",
+   "to": "READ_RUNOUT"
+  },
+  {
+   "t": "event",
+   "kind": "MEASUREMENT_RESULT",
+   "ts_ms": 8664663,
+   "cycle_index": 1,
+   "channel": "RUNOUT",
+   "index": 31,
+   "status": "valid",
+   "reason": "NONE",
+   "lateral_mm": -0.0,
+   "radial_mm": 0.0
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664663,
+   "cycle_index": 1,
+   "from": "READ_RUNOUT",
+   "to": "MEASURE_WHEEL_STATE"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664677,
+   "cycle_index": 1,
+   "from": "MEASURE_WHEEL_STATE",
+   "to": "CHECK_SOLVER_ADMISSION"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664684,
+   "cycle_index": 1,
+   "from": "CHECK_SOLVER_ADMISSION",
+   "to": "COMPUTE_ADJUSTMENTS"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664692,
+   "cycle_index": 1,
+   "from": "COMPUTE_ADJUSTMENTS",
+   "to": "COMPUTE_TARGETS"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664698,
+   "cycle_index": 1,
+   "from": "COMPUTE_TARGETS",
+   "to": "VERIFY"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664704,
+   "cycle_index": 1,
+   "from": "VERIFY",
+   "to": "EVALUATE_CONVERGENCE"
+  },
+  {
+   "t": "event",
+   "kind": "TERMINAL_RESULT",
+   "ts_ms": 8664710,
+   "cycle_index": 1,
+   "result": "CONVERGED_GEOMETRIC_ONLY"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664710,
+   "cycle_index": 1,
+   "from": "EVALUATE_CONVERGENCE",
+   "to": "TERMINAL"
+  },
+  {
+   "t": "event",
+   "kind": "STATE_TRANSITION",
+   "ts_ms": 8664733,
+   "cycle_index": 1,
+   "from": "TERMINAL",
+   "to": "READY"
+  }
+ ]
+}

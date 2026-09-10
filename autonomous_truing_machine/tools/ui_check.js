@@ -723,5 +723,54 @@ IDENT.mode = 'interactive'; IDENT.acquisition = 'manual'; IDENT.acquisition_sele
 IDENT.real_front_end = false;
 sandbox.loadIdent();
 
+// ---- replay a real recorded session (4c) ---------------------------------------------
+// Hand-built frames test the cases someone thought to write. This pushes a whole session
+// captured off a board (tools/probe/session_capture.py) through the same handle(), so the
+// page also has to survive the exact sequence and shapes the firmware really emits.
+(function replayRecordedSession() {
+  const file = path.join(__dirname, '..', 'test', 'fixtures', 'ui', 'session_fastdemo_auto.json');
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { ok(false, 'recorded session fixture loads', e.message); return; }
+  const frames = doc.frames || [];
+  ok(frames.length > 100, 'recorded session has a full cycle of frames', frames.length + ' frames');
+
+  // start from a clean READY, the way a browser joining an idle board would
+  sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+  sandbox.handle(PROV);
+  const feedStart = feedText('act').length;
+
+  let threw = null, prevTs = null;
+  for (let i = 0; i < frames.length && !threw; i++) {
+    const f = frames[i];
+    if (typeof f.ts_ms === 'number') {
+      if (prevTs !== null) advance(Math.max(0, Math.min(4000, f.ts_ms - prevTs)));
+      prevTs = f.ts_ms;
+    }
+    try { sandbox.handle(f); }
+    catch (e) { threw = 'frame ' + i + ' (' + (f.kind || f.t) + '): ' + e.message; }
+  }
+  ok(!threw, 'every frame of a real recorded session is handled without throwing', threw || '');
+
+  const fresh = feedText('act').slice(feedStart);
+  // the acoustic cue reached the operator for every demo spoke, both phases
+  ok(/PLUCK SPOKE 0 now/.test(fresh) && /PLUCK SPOKE 1 now/.test(fresh) && /PLUCK SPOKE 2 now/.test(fresh),
+    'replay: ARMED renders the pluck cue for every demo spoke');
+  ok(/recording spoke \d - hands off/.test(fresh),
+    'replay: LISTENING renders the hands-off cue');
+  // every reason the session actually carried reached the operator translated
+  const reasonPhrase = { AMBIGUOUS_PEAK: 'Ambiguous peak', VALUE_OUT_OF_RANGE: 'Not enough signal' };
+  const carried = new Set(frames.filter(f => f.kind === 'MEASUREMENT_RESULT' && f.reason && f.reason !== 'NONE').map(f => f.reason));
+  for (const r of carried) {
+    ok(reasonPhrase[r] && fresh.indexOf(reasonPhrase[r]) >= 0,
+      'replay: ' + r + ' reached the operator translated', reasonPhrase[r] || '(no phrase mapped in this test)');
+  }
+  // the run ended, said so as success, and left nothing mid-flight on the status card
+  ok(fresh.indexOf('run finished: CONVERGED_GEOMETRIC_ONLY') >= 0, 'replay: the terminal result is logged');
+  ok(rowCls('act') === 't-good', 'replay: a geometry-only convergence still reads as success');
+  ok(txt('statusbody').indexOf('Sending') < 0 && txt('statusbody').indexOf('Confirming') < 0,
+    'replay: no in-flight command is left stuck on the status card after the run ends');
+})();
+
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);
