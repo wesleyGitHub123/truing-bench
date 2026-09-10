@@ -409,6 +409,102 @@ static void test_reset_session_discards_state_no_measurement_consumed(void)
     src.close(&src);
 }
 
+/* I1: an attempt that returns early must not destroy the evidence of the previous capture.
+ * Wiping diag at the top of measure_run() made /debug/capture 404 ~3.7 s before the next
+ * capture replaced the samples - the harvest race that loses exactly the attempts a fetch
+ * came for. The reset now lives where the samples change, so anything that returns before
+ * the capture leaves the last one fully readable (SPEC §12.5: evidence of the last
+ * measurement; same rule real_reset_session applies at a session boundary). */
+static void cancel_during_lead(void *ctx, uint32_t ms)
+{
+    (void)ms;
+    truing_acoustic_request_cancel((truing_acoustic_if_t *)ctx);
+}
+
+static void assert_same_capture(const truing_acoustic_capture_view_t *v0, const truing_acoustic_capture_view_t *v)
+{
+    TEST_ASSERT_EQUAL_UINT32(v0->seq, v->seq);
+    TEST_ASSERT_EQUAL_UINT32(v0->n_words, v->n_words);
+    TEST_ASSERT_EQUAL_PTR(v0->words, v->words);
+    TEST_ASSERT_EQUAL_UINT32(v0->diag.n_captured, v->diag.n_captured);
+    TEST_ASSERT_EQUAL_UINT32(v0->diag.onsets, v->diag.onsets);
+    TEST_ASSERT_EQUAL_FLOAT(v0->diag.f1_hz, v->diag.f1_hz);
+    TEST_ASSERT_EQUAL_FLOAT(v0->diag.snr_db, v->diag.snr_db);
+    TEST_ASSERT_EQUAL_UINT8(v0->spoke_id, v->spoke_id);
+    TEST_ASSERT_EQUAL_UINT32(v0->attempt, v->attempt);
+}
+
+static void test_the_capture_view_survives_an_aborted_attempt(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    truing_acoustic_capture_view_t v, v0;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v0));
+
+    /* cancel before anything opens: the flag is consumed, nothing is captured, and the
+     * previous capture must still be exactly what the dump would have read before */
+    truing_acoustic_request_cancel(&a);
+    truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    assert_same_capture(&v0, &v);
+    TEST_ASSERT_EQUAL_UINT32(v0.seq, truing_acoustic_real_capture_seq(&a));   /* no capture, no bump */
+
+    /* the ARMED-phase abort: cancel arrives during the lead-in the operator counts into */
+    truing_acoustic_real_set_pluck_lead(&a, 50u, cancel_during_lead, &a);
+    truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    assert_same_capture(&v0, &v);
+
+    /* and the measurement after the abort is an ordinary retry: seq bumps. Attempt counting
+     * keys on calls, not on captures, so this third call is attempt 4 - and the capture view
+     * now says the words it holds are THAT attempt's evidence. */
+    truing_acoustic_real_set_pluck_lead(&a, 0u, NULL, NULL);
+    truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT32(v0.seq + 1u, v.seq);
+    TEST_ASSERT_EQUAL_UINT32(4u, v.attempt);
+    src.close(&src);
+}
+
+static void test_the_capture_view_survives_a_calibration_missing_early_return(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 470.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    truing_acoustic_capture_view_t v, v0;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v0));
+
+    /* the defensive path (SPEC 11.3.1) returns before anything is captured; it must not take
+     * the previous capture's evidence with it. profile_ok is admission, so it is poked here
+     * exactly the way test_status_rules re-inits with an incomplete profile - but on a ctx
+     * that already holds a capture. */
+    ctx.profile_ok = false;
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CALIBRATION_MISSING, e.meta.reason_code);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    assert_same_capture(&v0, &v);
+    src.close(&src);
+}
+
 static void test_status_rules_calibration_cancel_overrun_silence_format(void)
 {
     truing_audio_source_if_t src;
@@ -624,6 +720,8 @@ int main(void)
     RUN_TEST(test_an_attached_actuator_is_reported_as_the_excitation);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);
     RUN_TEST(test_a_cancelled_measurement_emits_no_phase_at_all);
+    RUN_TEST(test_the_capture_view_survives_an_aborted_attempt);
+    RUN_TEST(test_the_capture_view_survives_a_calibration_missing_early_return);
     RUN_TEST(test_reset_session_discards_state_no_measurement_consumed);
     RUN_TEST(test_workflow_with_real_acoustic_layers_reaches_converged_geometric_only);
     return UNITY_END();

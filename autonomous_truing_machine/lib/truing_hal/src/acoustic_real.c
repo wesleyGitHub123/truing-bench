@@ -258,11 +258,14 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
         c->attempt_cycle = cycle_index;
         c->attempt_valid = true;
     }
-    memset(&c->diag, 0, sizeof(c->diag));
-    c->diag.f1_hz = NAN;
-    c->diag.f2_hz = NAN;
-    c->diag.snr_db = NAN;
-    c->diag.l_eff_m = NAN;
+    /* pluck_commanded is decided for THIS attempt below (fire at the excitation seam); the rest
+     * of diag still describes the previous capture. Wiping the whole struct here destroyed that
+     * evidence - diag.n_captured -> 0 makes truing_acoustic_real_last_capture refuse, i.e. the
+     * /debug/capture dump 404s - ~3.7 s before the new capture replaces the samples, which is
+     * how a session loses exactly the attempt a slow fetch came for. The reset lives next to
+     * capture_seq++ below: nothing may invalidate evidence of the last measurement before the
+     * thing that replaces it exists (same rule real_reset_session applies at a boundary). */
+    c->diag.pluck_commanded = false;
     const uint32_t now = truing_clock_now_ms(&c->clock);
     if (!c->profile_ok) {
         /* SPEC 11.3.1: defensive behaviour when invoked despite admission being bypassed. */
@@ -298,6 +301,17 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_LISTENING, spoke_id, listen_window_ms(c->chain));
     const uint32_t t0 = truing_clock_now_ms(&c->clock);
     uint32_t got = 0u;
+    /* The previous capture is about to be replaced, so its diagnostics may be reset only now -
+     * after every early return above has had its chance to leave the evidence standing. The
+     * commanded flag survives the reset: the LISTENING frame above already reported it and the
+     * capture dump must say the same thing about the same attempt. */
+    const bool pluck_commanded = c->diag.pluck_commanded;
+    memset(&c->diag, 0, sizeof(c->diag));
+    c->diag.f1_hz = NAN;
+    c->diag.f2_hz = NAN;
+    c->diag.snr_db = NAN;
+    c->diag.l_eff_m = NAN;
+    c->diag.pluck_commanded = pluck_commanded;
     c->capture_seq++;   /* the buffer is about to change under any reader (SPEC §12.5) */
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
     c->diag.capture_result = r;
@@ -325,11 +339,15 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
 
 /* Records which measurement produced the words now sitting in the capture buffer, so a dump
  * can say what it is evidence OF. Purely a record of what already happened: measure_run() has
- * returned, `out` is final, and nothing downstream reads any of this (SPEC §13.3). */
+ * returned, `out` is final, and nothing downstream reads any of this (SPEC §13.3). real_measure
+ * calls it only when the attempt reached the capture point (seq moved) AND delivered words
+ * (n_captured > 0): an attempt that returned early or captured nothing must not relabel the
+ * capture still standing in the buffer - that identity belongs to the attempt that captured
+ * the words the buffer holds. */
 static void note_outcome(truing_acoustic_real_ctx_t *c, uint8_t spoke_id, uint8_t cycle_index,
                          const truing_tension_estimate_t *out)
 {
-    if (c == NULL || out == NULL) {
+    if (c == NULL || out == NULL || c->diag.n_captured == 0u) {
         return;
     }
     c->last_spoke = spoke_id;
@@ -342,9 +360,11 @@ static void note_outcome(truing_acoustic_real_ctx_t *c, uint8_t spoke_id, uint8_
 static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const truing_wheel_class_config_t *wheel_geometry,
                          uint8_t cycle_index, truing_tension_estimate_t *out)
 {
+    truing_acoustic_real_ctx_t *const c = (truing_acoustic_real_ctx_t *)self->ctx;
+    const uint32_t seq_before = (c != NULL) ? c->capture_seq : 0u;
     measure_run(self, spoke_id, wheel_geometry, cycle_index, out);
-    if (self != NULL && out != NULL) {
-        note_outcome((truing_acoustic_real_ctx_t *)self->ctx, spoke_id, cycle_index, out);
+    if (out != NULL && c != NULL && c->capture_seq != seq_before) {
+        note_outcome(c, spoke_id, cycle_index, out);
     }
 }
 
