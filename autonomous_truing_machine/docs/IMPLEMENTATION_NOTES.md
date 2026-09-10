@@ -472,6 +472,57 @@ This is a symptom, not the disease. SPEC 4.5 splits the cores and capture is alr
 pinned to core 1, but acoustic layers 2-4 still run inline on the control core. Moving
 them is Phase 2 work and is listed under open items.
 
+## Ambient-referenced SNR: measured on the campaign, and rejected (plan item I2)
+
+The firmware's SNR gate (`truing_peaks_snr_db`, peaks.c) is a local spectral contrast: the
+peak's magnitude minus the median log-magnitude of an annulus of bins 100-300 Hz either side
+of f1. It never reads the pre-roll, `noise_floor_dbfs`, or anything time-domain, and the
+question was whether an ambient-referenced measure — signal level against the ~200 ms of
+pre-excitation ambient every bundle carries — would separate plucks from no-pluck controls
+better. `tools/ambient_snr.py` computes it over all 64 bundles on disk (campaign passes A-D
+plus the three checked-in fixtures; per-bundle numbers in
+`test/fixtures/acoustic/captures/_campaign/ambient_snr.csv`, gitignored — evidence, not
+tests). AC-coupled, on the same `(word >> 8)` scale the DSP sees.
+
+**The result is a rejection, and it closes the question the right way round: the annulus SNR
+is the better discriminator, and by a wide margin.**
+
+| group | n | ambient-ref SNR (median / range) | annulus SNR (median / range) |
+|---|---|---|---|
+| A cleared — ring-down in window (7) | 7 | +0.7 / −1.4..+6.4 dB | +19.0 / +16.0..+24.6 dB |
+| B cleared — strike in window (2) | 2 | +19.3 / +14.2..+24.4 dB | +15.7 / +13.5..+17.9 dB |
+| C ambient, no pluck (18) | 18 | +4.3 / −2.4..+19.7 dB | +5.9 / +2.2..+9.9 dB |
+| D hand plucks, 0 clears (12) | 12 | +4.7 / −3.3..+11.6 dB | +5.5 / +2.0..+10.9 dB |
+
+- **The annulus SNR separates; the ambient-referenced SNR does not.** No-pluck controls top
+  out at 9.9 dB annulus; cleared captures start at 13.5 dB — the existing 12.0 dB gate sits
+  in that gap (the same conclusion the A4 sweep reached, by a second, independent method).
+  Ambient-referenced, the ranges overlap hard: controls reach +19.7 dB while clears median
+  +0.7 dB.
+- **Why: the thing analysed is a tonal ring-down, and it is broadband-quiet.** A ring-down is
+  spectrally prominent at f1 but its RMS decays into ambient within the 500 ms window — nine
+  of the campaign's clears measure *near zero or negative* ambient-ref, several captures have
+  a window QUIETER than their own pre-roll. A broadband RMS ratio is blind to exactly the
+  feature that carries f1, and it counts the strike's broadband attack (pass B clears: +14 to
+  +24 dB) as signal — the regime that otherwise always fails.
+- **Ambient is not stationary at capture scales.** Pass-C windows reach +19.7 dB over their
+  own pre-roll — rain gusts and ambient drift between the 200 ms pre-roll and the analysed
+  window. An ambient-referenced gate would therefore admit room noise while rejecting genuine
+  plucks: the exact silent-wrong-answer the pass-C controls exist to catch. This is also why
+  the not-implemented preflight fields stay unimplemented: a noise-floor check measured on the
+  pre-roll would be measuring a different moment than the one the verdict comes from.
+- **Caveat that stands:** the pre-roll length is derived from metadata (`n_words` minus
+  `capture_us`), not measured — audio_i2s.c clamps it to `ring_filled` and no field records
+  how many pre-trigger words were delivered. "Assumed", not "confirmed". Recording the
+  delivered pre-roll count in the capture diagnostics would firm this up for any future
+  ambient analysis; deferred — it crosses the `audio_source_if` capture contract, and no
+  ambient measure is gate-bound now.
+
+Consequence for Phase B: the annulus SNR survives its own audit; the local spectral contrast
+is not the problem on this chain. The Phase-B retune candidates remain `prominence_db = 12`
+and window placement (the solenoid), fitted against the final excitation — with discrimination
+against pass-C-style no-pluck controls as the acceptance rule, never raw pass rate.
+
 ## Board profiles stop at GPIO, and that is the right place for now
 
 Four board-profile macros are read by **nothing** in the firmware:
