@@ -463,16 +463,18 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
         return;
     }
     c->calls++;
+    if (!c->profile_ok) {
+        /* Same rule as measure_run: an early return leaves the standing capture's evidence
+         * intact - the diag reset waits until the buffer is actually about to change. */
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CALIBRATION_MISSING, cycle_index, truing_clock_now_ms(&c->clock), self->source_impl);
+        return;
+    }
+    const uint32_t n = n_words < c->n_capture ? n_words : c->n_capture;
     memset(&c->diag, 0, sizeof(c->diag));
     c->diag.f1_hz = NAN;
     c->diag.f2_hz = NAN;
     c->diag.snr_db = NAN;
     c->diag.l_eff_m = NAN;
-    if (!c->profile_ok) {
-        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CALIBRATION_MISSING, cycle_index, truing_clock_now_ms(&c->clock), self->source_impl);
-        return;
-    }
-    const uint32_t n = n_words < c->n_capture ? n_words : c->n_capture;
     c->capture_seq++;   /* replay overwrites the same buffer a dump would be reading */
     memcpy(c->words, words, (size_t)n * sizeof(int32_t));
     c->diag.n_captured = n;
