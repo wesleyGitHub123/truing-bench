@@ -1,9 +1,9 @@
 """Keyboard console for the solenoid bench sketch (tools/bench/solenoid_smoke) on the Nano.
 
 Each keypress goes straight to the board as one command (l/r shot, L/R 500 ms hold, a alternating
-run, +/- shot width, [/] release ramp, s status, ? help). The board's replies print here and are
-appended to a log file, together with anything you note, so what you saw and what the board says
-it did end up side by side in one timestamped record.
+run, +/- shot width, {/} push ramp, [/] release ramp, s status, ? help). The board's replies
+print here and are appended to a log file, together with anything you note, so what you saw and
+what the board says it did end up side by side in one timestamped record.
 
 Local keys, never sent to the board:
     n     type an observation note (Enter to finish), logged as  NOTE: ...
@@ -87,7 +87,7 @@ def reader():
 
 stamp("=== solenoid_ctl session start, log %s ===" % log_path)
 threading.Thread(target=reader, daemon=True).start()
-emit("keys go to the board: l r L R a + - [ ] s ?   |   n = note, Esc = quit\n")
+emit("keys go to the board: l r L R a + - { } [ ] s ?   |   n = note, Esc = quit\n")
 try:
     while True:
         ch = msvcrt.getwch()
