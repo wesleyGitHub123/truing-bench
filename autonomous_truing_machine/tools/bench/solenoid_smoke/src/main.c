@@ -17,8 +17,8 @@
  *   l / r    one shot on LEFT / RIGHT at the current shot width and release ramp
  *   L / R    500 ms hold on LEFT / RIGHT (read V_DS on the meter during it)
  *   a        10 alternating shots, LEFT first, 3 s apart; any key aborts
- *   + / -    shot width +/- 5 ms (5..100 ms)
- *   [ / ]    release ramp -/+ 2 ms (0..50 ms; 0 = instant cutoff, the old behaviour)
+ *   + / -    shot width +/- 5 ms (5 ms floor, no ceiling)
+ *   [ / ]    release ramp -/+ 5 ms (0 ms floor = instant cutoff, the old behaviour; no ceiling)
  *   s        status: shot width, release ramp, per-channel fire counts
  *   ? / h    this help
  *
@@ -44,10 +44,8 @@
 #define SHOT_MS_INIT    20u
 #define SHOT_MS_STEP    5u
 #define SHOT_MS_MIN     5u
-#define SHOT_MS_MAX     100u
 #define RELEASE_MS_INIT 0u
-#define RELEASE_MS_STEP 2u
-#define RELEASE_MS_MAX  50u
+#define RELEASE_MS_STEP 5u
 #define RUN_SHOTS       10
 #define RUN_GAP_MS      3000u
 #define MIN_GAP_MS      250u
@@ -88,7 +86,10 @@ static bool release(channel_t *ch, uint32_t release_ms)
     if (release_ms == 0u) {
         return ledc_set_duty_and_update(LEDC_MODE, ch->channel, 0, 0) == ESP_OK;
     }
-    const uint32_t step_us = (release_ms * 1000u) / RAMP_STEPS;
+    /* release_ms has no ceiling now, so widen before multiplying by 1000 -- release_ms alone
+     * would already overflow a uint32_t microsecond count past ~71 minutes. */
+    const uint64_t step_us64 = ((uint64_t)release_ms * 1000u) / RAMP_STEPS;
+    const uint32_t step_us = (step_us64 > UINT32_MAX) ? UINT32_MAX : (uint32_t)step_us64;
     for (uint32_t i = 1; i <= RAMP_STEPS; i++) {
         const uint32_t duty = (i >= RAMP_STEPS) ? 0u : LEDC_FULL_DUTY - (LEDC_FULL_DUTY * i) / RAMP_STEPS;
         if (ledc_set_duty_and_update(LEDC_MODE, ch->channel, duty, 0) != ESP_OK) {
@@ -233,8 +234,11 @@ void app_main(void)
         case 'L': ESP_LOGI(TAG, "LEFT hold -- read V_DS now"); fire(&g_left, HOLD_PULSE_MS, g_release_ms); break;
         case 'R': ESP_LOGI(TAG, "RIGHT hold -- read V_DS now"); fire(&g_right, HOLD_PULSE_MS, g_release_ms); break;
         case 'a': alternating_run(); break;
+        /* No ceiling on either knob -- only enough floor/overflow guard that a run of key
+         * repeats can't wrap a uint32_t or go negative. Hold time and coil duty cycle are the
+         * operator's call to make, not this sketch's. */
         case '+':
-            g_shot_ms = (g_shot_ms + SHOT_MS_STEP > SHOT_MS_MAX) ? SHOT_MS_MAX : g_shot_ms + SHOT_MS_STEP;
+            g_shot_ms = (g_shot_ms > UINT32_MAX - SHOT_MS_STEP) ? UINT32_MAX : g_shot_ms + SHOT_MS_STEP;
             status();
             break;
         case '-':
@@ -243,7 +247,7 @@ void app_main(void)
             break;
         case ']':
             g_release_ms =
-                (g_release_ms + RELEASE_MS_STEP > RELEASE_MS_MAX) ? RELEASE_MS_MAX : g_release_ms + RELEASE_MS_STEP;
+                (g_release_ms > UINT32_MAX - RELEASE_MS_STEP) ? UINT32_MAX : g_release_ms + RELEASE_MS_STEP;
             status();
             break;
         case '[':
