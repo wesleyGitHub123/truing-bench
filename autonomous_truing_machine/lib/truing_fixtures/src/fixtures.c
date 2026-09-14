@@ -113,6 +113,19 @@ void truing_fixture_solver_config(truing_solver_config_t *out, uint8_t n_rim_ang
     out->excitation_settle_ms = 500u;
 }
 
+void truing_fixture_excitation_profile(truing_excitation_profile_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->excitation_id = 1u;
+    /* 20 ms was never fitted to a solenoid; it is the starting point the B3.2 per-station
+     * pulse sweep brackets, identical at both stations until evidence says otherwise. */
+    out->pulse_ms[0] = 20.0f;
+    out->pulse_ms[1] = 20.0f;
+}
+
 void truing_fixture_chain_profile_inmp441(truing_chain_profile_t *out)
 {
     if (out == NULL) {
@@ -135,7 +148,6 @@ void truing_fixture_chain_profile_inmp441(truing_chain_profile_t *out)
      * statement; bench results change them, theory does not. */
     out->capture_ms = 1000.0f;
     out->pre_trigger_ms = 200.0f;
-    out->excitation_pulse_ms = 20.0f;
     out->measurement_min_snr_db = 12.0f;     /* research report.snr_warn_db */
     out->onset_frame_ms = 10.0f;
     out->onset_hop_ms = 5.0f;
@@ -221,10 +233,15 @@ void truing_fixture_machine_profile(truing_machine_profile_t *out)
         return;
     }
     memset(out, 0, sizeof(*out));
-    out->profile_id = 1u;
-    out->stations[TRUING_STATION_ACOUSTIC].present = true;
-    out->stations[TRUING_STATION_ACOUSTIC].angle_rad = 0.0f;
-    out->stations[TRUING_STATION_ACOUSTIC].positioning_tolerance_rad = 0.02f;
+    out->profile_id = 2u;   /* 2: two acoustic stations (1 was the single-station profile) */
+    /* PLACEHOLDER angles for both acoustic stations until the B2 bench measures the rig (plan
+     * M5); a measured value is a new profile (§11.6). Nothing in the fast demo depends on them. */
+    out->stations[TRUING_STATION_ACOUSTIC_LEFT].present = true;
+    out->stations[TRUING_STATION_ACOUSTIC_LEFT].angle_rad = 0.0f;
+    out->stations[TRUING_STATION_ACOUSTIC_LEFT].positioning_tolerance_rad = 0.02f;
+    out->stations[TRUING_STATION_ACOUSTIC_RIGHT].present = true;
+    out->stations[TRUING_STATION_ACOUSTIC_RIGHT].angle_rad = 3.0f * TRUING_PI / 2.0f;
+    out->stations[TRUING_STATION_ACOUSTIC_RIGHT].positioning_tolerance_rad = 0.02f;
     out->stations[TRUING_STATION_RUNOUT].present = true;
     out->stations[TRUING_STATION_RUNOUT].angle_rad = TRUING_PI / 2.0f;
     out->stations[TRUING_STATION_RUNOUT].positioning_tolerance_rad = 0.02f;
@@ -232,5 +249,5 @@ void truing_fixture_machine_profile(truing_machine_profile_t *out)
     out->stations[TRUING_STATION_ADJUSTMENT].angle_rad = TRUING_PI;
     out->stations[TRUING_STATION_ADJUSTMENT].positioning_tolerance_rad = 0.02f;
     out->stations[TRUING_STATION_REFERENCE].present = false;
-    out->reference_station = TRUING_STATION_ACOUSTIC;
+    out->reference_station = TRUING_STATION_ACOUSTIC_LEFT;   /* spoke 0 is confirmed at its own station */
 }

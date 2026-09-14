@@ -9,7 +9,7 @@ static const char *const k_result_str[TRUING_BLOB__COUNT] = {
     "ERR_VERSION", "ERR_KIND", "ERR_CRC", "ERR_PAYLOAD_LENGTH",
 };
 static const char *const k_kind_str[TRUING_BLOB_KIND__COUNT] = {
-    "UNSET", "WHEEL_CLASS", "SOLVER", "CHAIN_PROFILE", "TENSION_MODEL_PROFILE", "MACHINE_PROFILE",
+    "UNSET", "WHEEL_CLASS", "SOLVER", "CHAIN_PROFILE", "TENSION_MODEL_PROFILE", "MACHINE_PROFILE", "EXCITATION_PROFILE",
 };
 
 const char *truing_blob_result_str(truing_blob_result_t r)
@@ -426,7 +426,6 @@ size_t truing_blob_encode_chain_profile(const truing_chain_profile_t *p, uint8_t
     /* schema 2: Phase 1f DSP constants */
     put_f32(&w, p->capture_ms);
     put_f32(&w, p->pre_trigger_ms);
-    put_f32(&w, p->excitation_pulse_ms);
     put_f32(&w, p->measurement_min_snr_db);
     put_f32(&w, p->onset_frame_ms);
     put_f32(&w, p->onset_hop_ms);
@@ -475,7 +474,6 @@ truing_blob_result_t truing_blob_decode_chain_profile(const uint8_t *buf, size_t
     c.gate_start_ms = get_f32(&r);
     c.capture_ms = get_f32(&r);
     c.pre_trigger_ms = get_f32(&r);
-    c.excitation_pulse_ms = get_f32(&r);
     c.measurement_min_snr_db = get_f32(&r);
     c.onset_frame_ms = get_f32(&r);
     c.onset_hop_ms = get_f32(&r);
@@ -594,6 +592,44 @@ truing_blob_result_t truing_blob_decode_machine_profile(const uint8_t *buf, size
         c.stations[id].present = get_bool(&r);
         c.stations[id].angle_rad = get_f32(&r);
         c.stations[id].positioning_tolerance_rad = get_f32(&r);
+    }
+    res = reader_finish(&r);
+    if (res == TRUING_BLOB_OK) {
+        *out = c;
+    }
+    return res;
+}
+
+/* ---- excitation profile ------------------------------------------------------------ */
+/* Payload: u32 excitation_id; then for each acoustic station slot (LEFT, RIGHT): f32 pulse_ms. */
+size_t truing_blob_encode_excitation_profile(const truing_excitation_profile_t *p, uint8_t *buf, size_t cap)
+{
+    writer_t w;
+    if (p == NULL || !writer_begin(&w, buf, cap)) {
+        return 0u;
+    }
+    put_u32(&w, p->excitation_id);
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        put_f32(&w, p->pulse_ms[i]);
+    }
+    return writer_finish(&w, TRUING_BLOB_KIND_EXCITATION_PROFILE);
+}
+
+truing_blob_result_t truing_blob_decode_excitation_profile(const uint8_t *buf, size_t len, truing_excitation_profile_t *out)
+{
+    if (out == NULL) {
+        return TRUING_BLOB_ERR_NULL;
+    }
+    reader_t r;
+    truing_blob_result_t res = reader_begin(&r, buf, len, TRUING_BLOB_KIND_EXCITATION_PROFILE);
+    if (res != TRUING_BLOB_OK) {
+        return res;
+    }
+    truing_excitation_profile_t c;
+    memset(&c, 0, sizeof(c));
+    c.excitation_id = get_u32(&r);
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        c.pulse_ms[i] = get_f32(&r);
     }
     res = reader_finish(&r);
     if (res == TRUING_BLOB_OK) {

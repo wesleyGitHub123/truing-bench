@@ -406,6 +406,8 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
 
     uint8_t digest[TRUING_SHA256_DIGEST_BYTES];
     truing_chain_profile_digest(truing_demo_chain_profile(), digest);
+    uint8_t exc_digest[TRUING_SHA256_DIGEST_BYTES];
+    truing_excitation_profile_digest(truing_demo_excitation_profile(), exc_digest);
 
     /* The writer, not snprintf: a NaN has no JSON form and it writes null, which is what an
      * unmeasured frequency actually means. Hand-formatting these has produced `nan` in a
@@ -414,12 +416,13 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     truing_json_writer_t w;
     truing_json_init(&w, body, sizeof(body));
     truing_json_obj_open(&w, NULL);
-    truing_json_str(&w, "schema", "truing.acoustic.capture/1");
+    truing_json_str(&w, "schema", "truing.acoustic.capture/2");
     truing_json_u32(&w, "seq", v.seq);
     truing_json_u32(&w, "n_words", v.n_words);
     truing_json_u32(&w, "sample_rate_hz", TRUING_AUDIO_SAMPLE_RATE_HZ);
     truing_json_str(&w, "pcm_format", "int32 LE, sample24 << 8 (I2S 24-in-32)");
     truing_json_hex(&w, "chain_digest", digest, sizeof(digest));
+    truing_json_hex(&w, "excitation_digest", exc_digest, sizeof(exc_digest));
     /* Provenance: which board, which build, and above all whether these words came off a
      * microphone or out of the synthetic source (SPEC §6.2). */
     truing_json_str(&w, "source", truing_source_impl_str(truing_demo_acoustic_source()));
@@ -434,7 +437,10 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     truing_json_u32(&w, "attempt", v.attempt);
     truing_json_str(&w, "status", truing_status_str(v.status));
     truing_json_str(&w, "reason", truing_reason_str(v.reason));
-    truing_json_bool(&w, "pluck_commanded", v.diag.pluck_commanded);
+    /* Which station's actuator excited these words, and with what pulse (plan A7). */
+    truing_json_str(&w, "station", truing_station_str((truing_station_id_t)v.diag.station));
+    truing_json_bool(&w, "fired", v.diag.fired);
+    truing_json_f32(&w, "pulse_ms", v.diag.pulse_ms, 3u);
     truing_json_str(&w, "capture_result", truing_audio_result_str(v.diag.capture_result));
     /* The board's own diagnostics, written with the expect_ prefix the replay harness reads:
      * a fixture built from this is a host/target parity check on identical bytes. */

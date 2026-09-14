@@ -35,7 +35,8 @@ import urllib.request
 DEFAULT_HOST = "192.168.4.1"
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAPTURES = os.path.join(REPO_ROOT, "test", "fixtures", "acoustic", "captures")
-SCHEMA = "truing.acoustic.capture/1"
+# /2 adds station, fired, pulse_ms and excitation_digest; /1 bundles are the pre-split history.
+SCHEMAS = ("truing.acoustic.capture/2", "truing.acoustic.capture/1")
 SEQ_HEADER = "X-Truing-Capture-Seq"
 
 
@@ -56,8 +57,8 @@ def fetch_bundle(host, timeout):
     base = "http://%s" % host
     meta_raw, seq_a = get(base + "/debug/capture.json", timeout)
     meta = json.loads(meta_raw.decode("utf-8"))
-    if meta.get("schema") != SCHEMA:
-        raise SystemExit("board speaks schema %r, this tool speaks %r" % (meta.get("schema"), SCHEMA))
+    if meta.get("schema") not in SCHEMAS:
+        raise SystemExit("board speaks schema %r, this tool speaks %r" % (meta.get("schema"), SCHEMAS))
     pcm, seq_b = get(base + "/debug/capture.pcm", timeout)
     _, seq_c = get(base + "/debug/capture.json", timeout)
     if None in (seq_a, seq_b, seq_c):

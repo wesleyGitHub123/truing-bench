@@ -11,9 +11,9 @@ static size_t align8(size_t v)
     return (v + 7u) & ~(size_t)7u;
 }
 
-/* One acoustic call is two things to the person at the station - a window to pluck into and then
- * seconds of arithmetic - and until now it looked like one. These say which is running. Dropping
- * every one of them changes nothing: the window opens and closes on the firmware's clock. */
+/* One acoustic call is two things to the station - a strike and a capture window, then seconds
+ * of arithmetic - and these say which is running. Dropping every one of them changes nothing:
+ * the window opens and closes on the firmware's clock. */
 static void emit_phase(truing_acoustic_real_ctx_t *c, uint8_t cycle_index, truing_acoustic_phase_t phase,
                        uint8_t spoke_index, uint32_t window_ms)
 {
@@ -27,22 +27,16 @@ static void emit_phase(truing_acoustic_real_ctx_t *c, uint8_t cycle_index, truin
     ev.cycle_index = cycle_index;
     ev.u.acoustic.phase = (uint8_t)phase;
     ev.u.acoustic.spoke_index = spoke_index;
-    ev.u.acoustic.pluck_commanded = c->diag.pluck_commanded;
-    /* Reported from what actually happened this attempt, not from what is wired: an attached
-     * actuator whose fire() failed did NOT command anything, and the ARMED lead-in re-enables
-     * for exactly that case - so HAND is true of everything downstream, not just of the label.
-     * Deriving this from available() instead would let a wired-but-failing actuator put "the
-     * actuator was commanded" on the page while nothing happened (SPEC §17.3: a silent wrong
-     * answer). An actuator that fired is the ACTUATOR case; everything else is a hand. */
-    ev.u.acoustic.excitation = (uint8_t)(c->diag.pluck_commanded ? TRUING_EXCITATION_ACTUATOR
-                                                                 : TRUING_EXCITATION_HAND);
+    /* What actually happened this attempt, not what is wired: an actuator whose fire() failed
+     * never reaches a phase frame at all (the attempt is rejected before the window opens). */
+    ev.u.acoustic.station = c->attempt_station;
+    ev.u.acoustic.fired = c->attempt_fired;
     ev.u.acoustic.window_ms = window_ms;
     ev.u.acoustic.attempt = c->attempt;
     c->observer(c->observer_ctx, &ev);
 }
 
-/* The window the operator actually has: the pre-trigger is already in the ring when the call
- * starts, so only capture_ms is time they can still pluck into. */
+/* The live part of the window: the pre-trigger is already in the ring when the call starts. */
 static uint32_t listen_window_ms(const truing_chain_profile_t *chain)
 {
     return (uint32_t)(chain->capture_ms + 0.5f);
@@ -261,14 +255,14 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
         c->attempt_cycle = cycle_index;
         c->attempt_valid = true;
     }
-    /* pluck_commanded is decided for THIS attempt below (fire at the excitation seam); the rest
-     * of diag still describes the previous capture. Wiping the whole struct here destroyed that
-     * evidence - diag.n_captured -> 0 makes truing_acoustic_real_last_capture refuse, i.e. the
-     * /debug/capture dump 404s - ~3.7 s before the new capture replaces the samples, which is
-     * how a session loses exactly the attempt a slow fetch came for. The reset lives next to
-     * capture_seq++ below: nothing may invalidate evidence of the last measurement before the
-     * thing that replaces it exists (same rule real_reset_session applies at a boundary). */
-    c->diag.pluck_commanded = false;
+    /* This attempt's excitation is decided below; diag still describes the previous capture.
+     * Wiping diag here destroyed that evidence - diag.n_captured -> 0 makes
+     * truing_acoustic_real_last_capture refuse, i.e. the /debug/capture dump 404s - before the new
+     * capture replaces the samples. The reset lives next to capture_seq++ below: nothing may
+     * invalidate evidence of the last measurement before the thing that replaces it exists
+     * (same rule real_reset_session applies at a boundary). */
+    c->attempt_station = (uint8_t)truing_acoustic_station_for_spoke(spoke_id);
+    c->attempt_fired = false;
     const uint32_t now = truing_clock_now_ms(&c->clock);
     if (!c->profile_ok) {
         /* SPEC 11.3.1: defensive behaviour when invoked despite admission being bypassed. */
@@ -280,41 +274,36 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
         truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, self->source_impl);
         return;
     }
-    /* Excitation: commanded when an actuator is attached; otherwise the capture records whatever
-     * excitation arrives (a hand pluck at the station), and NO_ONSET_DETECTED says when none did. */
-    if (c->pluck != NULL && c->pluck->available != NULL && c->pluck->available(c->pluck) && c->chain->excitation_pulse_ms > 0.0f) {
-        c->diag.pluck_commanded = c->pluck->fire(c->pluck, c->chain->excitation_pulse_ms);
+    /* Excitation: the actuator at this spoke's own station, and nothing else. A station with no
+     * actuator, or one whose fire() fails, rejects the attempt before any capture: there is no
+     * hand-pluck fallback (plan A10), so a window opened now would record room noise under a
+     * measurement's name. The orchestrator's retry re-excites (SPEC §7.4). */
+    const int slot = truing_acoustic_station_slot((truing_station_id_t)c->attempt_station);
+    truing_pluck_if_t *const act = slot >= 0 ? c->actuator[slot] : NULL;
+    const float pulse_ms = slot >= 0 ? c->excitation->pulse_ms[slot] : NAN;
+    if (act == NULL || act->available == NULL || act->fire == NULL || !act->available(act) || !act->fire(act, pulse_ms)) {
+        c->rejections++;
+        fill_rejected(out, TRUING_REASON_EXCITATION_UNAVAILABLE, cycle_index, now, self->source_impl, c->profile);
+        return;
     }
-    /* A person at the station otherwise gets no warning at all: the window is fixed-length and
-     * cannot end early on a pluck, so a cue arriving with LISTENING is already racing the ~1 s
-     * close. ARMED gives them a lead-in. Skipped when an actuator did the excitation (nobody to
-     * count in) and when no lead is configured (host tests, replay: timing unchanged). */
-    if (c->pluck_lead_ms > 0u && c->delay_fn != NULL && !c->diag.pluck_commanded) {
-        emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_ARMED, spoke_id, c->pluck_lead_ms);
-        c->delay_fn(c->delay_ctx, c->pluck_lead_ms);
-        if (c->cancel_requested) {
-            c->cancel_requested = false;
-            truing_hal_fill_unavailable_estimate(out, TRUING_REASON_CANCELLED, cycle_index, now, self->source_impl);
-            return;
-        }
-    }
-    /* Last thing before the window opens, so the cue reaches the station while it is still open
-     * rather than describing something already over. Emitted AFTER any actuator was commanded,
-     * so pluck_commanded on this frame is the truth for this attempt. */
+    c->attempt_fired = true;
+    /* Last thing before the window opens, and after the actuator was commanded, so the frame
+     * is the truth for this attempt. */
     emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_LISTENING, spoke_id, listen_window_ms(c->chain));
     const uint32_t t0 = truing_clock_now_ms(&c->clock);
     uint32_t got = 0u;
     /* The previous capture is about to be replaced, so its diagnostics may be reset only now -
      * after every early return above has had its chance to leave the evidence standing. The
-     * commanded flag survives the reset: the LISTENING frame above already reported it and the
-     * capture dump must say the same thing about the same attempt. */
-    const bool pluck_commanded = c->diag.pluck_commanded;
+     * excitation facts of this attempt go in with it: the dump must describe the same attempt
+     * the LISTENING frame did. */
     memset(&c->diag, 0, sizeof(c->diag));
     c->diag.f1_hz = NAN;
     c->diag.f2_hz = NAN;
     c->diag.snr_db = NAN;
     c->diag.l_eff_m = NAN;
-    c->diag.pluck_commanded = pluck_commanded;
+    c->diag.station = c->attempt_station;
+    c->diag.fired = true;
+    c->diag.pulse_ms = pulse_ms;
     c->capture_seq++;   /* the buffer is about to change under any reader (SPEC §12.5) */
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
     c->diag.capture_result = r;
@@ -414,18 +403,6 @@ void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoust
     c->observer_ctx = observer_ctx;
 }
 
-void truing_acoustic_real_set_pluck_lead(truing_acoustic_if_t *self, uint32_t lead_ms,
-                                         void (*delay_fn)(void *ctx, uint32_t ms), void *delay_ctx)
-{
-    if (self == NULL || self->ctx == NULL) {
-        return;
-    }
-    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
-    c->pluck_lead_ms = lead_ms;
-    c->delay_fn = delay_fn;
-    c->delay_ctx = delay_ctx;
-}
-
 static void real_cancel(truing_acoustic_if_t *self)
 {
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
@@ -470,11 +447,14 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
         return;
     }
     const uint32_t n = n_words < c->n_capture ? n_words : c->n_capture;
+    c->attempt_station = (uint8_t)TRUING_STATION_UNSET;   /* replayed words: nothing was excited */
+    c->attempt_fired = false;
     memset(&c->diag, 0, sizeof(c->diag));
     c->diag.f1_hz = NAN;
     c->diag.f2_hz = NAN;
     c->diag.snr_db = NAN;
     c->diag.l_eff_m = NAN;
+    c->diag.pulse_ms = NAN;
     c->capture_seq++;   /* replay overwrites the same buffer a dump would be reading */
     memcpy(c->words, words, (size_t)n * sizeof(int32_t));
     c->diag.n_captured = n;
@@ -486,9 +466,36 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
     note_outcome(c, 0u, cycle_index, out);
 }
 
+static bool real_ready(truing_acoustic_if_t *self, truing_reason_t *reason)
+{
+    const truing_acoustic_real_ctx_t *c = (const truing_acoustic_real_ctx_t *)self->ctx;
+    if (c == NULL || !c->source_open) {
+        if (reason != NULL) *reason = TRUING_REASON_NOT_IMPLEMENTED;
+        return false;
+    }
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        truing_pluck_if_t *const a = c->actuator[i];
+        if (a == NULL || a->available == NULL || !a->available(a)) {
+            if (reason != NULL) *reason = TRUING_REASON_EXCITATION_UNAVAILABLE;
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The session header names what excites the spokes (SPEC §6.2), so the name says which stations
+ * have an actuator. Static strings: impl_name outlives the call. */
+static const char *impl_name_for(const truing_acoustic_actuators_t *a)
+{
+    const bool l = a != NULL && a->at[0] != NULL;
+    const bool r = a != NULL && a->at[1] != NULL;
+    return l && r ? "acoustic_real+pluck(L,R)" : (l ? "acoustic_real+pluck(L)" : (r ? "acoustic_real+pluck(R)" : "acoustic_real"));
+}
+
 bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *ctx, truing_clock_if_t clock,
-                               const truing_chain_profile_t *chain, const truing_tension_model_profile_t *profile,
-                               truing_audio_source_if_t *source, truing_pluck_if_t *pluck, void *scratch, size_t scratch_bytes,
+                               const truing_chain_profile_t *chain, const truing_excitation_profile_t *excitation,
+                               const truing_tension_model_profile_t *profile, truing_audio_source_if_t *source,
+                               const truing_acoustic_actuators_t *actuators, void *scratch, size_t scratch_bytes,
                                const char **detail)
 {
     if (detail != NULL) *detail = "";
@@ -496,20 +503,28 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
         return false;
     }
     memset(ctx, 0, sizeof(*ctx));
-    self->impl_name = "acoustic_real";
+    self->impl_name = impl_name_for(actuators);
     self->source_impl = TRUING_SOURCE_REAL;
     self->measure_spoke_tension = real_measure;
     self->request_cancel = real_cancel;
     self->reset_session = real_reset_session;
+    self->ready = real_ready;
     self->ctx = ctx;
     ctx->clock = clock;
     ctx->chain = chain;
+    ctx->excitation = excitation;
     ctx->profile = profile;
     ctx->source = source;
-    ctx->pluck = pluck;
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        ctx->actuator[i] = actuators != NULL ? actuators->at[i] : NULL;
+    }
     const char *field = NULL;
     if (chain == NULL || truing_chain_profile_check(chain, &field) != TRUING_CFG_OK) {
         if (detail != NULL) *detail = "chain profile invalid";
+        return false;
+    }
+    if (excitation == NULL || truing_excitation_profile_check(excitation, &field) != TRUING_CFG_OK) {
+        if (detail != NULL) *detail = "excitation profile invalid";
         return false;
     }
     if (!truing_dsp_params_from_chain(chain, &ctx->params)) {

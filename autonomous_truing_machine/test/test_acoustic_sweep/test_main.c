@@ -41,6 +41,7 @@
 #define MAX_NAME_LEN   96u
 
 static truing_chain_profile_t g_base;
+static truing_excitation_profile_t g_excitation;
 static truing_tension_model_profile_t g_profile;
 static truing_fake_clock_t g_fc;
 static truing_clock_if_t g_clock;
@@ -49,6 +50,7 @@ static char g_dir[MAX_PATH_LEN];
 void setUp(void)
 {
     truing_fixture_chain_profile_inmp441(&g_base);
+    truing_fixture_excitation_profile(&g_excitation);
     truing_fixture_tension_model_profile_complete(&g_profile);
     truing_fake_clock_init(&g_fc, &g_clock, 10u);
 }
@@ -159,7 +161,7 @@ static void run_one(const char *name, const char *axis, double value, const trui
     void *scratch = malloc(bytes);
     TEST_ASSERT_NOT_NULL(scratch);
     const char *detail = NULL;
-    if (!truing_acoustic_real_init(&a, &ctx, g_clock, chain, &g_profile, &src, NULL, scratch, bytes, &detail)) {
+    if (!truing_acoustic_real_init(&a, &ctx, g_clock, chain, &g_excitation, &g_profile, &src, NULL, scratch, bytes, &detail)) {
         printf("%s,%s,%g,INIT_REFUSED,%s,,,,,,\n", name, axis, value, detail);
         free(scratch);
         return;

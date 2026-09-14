@@ -84,9 +84,9 @@ def main():
 
         kind = f.get("kind", "")
         if kind == "ACOUSTIC_PHASE":
-            print("   ** %-14s sp%s a%s exc=%s cmd=%s" % (
+            print("   ** %-14s sp%s a%s actuator=%s fired=%s" % (
                 f.get("phase"), f.get("spoke_index"), f.get("attempt"),
-                f.get("excitation"), f.get("pluck_commanded")), flush=True)
+                f.get("actuator"), f.get("fired")), flush=True)
         elif kind:
             print("   <- %s" % kind, flush=True)
 

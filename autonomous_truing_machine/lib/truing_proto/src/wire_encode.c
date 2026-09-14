@@ -87,10 +87,10 @@ size_t truing_wire_encode_event(const truing_telemetry_event_t *ev, char *buf, s
     case TRUING_EVT_ACOUSTIC_PHASE:
         truing_json_str(&w, "phase", truing_acoustic_phase_str((truing_acoustic_phase_t)ev->u.acoustic.phase));
         truing_json_u32(&w, "spoke_index", ev->u.acoustic.spoke_index);
-        truing_json_str(&w, "excitation", truing_excitation_str((truing_excitation_t)ev->u.acoustic.excitation));
-        truing_json_bool(&w, "pluck_commanded", ev->u.acoustic.pluck_commanded);
-        /* LISTENING carries the open window; ARMED carries the lead-in before it opens;
-         * ONSET_DETECTED and ANALYZING carry 0 and the page must draw no bar. */
+        truing_json_str(&w, "actuator", truing_acoustic_actuator_str(ev->u.acoustic.station));
+        truing_json_bool(&w, "fired", ev->u.acoustic.fired);
+        /* LISTENING carries the open window; ONSET_DETECTED and ANALYZING carry 0 and the page
+         * must draw no bar. */
         truing_json_u32(&w, "window_ms", ev->u.acoustic.window_ms);
         truing_json_u32(&w, "attempt", ev->u.acoustic.attempt);
         break;

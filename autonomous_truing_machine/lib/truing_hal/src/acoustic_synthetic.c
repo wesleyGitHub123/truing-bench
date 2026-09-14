@@ -117,6 +117,7 @@ void truing_acoustic_synthetic_init(truing_acoustic_if_t *self, truing_acoustic_
     self->measure_spoke_tension = synthetic_measure;
     self->request_cancel = synthetic_cancel;
     self->reset_session = synthetic_reset_session;
+    self->ready = NULL;
     self->ctx = ctx;
 }
 

@@ -93,11 +93,11 @@ static void test_manual_reference_then_positioning_cycle(void)
     truing_navigation_establish_reference(&nav, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, r.outcome);
     TEST_ASSERT_EQUAL_INT(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION, r.wait_kind);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, r.target.station);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, r.target.station);
     truing_wait_prompt_t prompt;
     TEST_ASSERT_TRUE(truing_nav_result_to_prompt(&r, &prompt));
     TEST_ASSERT_EQUAL_INT(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION, prompt.kind);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, prompt.station);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, prompt.station);
     TEST_ASSERT_EQUAL_UINT8(0u, prompt.target_index);
     truing_navigation_poll(&nav, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, r.outcome);
@@ -132,7 +132,7 @@ static void test_manual_reference_then_positioning_cycle(void)
     /* Rim index 4 to the acoustic station (φ = 0): R = 7π/4. Same feature, different station,
      * different rotation — the station is not a universal constant. */
     t.kind = TRUING_NAV_TARGET_RIM_INDEX;
-    t.station = TRUING_STATION_ACOUSTIC;
+    t.station = TRUING_STATION_ACOUSTIC_LEFT;
     truing_navigation_request(&nav, &t, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_WAIT_POSITION_TO_RIM_INDEX, r.wait_kind);
     truing_navigation_confirm(&nav, &r);
@@ -165,7 +165,7 @@ static void test_manual_refusals(void)
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, r.outcome);
     TEST_ASSERT_EQUAL_INT(TRUING_REASON_CALIBRATION_MISSING, r.reason);
     /* Feature out of range. */
-    t = spoke_at(40u, TRUING_STATION_ACOUSTIC);
+    t = spoke_at(40u, TRUING_STATION_ACOUSTIC_LEFT);
     truing_navigation_request(&nav, &t, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, r.outcome);
     TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, r.reason);
@@ -177,7 +177,7 @@ static void test_manual_refusals(void)
     truing_navigation_poll(&nav, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_IDLE, r.outcome);
     /* stop() drops a pending request without touching position knowledge. */
-    t = spoke_at(3u, TRUING_STATION_ACOUSTIC);
+    t = spoke_at(3u, TRUING_STATION_ACOUSTIC_LEFT);
     truing_navigation_request(&nav, &t, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, r.outcome);
     truing_navigation_stop(&nav);
@@ -233,7 +233,7 @@ static void test_synthetic_positions_through_actuator_coordinates(void)
     TEST_ASSERT_FALSE(pos.sensor_confirmed);   /* commanded motion only: not corroborated */
 
     /* Shortest path: back to spoke 0 at acoustic is −π/4, i.e. −400 steps, not +2800. */
-    t = spoke_at(0u, TRUING_STATION_ACOUSTIC);
+    t = spoke_at(0u, TRUING_STATION_ACOUSTIC_LEFT);
     truing_navigation_request(&nav, &t, &r);
     TEST_ASSERT_EQUAL_INT32(-400, dctx.last_move_steps);
     truing_navigation_query(&nav, &pos);
@@ -286,7 +286,7 @@ static void test_synthetic_in_motion_polling_stop_and_fault(void)
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, TRUING_PI / 2.0f - truing_spoke_angle(32u, 2u), pos.rotation_rad);
 
     /* ABORT mid-motion: controlled stop, reference no longer vouched for (SPEC §10A.7). */
-    t = spoke_at(20u, TRUING_STATION_ACOUSTIC);
+    t = spoke_at(20u, TRUING_STATION_ACOUSTIC_LEFT);
     truing_navigation_request(&nav, &t, &r);
     TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, r.outcome);
     truing_navigation_stop(&nav);

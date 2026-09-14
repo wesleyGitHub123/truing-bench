@@ -589,6 +589,33 @@ is why the macro is kept rather than deleted.
   rule (`truing_config_check_pair`), not inside `WheelState`, which accepts any
   supported grid so the data model does not encode the Stage 1 policy.
 
+- **Two acoustic stations (SPEC 11.6, 16 station geometry, 10A.3, 9.1) — 2026-09-14.** The
+  Stage 1 rig has two excitation solenoids, one per wheel flange, each at its own station on
+  its own side of the wheel, because one fixed solenoid cannot reach both flanges.
+  - **Stations.** The single `acoustic` station id became `acoustic_left` and `acoustic_right`,
+    both required. The machine profile is now `profile_id` 2 with placeholder angles until the
+    bench measures them. This closes SPEC 16's station-geometry item **for this rig only**, with
+    the extension 10A.3 anticipates ("a station may be added").
+  - **Decision ownership moved, deliberately.** SPEC 9.1 says the acoustic subsystem "owns none
+    of" positioning, and 10A.3 says relocating a station never changes a consumer. Both are bent
+    in one bounded way. *Which* acoustic station a spoke goes to depends on which solenoid can
+    reach it, and that is a property of the excitation composite. So the rule lives in
+    `truing_acoustic_station_for_spoke()` (spoke 0 → LEFT, alternating). The orchestrator asks it
+    for the target station and still never sees an angle. The subsystem uses the same function to
+    pick the actuator. The station *angles* stay machine-profile data owned by navigation.
+  - **No hand-pluck fallback.** Readiness is a new acoustic contract hook, `ready()`, that
+    admission checks. A session is refused while any station lacks an actuator, and a failed fire
+    rejects the attempt before any capture.
+- **Reason-code extension `EXCITATION_UNAVAILABLE` (SPEC 13.2).** A station's actuator is not
+  installed or its fire() failed, so nothing was excited. Also the admission refusal for an
+  acoustic subsystem that is not ready. Appended after `CAPTURE_OVERRUN`.
+- **Excitation leaves the chain profile (SPEC 11.3).** SPEC 11.3's chain profile never listed an
+  excitation field; the firmware had added `excitation_pulse_ms`. It moved into
+  `truing_excitation_profile_t` (a pulse per acoustic station, its own digest) and the chain
+  digest became `truing.chain_profile/2`. A per-station pulse change therefore never invalidates
+  DSP evidence. The three checked-in capture bundles were migrated by derivation, with their
+  original digest kept as `chain_digest_v1` (see `test/fixtures/acoustic/captures/README.md`).
+
 ## Model-preparation findings (Phase 1b) — need the owner's decision
 
 Measured on the SYNTHETIC sym32 fixture (bike-wheel-calc example rim section,
@@ -670,6 +697,24 @@ configuration exists yet (hub geometry, `c` per side, the influence fingerprint
 and the tension-model parameters all require measurement or model preparation),
 so a normal session cannot be admitted until 1b and a measurement campaign
 supply them; the firmware reports this honestly as "not provisioned".
+
+**Known limitation: acoustic spoke identity vs the solver's `indexing_origin` (2026-09-14).**
+
+- **What it is.** The acoustic subsystem's convention (spoke 0 is the spoke the LEFT solenoid
+  strikes, alternating) is deliberately **not** reconciled with the artifact-bound
+  `indexing_origin` (SPEC 6.5). That origin is what maps spoke indices to influence-matrix
+  classes and to the nipple-adjustment instructions.
+- **Why the demo is safe.** It is safe while runout and the solve are synthetic, as in the fast
+  demo.
+- **What must happen first.** **Before any real physical truing session** (real runout, real
+  adjustments on a real wheel), the two identities must be reconciled. That reconciliation
+  belongs to the mechanical-designation campaign (Side A/B, hub/flange geometry), not to the
+  acoustic subsystem.
+- **Related hazard.** The station convention is compiled. A wheel mounted flipped, or an S0 the
+  LEFT solenoid cannot reach, would strike a neighbouring spoke and file it under the wrong index
+  with no reason code (SPEC 17.3 #11 class). Setting any `BOARD_PLUCK_ACTUATOR_*_PRESENT` to 1
+  therefore requires the bench attribution check (plan B2 M8) to have passed on the mounted
+  wheel.
 
 Carried forward from the 2026-09-04 DSP and build-hygiene pass:
 

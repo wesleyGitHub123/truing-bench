@@ -15,8 +15,8 @@
  *   BOARD_INDEX_SENSOR_GPIO            wheel index / reference sensor (Wheel Navigation, SPEC §10A)
  *   BOARD_WHEEL_DRIVE_*                wheel-drive actuator pins, reserved for the C3 development
  *                                      motor driver (Wheel Navigation owns them; SPEC §10A)
- *   BOARD_PLUCK_ACTUATOR_GPIO          excitation actuator (reserved; acoustic subsystem owns it)
- *   BOARD_PLUCK_ACTUATOR_PRESENT       1 if a solenoid is physically wired to that pin (both boards: 0)
+ *   BOARD_PLUCK_ACTUATOR_LEFT_GPIO / _RIGHT_GPIO        excitation actuator per acoustic station (acoustic subsystem owns them)
+ *   BOARD_PLUCK_ACTUATOR_LEFT_PRESENT / _RIGHT_PRESENT  1 once that station's solenoid is wired and bench-verified (both boards: 0)
  *   BOARD_STATUS_LED_GPIO / BOARD_STATUS_LED_ACTIVE_LOW / BOARD_HAS_PLAIN_STATUS_LED
  *
  * DESCRIPTIVE, NOT WIRED: BOARD_HAS_SEPARATE_DEBUG_PORT, BOARD_HAS_PLAIN_STATUS_LED,

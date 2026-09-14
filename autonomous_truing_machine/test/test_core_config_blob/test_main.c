@@ -92,9 +92,23 @@ static void test_round_trip_all_kinds(void)
     TEST_ASSERT_EQUAL_INT(TRUING_BLOB_OK, truing_blob_decode_machine_profile(a, na, &m2));
     nb = truing_blob_encode_machine_profile(&m2, b, sizeof(b));
     TEST_ASSERT_EQUAL_MEMORY(a, b, na);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, m2.reference_station);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, m2.reference_station);
     TEST_ASSERT_FALSE(m2.stations[TRUING_STATION_REFERENCE].present);
+    TEST_ASSERT_TRUE(m2.stations[TRUING_STATION_ACOUSTIC_RIGHT].present);
+    TEST_ASSERT_FLOAT_WITHIN(1e-6f, m.stations[TRUING_STATION_ACOUSTIC_RIGHT].angle_rad,
+                             m2.stations[TRUING_STATION_ACOUSTIC_RIGHT].angle_rad);
     TEST_ASSERT_EQUAL_INT(TRUING_CFG_OK, truing_machine_profile_check(&m2, NULL));
+
+    truing_excitation_profile_t e, e2;
+    truing_fixture_excitation_profile(&e);
+    e.pulse_ms[1] = 17.5f;   /* the stations may differ; the codec must keep them apart */
+    na = truing_blob_encode_excitation_profile(&e, a, sizeof(a));
+    TEST_ASSERT_EQUAL_INT(TRUING_BLOB_OK, truing_blob_decode_excitation_profile(a, na, &e2));
+    nb = truing_blob_encode_excitation_profile(&e2, b, sizeof(b));
+    TEST_ASSERT_EQUAL_MEMORY(a, b, na);
+    TEST_ASSERT_EQUAL_FLOAT(20.0f, e2.pulse_ms[0]);
+    TEST_ASSERT_EQUAL_FLOAT(17.5f, e2.pulse_ms[1]);
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_OK, truing_excitation_profile_check(&e2, NULL));
 }
 
 static void test_integrity_and_structure_failures(void)
@@ -163,6 +177,8 @@ static void test_every_blob_fits_the_capacity_bound(void)
     truing_chain_profile_t c;
     truing_tension_model_profile_t t;
     truing_machine_profile_t m;
+    truing_excitation_profile_t e;
+    truing_fixture_excitation_profile(&e);
     truing_fixture_wheel_class_sym32(&w);
     truing_fixture_solver_config(&s, 32u);
     truing_fixture_chain_profile_inmp441(&c);
@@ -173,6 +189,7 @@ static void test_every_blob_fits_the_capacity_bound(void)
     TEST_ASSERT_TRUE(truing_blob_encode_chain_profile(&c, buf, sizeof(buf)) > 0u);
     TEST_ASSERT_TRUE(truing_blob_encode_tension_model_profile(&t, buf, sizeof(buf)) > 0u);
     TEST_ASSERT_TRUE(truing_blob_encode_machine_profile(&m, buf, sizeof(buf)) > 0u);
+    TEST_ASSERT_TRUE(truing_blob_encode_excitation_profile(&e, buf, sizeof(buf)) > 0u);
 }
 
 int main(int argc, char **argv)

@@ -63,6 +63,10 @@ typedef enum {
     /* CAPTURE_OVERRUN — the audio front end dropped samples during a capture; the spectrum of a
      *             discontinuous record is corrupt, so the measurement is rejected (SPEC §9.4). */
     TRUING_REASON_CAPTURE_OVERRUN,
+    /* EXCITATION_UNAVAILABLE — the acoustic station's excitation actuator is not installed or its
+     *             fire() failed, so there is nothing to measure; also refuses a session whose
+     *             acoustic subsystem is not ready. Never degraded to a hand pluck (plan A10). */
+    TRUING_REASON_EXCITATION_UNAVAILABLE,
     TRUING_REASON__COUNT
 } truing_reason_t;
 

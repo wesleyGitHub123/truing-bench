@@ -9,11 +9,7 @@ static const char *const k_kind_str[TRUING_EVT__COUNT] = {
 };
 
 static const char *const k_phase_str[TRUING_ACOUSTIC_PHASE__COUNT] = {
-    "LISTENING", "ONSET_DETECTED", "ANALYZING", "ARMED",
-};
-
-static const char *const k_excitation_str[TRUING_EXCITATION__COUNT] = {
-    "NONE", "HAND", "ACTUATOR",
+    "LISTENING", "ONSET_DETECTED", "ANALYZING",
 };
 
 const char *truing_acoustic_phase_str(truing_acoustic_phase_t p)
@@ -21,9 +17,10 @@ const char *truing_acoustic_phase_str(truing_acoustic_phase_t p)
     return (unsigned)p < TRUING_ACOUSTIC_PHASE__COUNT ? k_phase_str[p] : "?";
 }
 
-const char *truing_excitation_str(truing_excitation_t e)
+const char *truing_acoustic_actuator_str(uint8_t station)
 {
-    return (unsigned)e < TRUING_EXCITATION__COUNT ? k_excitation_str[e] : "?";
+    const int slot = truing_acoustic_station_slot((truing_station_id_t)station);
+    return slot == 0 ? "LEFT" : (slot == 1 ? "RIGHT" : "NONE");
 }
 
 const char *truing_event_kind_str(truing_event_kind_t k)

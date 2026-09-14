@@ -33,6 +33,8 @@ truing_source_impl_t truing_demo_acoustic_source(void);
 /* The acoustic chain configuration the measurement ran under. Its digest is what lets a
  * stored capture refuse replay under different DSP constants. NULL before start-up. */
 const truing_chain_profile_t *truing_demo_chain_profile(void);
+/* How the acoustic stations' actuators excite a spoke; its own digest, separate from the chain's. */
+const truing_excitation_profile_t *truing_demo_excitation_profile(void);
 
 /* ---- acquisition path (FAST DEMO image only) ------------------------------------------
  * Which implementations satisfy navigation and runout for the NEXT session:

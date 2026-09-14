@@ -144,7 +144,6 @@ typedef struct {
      * never literals"; reference meaning in the research repo's config/dsp.yaml). */
     float    capture_ms;                   /* audio captured per measurement after the excitation trigger */
     float    pre_trigger_ms;               /* audio kept before the trigger so the onset detector sees silence */
-    float    excitation_pulse_ms;          /* pluck actuator pulse (0 = no actuator commanded) */
     float    measurement_min_snr_db;       /* below this the estimate is REJECTED / LOW_SNR */
     float    onset_frame_ms;
     float    onset_hop_ms;
@@ -166,6 +165,20 @@ typedef struct {
     float    snr_noise_offset_lo_hz;
     float    snr_noise_offset_hi_hz;
 } truing_chain_profile_t;
+
+/* ---- Excitation actuator profile ------------------------------------------------- */
+/* How each acoustic station's actuator excites a spoke. Deliberately NOT part of the chain
+ * profile: SPEC §11.3's chain is transducer + interface + environment + DSP, and a change in
+ * how a spoke is struck must not invalidate DSP evidence captured under the same chain. Its
+ * own digest records it. Indexed by truing_acoustic_station_slot(); whether the two stations
+ * need different values is for characterization evidence to decide, not this struct. */
+#define TRUING_ACOUSTIC_STATIONS 2u
+#define TRUING_EXCITATION_PULSE_MAX_MS 1000.0f   /* sanity bound: a longer "pulse" is a stuck actuator */
+
+typedef struct {
+    uint32_t excitation_id;
+    float    pulse_ms[TRUING_ACOUSTIC_STATIONS];   /* actuator on-time per station, (0, MAX] */
+} truing_excitation_profile_t;
 
 /* ---- §11.3.1 Tension model profile ---------------------------------------------- */
 typedef enum {
@@ -208,10 +221,17 @@ typedef struct {
 /* ---- §11.6 Machine profile: physical station geometry (SPEC §10A) ----------------- */
 /* The physical stations of the machine. Their placement is DATA (this profile), never a
  * compiled-in assumption: a mechanical revision that relocates a station changes this
- * profile, not the workflow. Stations may share an angle. */
+ * profile, not the workflow. Stations may share an angle.
+ *
+ * Two acoustic stations, one per excitation actuator, one on each side of the wheel: a
+ * solenoid can only reach the spokes of its own flange. LEFT/RIGHT are rig labels owned by
+ * the acoustic subsystem (truing_acoustic_station_for_spoke), deliberately NOT §6.4.1 side
+ * A/B. This resolves the §16 station-geometry item for the Stage 1 rig and extends the
+ * §11.6 station list (IMPLEMENTATION_NOTES). */
 typedef enum {
     TRUING_STATION_UNSET = 0,
-    TRUING_STATION_ACOUSTIC,     /* excitation + capture */
+    TRUING_STATION_ACOUSTIC_LEFT,  /* excitation + capture: the LEFT actuator's station */
+    TRUING_STATION_ACOUSTIC_RIGHT, /* excitation + capture: the RIGHT actuator's station */
     TRUING_STATION_RUNOUT,       /* lateral / radial gauges */
     TRUING_STATION_ADJUSTMENT,   /* nipple adjustment (operator in C2, actuator in C3) */
     TRUING_STATION_REFERENCE,    /* index / reference sensor, if the machine has one */
@@ -267,6 +287,9 @@ truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, c
  * different answer with nothing to indicate why. Recording this digest alongside the samples
  * turns that silent divergence into a refusal. A zeroed digest is written for a NULL profile. */
 void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TRUING_SHA256_DIGEST_BYTES]);
+truing_cfg_check_t truing_excitation_profile_check(const truing_excitation_profile_t *p, const char **field);
+/* Same construction and purpose as the chain digest, for how the audio was excited. */
+void truing_excitation_profile_digest(const truing_excitation_profile_t *p, uint8_t out[TRUING_SHA256_DIGEST_BYTES]);
 truing_cfg_check_t truing_tension_model_profile_check(const truing_tension_model_profile_t *p,
                                                       uint32_t *missing_fields, const char **field);
 truing_cfg_check_t truing_tension_model_profile_compatible(const truing_tension_model_profile_t *p,
@@ -280,6 +303,8 @@ truing_cfg_check_t truing_machine_profile_check(const truing_machine_profile_t *
 /* NULL when the station is absent from the profile. */
 const truing_station_geometry_t *truing_machine_profile_station(const truing_machine_profile_t *p, truing_station_id_t id);
 const char *truing_station_str(truing_station_id_t id);
+/* Index of an acoustic station into per-station arrays: 0 LEFT, 1 RIGHT, -1 for any other. */
+int truing_acoustic_station_slot(truing_station_id_t id);
 
 /* Bracing angle per side from configured hub geometry (SPEC §11.1 geometry classification):
  * alpha = atan2(flange_offset, rim_radius - flange_radius). */

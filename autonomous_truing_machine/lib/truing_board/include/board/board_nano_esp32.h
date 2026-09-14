@@ -41,12 +41,20 @@
 #define BOARD_WHEEL_DRIVE_UART_RX_GPIO 47
 #define BOARD_WHEEL_DRIVE_DIAG_GPIO    13
 
-/* Excitation actuator on D6. */
-#define BOARD_PLUCK_ACTUATOR_GPIO      9
-/* 1 once a solenoid is physically wired to that pin. While 0, the composition root leaves the
- * pluck seam absent: the operator plucks at the station and the ARMED lead-in counts them in.
- * bring-up still probes the GPIO regardless -- that is a self-test, not an excitation. */
-#define BOARD_PLUCK_ACTUATOR_PRESENT   0
+/* Excitation actuators, one per acoustic station: LEFT on D6, RIGHT on D7 (plan A8). Each
+ * *_PRESENT is 1 only once that station's solenoid is wired AND has passed its B2 bench
+ * check. While 0 the station has no actuator: sessions are refused (EXCITATION_UNAVAILABLE),
+ * nothing is fired, not even by bring-up, and nobody plucks by hand.
+ *
+ * PRECONDITION for setting either to 1: the physical spoke marked S0 is struck by the LEFT
+ * solenoid and S1 only by the RIGHT one (plan B2 M8). The station convention is compiled
+ * (truing_acoustic_station_for_spoke), so a wheel mounted flipped would strike a neighbouring
+ * spoke and file it under the wrong index with no reason code. It is also NOT reconciled with
+ * the solver's indexing_origin (IMPLEMENTATION_NOTES, known limitation). */
+#define BOARD_PLUCK_ACTUATOR_LEFT_GPIO     9
+#define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT  0
+#define BOARD_PLUCK_ACTUATOR_RIGHT_GPIO    10
+#define BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT 0
 
 /* Yellow built-in LED on D13 (GPIO48), active-high. */
 #define BOARD_HAS_PLAIN_STATUS_LED     1

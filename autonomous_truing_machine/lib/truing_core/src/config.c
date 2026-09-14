@@ -277,7 +277,7 @@ void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TR
     truing_sha256_init(&s);
     /* Tagged, so a future change of what goes into the digest cannot be mistaken for a
      * change of configuration. */
-    truing_sha256_update(&s, (const uint8_t *)"truing.chain_profile/1", 22u);
+    truing_sha256_update(&s, (const uint8_t *)"truing.chain_profile/2", 22u);
     digest_u32(&s, p->chain_id);
     digest_u32(&s, (uint32_t)p->transducer);
     digest_u32(&s, p->sample_rate_hz);
@@ -291,7 +291,6 @@ void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TR
     digest_f32(&s, p->gate_start_ms);
     digest_f32(&s, p->capture_ms);
     digest_f32(&s, p->pre_trigger_ms);
-    digest_f32(&s, p->excitation_pulse_ms);
     digest_f32(&s, p->measurement_min_snr_db);
     digest_f32(&s, p->onset_frame_ms);
     digest_f32(&s, p->onset_hop_ms);
@@ -313,6 +312,46 @@ void truing_chain_profile_digest(const truing_chain_profile_t *p, uint8_t out[TR
     digest_f32(&s, p->snr_noise_offset_lo_hz);
     digest_f32(&s, p->snr_noise_offset_hi_hz);
     truing_sha256_final(&s, out);
+}
+
+void truing_excitation_profile_digest(const truing_excitation_profile_t *p, uint8_t out[TRUING_SHA256_DIGEST_BYTES])
+{
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, TRUING_SHA256_DIGEST_BYTES);
+    if (p == NULL) {
+        return;
+    }
+    truing_sha256_t s;
+    truing_sha256_init(&s);
+    truing_sha256_update(&s, (const uint8_t *)"truing.excitation_profile/1", 27u);
+    digest_u32(&s, p->excitation_id);
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        digest_f32(&s, p->pulse_ms[i]);
+    }
+    truing_sha256_final(&s, out);
+}
+
+truing_cfg_check_t truing_excitation_profile_check(const truing_excitation_profile_t *p, const char **field)
+{
+    set_field(field, "");
+    if (p == NULL) {
+        return TRUING_CFG_ERR_NULL;
+    }
+    if (p->excitation_id == 0u) {
+        set_field(field, "excitation_id");
+        return TRUING_CFG_ERR_UNSET;
+    }
+    static const char *const k_pulse_field[TRUING_ACOUSTIC_STATIONS] = { "pulse_ms_left", "pulse_ms_right" };
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        CHECK(check_pos(p->pulse_ms[i], k_pulse_field[i], field));
+        if (p->pulse_ms[i] > TRUING_EXCITATION_PULSE_MAX_MS) {
+            set_field(field, k_pulse_field[i]);
+            return TRUING_CFG_ERR_OUT_OF_RANGE;
+        }
+    }
+    return TRUING_CFG_OK;
 }
 
 truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, const char **field)
@@ -350,7 +389,6 @@ truing_cfg_check_t truing_chain_profile_check(const truing_chain_profile_t *p, c
     /* Phase 1f DSP constants (SPEC 9.5): present, finite and mutually consistent. */
     CHECK(check_pos(p->capture_ms, "capture_ms", field));
     CHECK(check_nonneg(p->pre_trigger_ms, "pre_trigger_ms", field));
-    CHECK(check_nonneg(p->excitation_pulse_ms, "excitation_pulse_ms", field));
     CHECK(check_nonneg(p->measurement_min_snr_db, "measurement_min_snr_db", field));
     CHECK(check_pos(p->onset_frame_ms, "onset_frame_ms", field));
     CHECK(check_pos(p->onset_hop_ms, "onset_hop_ms", field));
@@ -537,12 +575,17 @@ truing_cfg_check_t truing_config_check_pair(const truing_wheel_class_config_t *w
 
 /* ---- machine profile (SPEC §10A, §11.6) ------------------------------------------- */
 static const char *const k_station_str[TRUING_STATION__COUNT] = {
-    "unset", "acoustic", "runout", "adjustment", "reference",
+    "unset", "acoustic_left", "acoustic_right", "runout", "adjustment", "reference",
 };
 
 const char *truing_station_str(truing_station_id_t id)
 {
     return (unsigned)id < TRUING_STATION__COUNT ? k_station_str[id] : "?";
+}
+
+int truing_acoustic_station_slot(truing_station_id_t id)
+{
+    return id == TRUING_STATION_ACOUSTIC_LEFT ? 0 : (id == TRUING_STATION_ACOUSTIC_RIGHT ? 1 : -1);
 }
 
 const truing_station_geometry_t *truing_machine_profile_station(const truing_machine_profile_t *p, truing_station_id_t id)
@@ -563,9 +606,11 @@ truing_cfg_check_t truing_machine_profile_check(const truing_machine_profile_t *
         set_field(field, "profile_id");
         return TRUING_CFG_ERR_UNSET;
     }
-    /* The workflow positions features at these three stations in every cycle (SPEC §7.1);
-     * they may share an angle, but each must be declared. */
-    static const truing_station_id_t k_required[] = { TRUING_STATION_ACOUSTIC, TRUING_STATION_RUNOUT, TRUING_STATION_ADJUSTMENT };
+    /* The workflow positions features at these stations in every cycle (SPEC §7.1); they may
+     * share an angle, but each must be declared. Both acoustic stations are required: every
+     * spoke is routed to one of them by the acoustic subsystem's convention. */
+    static const truing_station_id_t k_required[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT,
+                                                      TRUING_STATION_RUNOUT, TRUING_STATION_ADJUSTMENT };
     for (unsigned i = 0; i < sizeof(k_required) / sizeof(k_required[0]); ++i) {
         if (!p->stations[k_required[i]].present) {
             set_field(field, k_station_str[k_required[i]]);

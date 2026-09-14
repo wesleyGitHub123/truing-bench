@@ -41,6 +41,9 @@ struct truing_acoustic_if {
     void (*request_cancel)(truing_acoustic_if_t *self);
     /* Clear latched request state at a session boundary (may be NULL: nothing to clear). */
     void (*reset_session)(truing_acoustic_if_t *self);
+    /* Can this subsystem excite and measure every spoke a session will ask for? Asked at session
+     * admission; false fills `reason`. May be NULL: nothing to be ready about (synthetic, stub). */
+    bool (*ready)(truing_acoustic_if_t *self, truing_reason_t *reason);
     void *ctx;
 };
 
@@ -52,6 +55,16 @@ void truing_acoustic_request_cancel(truing_acoustic_if_t *self);
 /* Discard any cancel that no measurement consumed, plus attempt bookkeeping, so it cannot
  * leak into the next session. No-op when the interface or its hook is absent. */
 void truing_acoustic_reset_session(truing_acoustic_if_t *self);
+/* True when the interface has no readiness hook. Admission refuses on false (plan A10: a session
+ * that cannot excite a spoke is refused, never quietly degraded to a hand pluck). */
+bool truing_acoustic_ready(truing_acoustic_if_t *self, truing_reason_t *reason);
+
+/* Which acoustic station a spoke must be brought to (SPEC §10A: a prompt names feature AND
+ * station). The convention belongs to this subsystem, because it is the actuators' physical
+ * reach that decides it: spoke 0 is the LEFT actuator's, and assignment alternates from there.
+ * The orchestrator asks; it never learns the rule. Deliberately independent of §6.4.1 side
+ * A/B and the solver's indexing_origin (see IMPLEMENTATION_NOTES, known limitation). */
+truing_station_id_t truing_acoustic_station_for_spoke(uint8_t spoke_id);
 
 /* ---- Stub: capability absent -------------------------------------------------- */
 typedef struct {

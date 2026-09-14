@@ -21,7 +21,12 @@
 #include "truing_orch/orchestrator.h"
 
 static truing_chain_profile_t g_chain;
+static truing_excitation_profile_t g_excitation;
 static truing_tension_model_profile_t g_profile;
+/* A fake actuator at each acoustic station, attached: what every measurement test excites with. */
+static truing_pluck_if_t g_pl[TRUING_ACOUSTIC_STATIONS];
+static truing_pluck_fake_ctx_t g_pctx[TRUING_ACOUSTIC_STATIONS];
+static truing_acoustic_actuators_t g_act;
 static truing_wheel_class_config_t g_wheel;
 static truing_fake_clock_t g_fc;
 static truing_clock_if_t g_clock;
@@ -31,7 +36,12 @@ static size_t g_scratch_bytes;
 void setUp(void)
 {
     truing_fixture_chain_profile_inmp441(&g_chain);
+    truing_fixture_excitation_profile(&g_excitation);
     truing_fixture_tension_model_profile_complete(&g_profile);
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        truing_pluck_fake_init(&g_pl[i], &g_pctx[i], true);
+        g_act.at[i] = &g_pl[i];
+    }
     truing_fixture_wheel_class_sym32(&g_wheel);
     truing_fake_clock_init(&g_fc, &g_clock, 10u);
     g_scratch_bytes = truing_acoustic_real_scratch_bytes(&g_chain);
@@ -51,18 +61,16 @@ static void test_synthetic_pluck_yields_a_provisional_estimate_through_all_four_
     truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
     sctx.f2_hz = 2.03f * 480.0f;    /* a slightly inharmonic partner, as a stiff string has */
     sctx.amp2_rel = 0.3f;
-    truing_pluck_if_t pl;
-    truing_pluck_fake_ctx_t pctx;
-    truing_pluck_fake_init(&pl, &pctx, true);
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, a.source_impl);
     truing_tension_estimate_t e;
-    truing_acoustic_measure(&a, 3u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT32(1u, pctx.fires);
-    TEST_ASSERT_EQUAL_FLOAT(g_chain.excitation_pulse_ms, pctx.last_pulse_ms);
+    truing_acoustic_measure(&a, 3u, &g_wheel, 1u, &e);   /* spoke 3 is the RIGHT station's */
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[0].fires);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[1], g_pctx[1].last_pulse_ms);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
     TEST_ASSERT_EQUAL_INT(TRUING_REASON_PROVISIONAL_MODE_ID, e.meta.reason_code);
     TEST_ASSERT_EQUAL_INT(TRUING_MODE_ID_PRESUMED_FUNDAMENTAL, e.frequency.mode_identity);
@@ -103,7 +111,7 @@ static void test_capture_evidence_replays_to_the_same_measurement(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
 
     /* Nothing measured yet: there is nothing to hand out, and it says so rather than
      * handing out an uninitialised buffer. */
@@ -124,6 +132,10 @@ static void test_capture_evidence_replays_to_the_same_measurement(void)
     TEST_ASSERT_EQUAL_UINT32(1u, v.attempt);
     TEST_ASSERT_EQUAL_INT(e.meta.status, v.status);
     TEST_ASSERT_EQUAL_INT(e.meta.reason_code, v.reason);
+    /* and which station's actuator excited them, with what pulse */
+    TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_RIGHT, v.diag.station);
+    TEST_ASSERT_TRUE(v.diag.fired);
+    TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[1], v.diag.pulse_ms);
 
     /* Take the evidence away exactly as a dump would, then replay it. */
     const uint32_t n = v.n_words;
@@ -145,7 +157,7 @@ static void test_capture_evidence_replays_to_the_same_measurement(void)
     truing_acoustic_real_ctx_t bctx;
     void *bscratch = malloc(g_scratch_bytes);
     TEST_ASSERT_NOT_NULL(bscratch);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&b, &bctx, g_clock, &g_chain, &g_profile, &rsrc, NULL, bscratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&b, &bctx, g_clock, &g_chain, &g_excitation, &g_profile, &rsrc, &g_act, bscratch, g_scratch_bytes, &detail));
     truing_tension_estimate_t re;
     truing_acoustic_real_analyze_words(&b, words, n, 2u, &re);
     const truing_acoustic_real_diag_t *d1 = &bctx.diag;
@@ -222,7 +234,7 @@ static void test_phase_events_report_the_measurement_lifecycle_in_order(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
 
     truing_tension_estimate_t e;
@@ -241,14 +253,16 @@ static void test_phase_events_report_the_measurement_lifecycle_in_order(void)
         TEST_ASSERT_EQUAL_UINT8(2u, g_obs.ev[i].cycle_index);
         TEST_ASSERT_EQUAL_UINT32(1u, g_obs.ev[i].u.acoustic.attempt);
     }
-    /* Only LISTENING carries a window, and it is the time the operator can still pluck into:
-     * the pre-trigger is already in the ring when the call begins. */
+    /* Only LISTENING carries a window: the live capture, since the pre-trigger is already in the
+     * ring when the call begins. */
     TEST_ASSERT_EQUAL_UINT32((uint32_t)g_chain.capture_ms, g_obs.ev[0].u.acoustic.window_ms);
     TEST_ASSERT_EQUAL_UINT32(0u, g_obs.ev[1].u.acoustic.window_ms);
     TEST_ASSERT_EQUAL_UINT32(0u, g_obs.ev[2].u.acoustic.window_ms);
-    /* No actuator wired: the excitation is a hand at the station, and nothing was commanded. */
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
-    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.pluck_commanded);
+    /* Spoke 7 is the RIGHT station's, and its actuator was commanded before the window opened. */
+    for (unsigned i = 0u; i < g_obs.n; ++i) {
+        TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_RIGHT, g_obs.ev[i].u.acoustic.station);
+        TEST_ASSERT_TRUE(g_obs.ev[i].u.acoustic.fired);
+    }
     src.close(&src);
 }
 
@@ -263,7 +277,7 @@ static void test_a_silent_capture_reports_listening_but_never_an_onset(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
 
     truing_tension_estimate_t e;
@@ -285,118 +299,135 @@ static void test_a_silent_capture_reports_listening_but_never_an_onset(void)
     src.close(&src);
 }
 
-/* An attached actuator is reported as one, so the page can say "plucking" instead of asking a
- * person to. This is the whole of the future solenoid's wire contract, tested before it exists. */
-static void test_an_attached_actuator_is_reported_as_the_excitation(void)
+/* Each spoke is struck by the actuator at its own acoustic station and by nothing else, with that
+ * station's pulse. spoke 0 is LEFT's and assignment alternates (truing_acoustic_station_for_spoke):
+ * firing the other station's solenoid would excite a different spoke under this one's name. */
+static void test_each_spoke_fires_only_its_own_stations_actuator(void)
 {
     memset(&g_obs, 0, sizeof(g_obs));
     truing_audio_source_if_t src;
     truing_audio_synthetic_ctx_t sctx;
     truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    truing_pluck_if_t pl;
-    truing_pluck_fake_ctx_t pctx;
-    truing_pluck_fake_init(&pl, &pctx, true);
-    /* the seam's identity fields - previously unasserted anywhere */
-    TEST_ASSERT_EQUAL_STRING("pluck_fake", pl.impl_name);
-    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, pl.source_impl);
+    /* the seam's identity fields */
+    TEST_ASSERT_EQUAL_STRING("pluck_fake", g_pl[0].impl_name);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, g_pl[0].source_impl);
+    g_excitation.pulse_ms[1] = 35.0f;   /* the stations may differ; each gets its own */
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_EQUAL_STRING("acoustic_real+pluck(L,R)", a.impl_name);
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
 
     truing_tension_estimate_t e;
-    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_ACTUATOR, g_obs.ev[0].u.acoustic.excitation);
-    /* Commanded BEFORE the window opens, so the LISTENING frame already knows it fired. */
-    TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.pluck_commanded);
-    TEST_ASSERT_EQUAL_UINT32(1u, pctx.fires);
-    src.close(&src);
-}
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[0].fires);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[0], g_pctx[0].last_pulse_ms);
+    /* commanded BEFORE the window opens, so the LISTENING frame already knows which fired */
+    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_LISTENING, g_obs.ev[0].u.acoustic.phase);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_LEFT, g_obs.ev[0].u.acoustic.station);
+    TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.fired);
 
-/* The rest of the actuator seam's contract, tested before the solenoid exists: zero pulse width
- * commands nothing, a fire() failure is reported as what it is (a hand at the station - which is
- * also what the firmware then does, since the ARMED lead-in re-enables for that attempt), and an
- * absent actuator leaves the hand-pluck path fully intact. fail_next has existed since the fake
- * was written; this is the first thing that has ever exercised it. */
-static void lead_delay_count(void *ctx, uint32_t ms)
-{
-    (void)ms;
-    (*(unsigned *)ctx)++;
-}
-
-static void test_the_excitation_claims_stay_honest_without_a_working_actuator(void)
-{
-    truing_audio_source_if_t src;
-    truing_audio_synthetic_ctx_t sctx;
-    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    truing_pluck_if_t pl;
-    truing_pluck_fake_ctx_t pctx;
-    truing_pluck_fake_init(&pl, &pctx, true);
-    truing_acoustic_if_t a;
-    truing_acoustic_real_ctx_t ctx;
-    const char *detail = NULL;
-    truing_tension_estimate_t e;
-
-    /* pulse width zero is the chain profile's own "no actuator commanded" (config.h): even an
-     * attached, working actuator is never fired, and the excitation is the hand. */
-    g_chain.excitation_pulse_ms = 0.0f;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
-    memset(&g_obs, 0, sizeof(g_obs));
-    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
-    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
-    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.pluck_commanded);
-    src.close(&src);
-
-    /* a fire() that reports failure must not let anything claim the actuator was commanded */
-    truing_fixture_chain_profile_inmp441(&g_chain);   /* setUp's copy was mutated above */
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
-    memset(&g_obs, 0, sizeof(g_obs));
-    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
-    pctx.fail_next = true;
-    unsigned leads = 0u;
-    truing_acoustic_real_set_pluck_lead(&a, 50u, lead_delay_count, &leads);
-    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);   /* the pulse was never commanded */
-    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.pluck_commanded);
-    /* the frame says a hand is the excitation, and the ARMED lead-in really ran for it */
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_ARMED, g_obs.ev[0].u.acoustic.phase);
-    TEST_ASSERT_EQUAL_UINT32(1u, leads);
-    /* and the next attempt commands normally again: the failure was one-shot */
     memset(&g_obs, 0, sizeof(g_obs));
     truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT32(1u, pctx.fires);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_ACTUATOR, g_obs.ev[0].u.acoustic.excitation);
-    TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.pluck_commanded);
-    src.close(&src);
-}
-
-static void test_an_absent_actuator_keeps_the_hand_pluck_path(void)
-{
-    truing_audio_source_if_t src;
-    truing_audio_synthetic_ctx_t sctx;
-    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    truing_pluck_if_t pl;
-    truing_pluck_fake_ctx_t pctx;
-    truing_pluck_fake_init(&pl, &pctx, false);
-    truing_acoustic_if_t a;
-    truing_acoustic_real_ctx_t ctx;
-    const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, &pl, g_scratch, g_scratch_bytes, &detail));
-    memset(&g_obs, 0, sizeof(g_obs));
-    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
-    unsigned leads = 0u;
-    truing_acoustic_real_set_pluck_lead(&a, 50u, lead_delay_count, &leads);
-    truing_tension_estimate_t e;
-    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
-    TEST_ASSERT_EQUAL_UINT32(0u, pctx.fires);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_EXCITATION_HAND, g_obs.ev[0].u.acoustic.excitation);
-    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_ARMED, g_obs.ev[0].u.acoustic.phase);
-    TEST_ASSERT_EQUAL_UINT32(1u, leads);   /* the operator was counted in */
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[0].fires);   /* never both in one measurement */
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_FLOAT(35.0f, g_pctx[1].last_pulse_ms);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_RIGHT, g_obs.ev[0].u.acoustic.station);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    src.close(&src);
+}
+
+/* A fire() that fails is a rejected attempt with a reason, before any window opens: no phase frame
+ * claims an excitation, nothing is captured, the previous capture stays readable, the other station
+ * is untouched, and the next attempt (the orchestrator's re-excitation, SPEC §7.4) fires normally.
+ * No hand-pluck fallback exists to take over (plan A10). */
+static void test_a_failed_fire_rejects_the_attempt_before_any_capture(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);   /* a capture to preserve: LEFT fires */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    truing_acoustic_capture_view_t v0, v;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v0));
+
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+    g_pctx[0].fail_next = true;
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+    TEST_ASSERT_TRUE(isnan(e.tension_n));
+    TEST_ASSERT_EQUAL_UINT32(0u, g_obs.n);                       /* no window was ever announced */
+    TEST_ASSERT_EQUAL_UINT32(v0.seq, truing_acoustic_real_capture_seq(&a));   /* nothing captured */
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT32(v0.seq, v.seq);
+    TEST_ASSERT_EQUAL_UINT32(v0.attempt, v.attempt);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_LEFT, v.diag.station);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[1].fires);               /* the other station was never touched */
+
+    /* the failure was one-shot: the retry fires and measures */
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_TRUE(g_obs.n > 0u);
+    TEST_ASSERT_TRUE(g_obs.ev[0].u.acoustic.fired);
+    TEST_ASSERT_EQUAL_UINT32(3u, g_obs.ev[0].u.acoustic.attempt);   /* attempts count calls, not captures */
+    src.close(&src);
+}
+
+/* A station with no actuator - or one that reports itself unavailable - rejects its own spokes and
+ * makes the subsystem not ready, so admission refuses the session. The other station still works:
+ * sequential bring-up campaign trials stay possible. */
+static void test_a_missing_actuator_rejects_its_station_and_is_not_ready(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    truing_tension_estimate_t e;
+    truing_reason_t why = TRUING_REASON_NONE;
+
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_ready(&a, &why));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NONE, why);
+
+    truing_acoustic_actuators_t left_only = g_act;
+    left_only.at[1] = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &left_only, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_EQUAL_STRING("acoustic_real+pluck(L)", a.impl_name);
+    TEST_ASSERT_FALSE(truing_acoustic_ready(&a, &why));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, why);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);   /* RIGHT's spoke: nothing to strike it */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_acoustic_real_capture_seq(&a));
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);   /* LEFT's spoke still measures */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+
+    /* wired but reporting itself unavailable is the same as absent */
+    g_pctx[0].attached = false;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_FALSE(truing_acoustic_ready(&a, &why));
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+
+    /* no actuators at all */
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_EQUAL_STRING("acoustic_real", a.impl_name);
+    TEST_ASSERT_FALSE(truing_acoustic_ready(&a, &why));
+    /* and an invalid excitation profile is refused at init, like an invalid chain */
+    g_excitation.pulse_ms[0] = 0.0f;
+    TEST_ASSERT_FALSE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_EQUAL_STRING("excitation profile invalid", detail);
     src.close(&src);
 }
 
@@ -411,13 +442,13 @@ static void test_the_estimate_is_identical_with_and_without_an_observer(void)
     truing_tension_estimate_t quiet, watched;
 
     truing_audio_synthetic_init(&src, &sctx, 470.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &quiet);
     src.close(&src);
 
     memset(&g_obs, 0, sizeof(g_obs));
     truing_audio_synthetic_init(&src, &sctx, 470.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
     truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &watched);
     src.close(&src);
@@ -430,7 +461,7 @@ static void test_the_estimate_is_identical_with_and_without_an_observer(void)
 
     /* Detaching mid-life is safe and silences it again. */
     truing_audio_synthetic_init(&src, &sctx, 470.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
     truing_acoustic_real_set_observer(&a, NULL, NULL);
     const unsigned before = g_obs.n;
@@ -449,7 +480,7 @@ static void test_a_cancelled_measurement_emits_no_phase_at_all(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
     truing_acoustic_request_cancel(&a);
     truing_tension_estimate_t e;
@@ -474,7 +505,7 @@ static void test_reset_session_discards_state_no_measurement_consumed(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL,
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act,
                                                g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
     truing_tension_estimate_t e;
@@ -504,12 +535,6 @@ static void test_reset_session_discards_state_no_measurement_consumed(void)
  * came for. The reset now lives where the samples change, so anything that returns before
  * the capture leaves the last one fully readable (SPEC §12.5: evidence of the last
  * measurement; same rule real_reset_session applies at a session boundary). */
-static void cancel_during_lead(void *ctx, uint32_t ms)
-{
-    (void)ms;
-    truing_acoustic_request_cancel((truing_acoustic_if_t *)ctx);
-}
-
 static void assert_same_capture(const truing_acoustic_capture_view_t *v0, const truing_acoustic_capture_view_t *v)
 {
     TEST_ASSERT_EQUAL_UINT32(v0->seq, v->seq);
@@ -531,7 +556,7 @@ static void test_the_capture_view_survives_an_aborted_attempt(void)
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_tension_estimate_t e;
     truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
@@ -547,17 +572,16 @@ static void test_the_capture_view_survives_an_aborted_attempt(void)
     assert_same_capture(&v0, &v);
     TEST_ASSERT_EQUAL_UINT32(v0.seq, truing_acoustic_real_capture_seq(&a));   /* no capture, no bump */
 
-    /* the ARMED-phase abort: cancel arrives during the lead-in the operator counts into */
-    truing_acoustic_real_set_pluck_lead(&a, 50u, cancel_during_lead, &a);
+    /* an excitation that fails also returns before the capture, and must leave it standing too */
+    g_pctx[0].fail_next = true;
     truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
-    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
     TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
     assert_same_capture(&v0, &v);
 
     /* and the measurement after the abort is an ordinary retry: seq bumps. Attempt counting
      * keys on calls, not on captures, so this third call is attempt 4 - and the capture view
      * now says the words it holds are THAT attempt's evidence. */
-    truing_acoustic_real_set_pluck_lead(&a, 0u, NULL, NULL);
     truing_acoustic_measure(&a, 6u, &g_wheel, 3u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
     TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
@@ -574,7 +598,7 @@ static void test_the_capture_view_survives_a_calibration_missing_early_return(vo
     truing_acoustic_if_t a;
     truing_acoustic_real_ctx_t ctx;
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_tension_estimate_t e;
     truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
@@ -606,14 +630,14 @@ static void test_status_rules_calibration_cancel_overrun_silence_format(void)
     /* incomplete profile: CALIBRATION_MISSING, never a nominal L_eff (SPEC 11.3.1) */
     truing_tension_model_profile_t incomplete;
     truing_fixture_tension_model_profile_incomplete(&incomplete);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &incomplete, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &incomplete, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, e.meta.status);
     TEST_ASSERT_EQUAL_INT(TRUING_REASON_CALIBRATION_MISSING, e.meta.reason_code);
     TEST_ASSERT_TRUE(isnan(e.tension_n));
     src.close(&src);
     /* cancel before the capture: CANCELLED, the flag is consumed */
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
     truing_acoustic_request_cancel(&a);
     truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, e.meta.status);
@@ -645,7 +669,7 @@ static void test_status_rules_calibration_cancel_overrun_silence_format(void)
     truing_audio_source_if_t rec;
     truing_audio_buffer_ctx_t rctx;
     truing_audio_buffer_init(&rec, &rctx, words, 4800u, NULL);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &rec, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &rec, &g_act, g_scratch, g_scratch_bytes, &detail));
     rctx.inject_overrun = true;
     truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
@@ -656,13 +680,13 @@ static void test_status_rules_calibration_cancel_overrun_silence_format(void)
     truing_audio_system_format(&f44);
     f44.sample_rate_hz = 44100u;
     truing_audio_buffer_init(&rec, &rctx, words, 4800u, &f44);
-    TEST_ASSERT_FALSE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &rec, NULL, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_FALSE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &rec, &g_act, g_scratch, g_scratch_bytes, &detail));
     TEST_ASSERT_NOT_NULL(strstr(detail, "refused"));
     truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, e.meta.status);
     /* scratch too small */
     truing_audio_buffer_init(&rec, &rctx, words, 4800u, NULL);
-    TEST_ASSERT_FALSE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &rec, NULL, g_scratch, 1024u, &detail));
+    TEST_ASSERT_FALSE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &rec, &g_act, g_scratch, 1024u, &detail));
 }
 
 /* ---- the complete workflow: real calculation + real acoustic layers on a synthetic front end -- */
@@ -689,8 +713,9 @@ typedef struct {
     truing_calc_artifact_ctx_t cctx;
     truing_audio_source_if_t src;
     truing_audio_synthetic_ctx_t sctx;
-    truing_pluck_if_t pluck;
-    truing_pluck_fake_ctx_t pctx;
+    truing_pluck_if_t pluck[TRUING_ACOUSTIC_STATIONS];
+    truing_pluck_fake_ctx_t pctx[TRUING_ACOUSTIC_STATIONS];
+    truing_acoustic_actuators_t actuators;
     truing_acoustic_if_t acoustic;
     truing_acoustic_real_ctx_t actx;
     truing_runout_if_t runout;
@@ -726,9 +751,12 @@ static void test_workflow_with_real_acoustic_layers_reaches_converged_geometric_
     truing_calc_artifact_init(&r->calc, &r->cctx, &r->artifact, &g_wheel);
     /* every spoke "sounds" at 460 Hz: the synthetic front end is the same for all */
     truing_audio_synthetic_init(&r->src, &r->sctx, 460.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    truing_pluck_fake_init(&r->pluck, &r->pctx, true);
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&r->acoustic, &r->actx, g_clock, &g_chain, &g_profile, &r->src, &r->pluck,
-                                               g_scratch, g_scratch_bytes, &detail));
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        truing_pluck_fake_init(&r->pluck[i], &r->pctx[i], true);
+        r->actuators.at[i] = &r->pluck[i];
+    }
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&r->acoustic, &r->actx, g_clock, &g_chain, &g_excitation, &g_profile, &r->src,
+                                               &r->actuators, g_scratch, g_scratch_bytes, &detail));
     truing_runout_manual_init(&r->runout, &r->rctx, g_clock);
     truing_navigation_manual_init(&r->nav, &r->nctx, g_clock, 32u, 32u, &r->machine);
     r->sink.impl_name = "sink";
@@ -780,7 +808,8 @@ static void test_workflow_with_real_acoustic_layers_reaches_converged_geometric_
     TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY, snap.last_result);
     TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY, r->sctx_sink.last_terminal);
     TEST_ASSERT_TRUE(r->actx.estimates >= 64u);            /* measure + verify passes */
-    TEST_ASSERT_EQUAL_UINT32(r->actx.calls, r->pctx.fires); /* one excitation commanded per measurement */
+    TEST_ASSERT_EQUAL_UINT32(r->actx.calls, r->pctx[0].fires + r->pctx[1].fires); /* one excitation per measurement */
+    TEST_ASSERT_TRUE(r->pctx[0].fires > 0u && r->pctx[1].fires > 0u);             /* both stations did work */
     TEST_ASSERT_EQUAL_UINT32(0u, r->actx.rejections);
     /* every stored tension is the real layer-4 output on the interim layer-3 selection: suspect */
     const truing_wheel_state_t *ws = &r->orch.wheel_state;
@@ -806,9 +835,9 @@ int main(void)
     RUN_TEST(test_status_rules_calibration_cancel_overrun_silence_format);
     RUN_TEST(test_phase_events_report_the_measurement_lifecycle_in_order);
     RUN_TEST(test_a_silent_capture_reports_listening_but_never_an_onset);
-    RUN_TEST(test_an_attached_actuator_is_reported_as_the_excitation);
-    RUN_TEST(test_the_excitation_claims_stay_honest_without_a_working_actuator);
-    RUN_TEST(test_an_absent_actuator_keeps_the_hand_pluck_path);
+    RUN_TEST(test_each_spoke_fires_only_its_own_stations_actuator);
+    RUN_TEST(test_a_failed_fire_rejects_the_attempt_before_any_capture);
+    RUN_TEST(test_a_missing_actuator_rejects_its_station_and_is_not_ready);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);
     RUN_TEST(test_a_cancelled_measurement_emits_no_phase_at_all);
     RUN_TEST(test_the_capture_view_survives_an_aborted_attempt);

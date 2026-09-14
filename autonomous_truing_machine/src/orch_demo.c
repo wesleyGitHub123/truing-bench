@@ -39,10 +39,10 @@ static const char *TAG = "orch_demo";
  * type-checked in every build; the dead one folds away. */
 #include "build_mode.h"
 
-/* Every board profile must state whether a solenoid is wired to the actuator pin; an undefined
+/* Every board profile must state whether each acoustic station's solenoid is wired; an undefined
  * macro would silently preprocess as 0 and hide a profile that simply forgot it. */
-#ifndef BOARD_PLUCK_ACTUATOR_PRESENT
-#error "board profile does not define BOARD_PLUCK_ACTUATOR_PRESENT (0 or 1)"
+#if !defined(BOARD_PLUCK_ACTUATOR_LEFT_PRESENT) || !defined(BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT)
+#error "board profile does not define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT and _RIGHT_PRESENT (0 or 1)"
 #endif
 
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
@@ -57,9 +57,11 @@ static struct {
     truing_acoustic_real_ctx_t actx;      /* REAL layers 2-4 (Phase 1f) on a SYNTHETIC front end */
     truing_audio_source_if_t audio;
     truing_audio_synthetic_ctx_t audio_ctx;
-    truing_pluck_if_t pluck;
-    truing_pluck_fake_ctx_t pluck_ctx;
-    truing_pluck_gpio_ctx_t pluck_gpio_ctx;   /* real front end: the reserved actuator GPIO */
+    truing_excitation_profile_t excitation;
+    /* One excitation actuator per acoustic station, indexed by truing_acoustic_station_slot(). */
+    truing_pluck_if_t pluck[TRUING_ACOUSTIC_STATIONS];
+    truing_pluck_fake_ctx_t pluck_ctx[TRUING_ACOUSTIC_STATIONS];        /* synthetic front end */
+    truing_pluck_gpio_ctx_t pluck_gpio_ctx[TRUING_ACOUSTIC_STATIONS];   /* real front end: the stations' GPIOs */
     void *acoustic_scratch;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
@@ -167,6 +169,11 @@ const truing_chain_profile_t *truing_demo_chain_profile(void)
     return &s.chain;
 }
 
+const truing_excitation_profile_t *truing_demo_excitation_profile(void)
+{
+    return &s.excitation;
+}
+
 bool truing_demo_request_acquisition(bool automatic, const char **detail)
 {
     if (!TRUING_FAST_DEMO) {
@@ -262,21 +269,11 @@ static void acoustic_phase_observer(void *ctx, const truing_telemetry_event_t *e
         (void)truing_wire_session_send_event(&s.session, ev);
     }
     /* Short on purpose: this is on the path to opening the capture window. */
-    ESP_LOGI(TAG, "[%6" PRIu32 " ms] acoustic %s spoke %u attempt %" PRIu32 "%s", ev->timestamp_ms,
+    ESP_LOGI(TAG, "[%6" PRIu32 " ms] acoustic %s spoke %u attempt %" PRIu32 " actuator %s%s", ev->timestamp_ms,
              truing_acoustic_phase_str((truing_acoustic_phase_t)ev->u.acoustic.phase),
              (unsigned)ev->u.acoustic.spoke_index, ev->u.acoustic.attempt,
-             ev->u.acoustic.phase == (uint8_t)TRUING_ACOUSTIC_PHASE_LISTENING ? " - PLUCK NOW" : "");
+             truing_acoustic_actuator_str(ev->u.acoustic.station), ev->u.acoustic.fired ? " fired" : "");
 }
-
-#if TRUING_REAL_FRONT_END
-/* The ARMED lead-in wait. Runs on the measuring task, inside the measurement; the acoustic HAL
- * hands it out as a function pointer so it never links FreeRTOS itself. */
-static void pluck_lead_delay(void *ctx, uint32_t ms)
-{
-    (void)ctx;
-    vTaskDelay(pdMS_TO_TICKS(ms));
-}
-#endif
 
 static void drain_telemetry(void)
 {
@@ -335,28 +332,29 @@ static void demo_task(void *arg)
     ESP_LOGI(TAG, "== Stage 1 workflow, %s (%s; %s; REAL truing calculation on the golden "
                   "fixture artifact%s) ==",
              (TRUING_FAST_DEMO && TRUING_REAL_FRONT_END)
-                     ? "ACOUSTIC DEMONSTRATION: a few spokes are plucked on the real microphone to show the front "
-                       "end works; runout is automatic and SYNTHETIC - this is not a physical wheel result"
+                     ? "ACOUSTIC DEMONSTRATION: a few spokes are struck by the station solenoids on the real microphone "
+                       "to show the front end works; runout is automatic and SYNTHETIC - this is not a physical wheel result"
              : TRUING_FAST_DEMO ? "FAST DEMO: a person starts the session and applies the adjustments; acquisition is "
                                 "automatic and SYNTHETIC - this is not a physical wheel result"
                               : (TRUING_SELF_PLAY ? "SELF-PLAY: the auto-operator starts the session and answers its own waits"
                                                   : (TRUING_REAL_FRONT_END
-                                                          ? "INTERACTIVE with the PHYSICAL INMP441 front end: a person positions the wheel, reads the gauges and plucks each spoke at the station"
+                                                          ? "INTERACTIVE with the PHYSICAL INMP441 front end: a person positions the wheel and reads the gauges; each spoke is struck by its station's solenoid"
                                                           : "INTERACTIVE: the session starts and the waits are answered from the web UI")),
              TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
                                 "SYNTHETIC runout"
                               : "manual navigation + manual runout",
              !TRUING_REAL_FRONT_END
                      ? "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source"
-                     : (BOARD_PLUCK_ACTUATOR_PRESENT
-                                ? "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the "
-                                  "solenoid pulse on its reserved GPIO"
-                                : "REAL acoustic layers 1-4 on the INMP441 microphone; excitation is the "
-                                  "hand pluck at the station, no actuator wired"),
+                     : (BOARD_PLUCK_ACTUATOR_LEFT_PRESENT && BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT
+                                ? "REAL acoustic layers 1-4 on the INMP441 microphone; each spoke is excited by the "
+                                  "solenoid at its own acoustic station (LEFT/RIGHT)"
+                                : "REAL acoustic layers 1-4 on the INMP441 microphone; at least one acoustic station has "
+                                  "NO solenoid, so sessions are refused (EXCITATION_UNAVAILABLE) - no hand pluck"),
              TRUING_REAL_FRONT_END ? "" : "; the simulated wheel responds through the same influence model");
     truing_fixture_wheel_class_sym32(&s.wheel);
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
+    truing_fixture_excitation_profile(&s.excitation);
     truing_fixture_tension_model_profile_complete(&s.tmodel);
     truing_fixture_machine_profile(&s.machine);
     s.clock.now_ms = boot_clock_now;
@@ -365,10 +363,9 @@ static void demo_task(void *arg)
     /* Acoustic with the PHYSICAL front end: the INMP441 over I2S, opened ONCE here and drained
      * continuously by its own core-1 task into a PSRAM ring; every measurement below captures
      * one bounded window from that ring (SPEC 9.3, 9.4). The sizing is what the acoustic
-     * bring-up proved on target. The excitation actuator seam is wired below only if the board
-     * profile declares a solenoid present; otherwise the capture records whatever excitation
-     * arrives - the hand pluck at the station - and NO_ONSET_DETECTED says honestly when none
-     * did (SPEC 9.1). */
+     * bring-up proved on target. Each acoustic station's actuator is wired below only if the
+     * board profile declares its solenoid present; a station without one rejects its spokes and
+     * refuses sessions (EXCITATION_UNAVAILABLE). There is no hand-pluck fallback. */
     const truing_audio_i2s_config_t icfg = {
         .dma_frame_num = 240u,      /* 5 ms per descriptor, multiple of 3, 960 B <= 4092 B (SPEC 9.4.1) */
         .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
@@ -382,39 +379,42 @@ static void demo_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    /* The excitation actuator on its reserved GPIO (SPEC 4.3: a pin number exists only in the
-     * board profile). Wired into the acoustic subsystem ONLY when the board profile says a
-     * solenoid is physically attached - gpio_config() succeeding is not evidence of one, and a
-     * bare pin makes gpio_fire() return true for nothing, which would skip the ARMED lead-in
-     * and tell the operator "the actuator was commanded" while they pluck by hand (SPEC 17.3).
-     * bringup_acoustic still probes this GPIO on every boot; that is a self-test, not an
-     * excitation into a measurement. B2 benches the solenoid before its numbers are trusted. */
-#if BOARD_PLUCK_ACTUATOR_PRESENT
-    if (!truing_pluck_gpio_init(&s.pluck, &s.pluck_gpio_ctx, BOARD_PLUCK_ACTUATOR_GPIO)) {
-        ESP_LOGW(TAG, "pluck actuator GPIO init failed (%d); excitation falls back to the hand pluck",
-                 BOARD_PLUCK_ACTUATOR_GPIO);
+    /* The acoustic stations' actuators on their GPIOs (SPEC 4.3: pin numbers exist only in the
+     * board profile). Wired ONLY when the board profile says that station's solenoid is attached
+     * and bench-verified - gpio_config() succeeding is not evidence of a solenoid, and a bare pin
+     * makes gpio_fire() return true for nothing (SPEC 17.3). */
+#if BOARD_PLUCK_ACTUATOR_LEFT_PRESENT
+    if (!truing_pluck_gpio_init(&s.pluck[0], &s.pluck_gpio_ctx[0], BOARD_PLUCK_ACTUATOR_LEFT_GPIO)) {
+        ESP_LOGW(TAG, "LEFT actuator GPIO init failed (%d); sessions will be refused", BOARD_PLUCK_ACTUATOR_LEFT_GPIO);
+    }
+#endif
+#if BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT
+    if (!truing_pluck_gpio_init(&s.pluck[1], &s.pluck_gpio_ctx[1], BOARD_PLUCK_ACTUATOR_RIGHT_GPIO)) {
+        ESP_LOGW(TAG, "RIGHT actuator GPIO init failed (%d); sessions will be refused", BOARD_PLUCK_ACTUATOR_RIGHT_GPIO);
     }
 #endif
 #else
     /* Acoustic: the real subsystem (onset, spectrum, candidates, interim selection, model) on a
-     * synthetic pluck at 460 Hz with a faint noise floor; the fake actuator is "attached". */
+     * synthetic pluck at 460 Hz with a faint noise floor; a fake actuator is "attached" at each
+     * acoustic station. */
     truing_audio_synthetic_init(&s.audio, &s.audio_ctx, 460.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
-    truing_pluck_fake_init(&s.pluck, &s.pluck_ctx, true);
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        truing_pluck_fake_init(&s.pluck[i], &s.pluck_ctx[i], true);
+    }
 #endif
     /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h).
-     * Real front end: the GPIO actuator only if the board says one is wired AND it configured;
-     * otherwise NULL - an absent seam is what makes the ARMED lead-in run and the excitation
-     * report HAND (see emit_phase). With BOARD_PLUCK_ACTUATOR_PRESENT 0, pluck_gpio_ctx was
-     * never initialised, so .configured is false and this is NULL. */
-    truing_pluck_if_t *const pluck_seam = TRUING_REAL_FRONT_END
-                                              ? (s.pluck_gpio_ctx.configured ? &s.pluck : NULL)
-                                              : &s.pluck;
+     * Real front end: a station's GPIO actuator only if the board says it is wired AND it
+     * configured; otherwise NULL, which refuses sessions and rejects that station's spokes. */
+    truing_acoustic_actuators_t actuators;
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        actuators.at[i] = TRUING_REAL_FRONT_END ? (s.pluck_gpio_ctx[i].configured ? &s.pluck[i] : NULL) : &s.pluck[i];
+    }
     const size_t scratch_bytes = truing_acoustic_real_scratch_bytes(&s.chain);
     s.acoustic_scratch = heap_caps_malloc(scratch_bytes, MALLOC_CAP_SPIRAM);
     const char *adetail = NULL;
     if (s.acoustic_scratch == NULL ||
-        !truing_acoustic_real_init(&s.acoustic, &s.actx, s.clock, &s.chain, &s.tmodel, &s.audio, pluck_seam, s.acoustic_scratch,
-                                   scratch_bytes, &adetail)) {
+        !truing_acoustic_real_init(&s.acoustic, &s.actx, s.clock, &s.chain, &s.excitation, &s.tmodel, &s.audio, &actuators,
+                                   s.acoustic_scratch, scratch_bytes, &adetail)) {
         ESP_LOGE(TAG, "acoustic subsystem init failed (%s)", adetail != NULL ? adetail : "scratch");
         vTaskDelete(NULL);
         return;
@@ -422,14 +422,6 @@ static void demo_task(void *arg)
     /* Wired by the composition root, which is the only place that knows there is a transport to
      * push to. The orchestrator's contract with the acoustic subsystem is unchanged. */
     truing_acoustic_real_set_observer(&s.acoustic, acoustic_phase_observer, NULL);
-#if TRUING_REAL_FRONT_END
-    /* The capture window cannot end early on a pluck, so the person at the station needs to be
-     * counted in BEFORE it opens or they spend the first attempt reacting. 2.5 s: long enough
-     * to read the cue over WiFi and get a hand to the spoke, short enough that a bounded
-     * 3-spoke pass stays under a minute. The wait itself is FreeRTOS; the HAL takes it as a
-     * function pointer so it never links the RTOS. */
-    truing_acoustic_real_set_pluck_lead(&s.acoustic, 2500u, pluck_lead_delay, NULL);
-#endif
     /* THE fast-demo substitution, and the only one. Both implementations already exist and
      * both already declare what they are; picking between them here - before
      * truing_orch_init() - is what makes the whole session honest downstream.
@@ -717,9 +709,11 @@ static void demo_task(void *arg)
     }
     ESP_LOGI(TAG, "simulated wheel after the run: max|lateral| = %.4f mm (tolerance %.2f mm)", (double)final_max,
              (double)s.solver.tol_lateral_mm);
-    ESP_LOGI(TAG, "acoustic: calls=%" PRIu32 " estimates=%" PRIu32 " rejections=%" PRIu32 " plucks_commanded=%" PRIu32
-                  " | last f1=%.3f Hz snr=%.1f dB analysis=%" PRIu32 " ms (source %s)",
-             s.actx.calls, s.actx.estimates, s.actx.rejections, s.pluck_ctx.fires, (double)s.actx.diag.f1_hz,
+    const uint32_t fires_left = TRUING_REAL_FRONT_END ? s.pluck_gpio_ctx[0].fires : s.pluck_ctx[0].fires;
+    const uint32_t fires_right = TRUING_REAL_FRONT_END ? s.pluck_gpio_ctx[1].fires : s.pluck_ctx[1].fires;
+    ESP_LOGI(TAG, "acoustic: calls=%" PRIu32 " estimates=%" PRIu32 " rejections=%" PRIu32 " fires LEFT=%" PRIu32
+                  " RIGHT=%" PRIu32 " | last f1=%.3f Hz snr=%.1f dB analysis=%" PRIu32 " ms (source %s)",
+             s.actx.calls, s.actx.estimates, s.actx.rejections, fires_left, fires_right, (double)s.actx.diag.f1_hz,
              (double)s.actx.diag.snr_db, s.actx.diag.analysis_us / 1000u, s.audio.impl_name);
     ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3). The calculation and the acoustic layers 2-4 are "
                   "real; the audio front end is a synthetic pluck and the wheel is a simulation of the artifact's own model, so "

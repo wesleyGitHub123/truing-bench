@@ -22,6 +22,7 @@ typedef struct {
     uint32_t state_entries[TRUING_STATE__COUNT];
     uint32_t by_kind[TRUING_EVT__COUNT];
     uint32_t waits_by_kind[TRUING_WAIT_KIND__COUNT];
+    truing_station_id_t spoke_prompt_station[TRUING_MAX_SPOKES];   /* last POSITION_TO_SPOKE station per spoke */
     truing_terminal_result_t last_terminal;
 } sink_ctx_t;
 
@@ -36,6 +37,9 @@ static bool sink_emit(truing_telemetry_if_t *self, const truing_telemetry_event_
     }
     if (ev->kind == TRUING_EVT_WAIT_ISSUED && (unsigned)ev->u.wait.kind < TRUING_WAIT_KIND__COUNT) {
         c->waits_by_kind[ev->u.wait.kind]++;
+        if (ev->u.wait.kind == TRUING_WAIT_POSITION_TO_SPOKE && ev->u.wait.target_index < TRUING_MAX_SPOKES) {
+            c->spoke_prompt_station[ev->u.wait.target_index] = ev->u.wait.station;
+        }
     }
     if (ev->kind == TRUING_EVT_TERMINAL_RESULT) {
         c->last_terminal = ev->u.terminal;
@@ -410,7 +414,7 @@ static void test_initialize_establishes_reference_through_navigation(void)
     TEST_ASSERT_EQUAL_INT(TRUING_STATE_WAIT_FOR_OPERATOR, snap.state);
     TEST_ASSERT_TRUE(snap.waiting);
     TEST_ASSERT_EQUAL_INT(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION, snap.active_wait.kind);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, snap.active_wait.station);   /* the profile's reference station */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, snap.active_wait.station);   /* the profile's reference station */
     TEST_ASSERT_EQUAL_UINT32(1u, snap.active_wait.wait_id);
     /* START_TRUING is not admissible here (SPEC §12.3). */
     truing_reason_t reason;
@@ -525,7 +529,7 @@ static void test_full_workflow_reaches_converged_geometric_only(void)
     TEST_ASSERT_TRUE(prov.generating_fingerprint.set);
     TEST_ASSERT_EQUAL_UINT32(1u, prov.tension_model_profile_id);
     TEST_ASSERT_EQUAL_UINT32(1u, prov.chain_profile_id);
-    TEST_ASSERT_EQUAL_UINT32(1u, prov.machine_profile_id);
+    TEST_ASSERT_EQUAL_UINT32(2u, prov.machine_profile_id);   /* the two-acoustic-station fixture profile */
     TEST_ASSERT_EQUAL_INT(TRUING_LAYOUT_FULL, prov.active_layout);
     TEST_ASSERT_EQUAL_UINT16(96u, truing_row_mask_popcount(&prov.active_row_set));
     TEST_ASSERT_TRUE(prov.plan.valid);
@@ -740,7 +744,7 @@ static void test_abort_and_parameter_rules_at_a_wait(void)
     truing_orch_snapshot_t snap;
     truing_orch_snapshot(&g.orch, &snap);
     TEST_ASSERT_EQUAL_INT(TRUING_WAIT_POSITION_TO_SPOKE, snap.active_wait.kind);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, snap.active_wait.station);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, snap.active_wait.station);
     TEST_ASSERT_EQUAL_UINT8(0u, snap.active_wait.target_index);
 
     /* Session-fixed parameter: rejected while a session is active; session-mutable: applied. */
@@ -788,6 +792,45 @@ static void test_abort_and_parameter_rules_at_a_wait(void)
     truing_cycle_provenance_t prov;
     truing_orch_provenance(&g.orch, &prov);
     TEST_ASSERT_EQUAL_UINT32(2u, prov.session_id);
+}
+
+/* A subsystem that cannot excite a spoke is refused at START, with the subsystem's own reason -
+ * never admitted and then quietly degraded to a hand pluck (plan A10). */
+static bool never_ready(truing_acoustic_if_t *self, truing_reason_t *reason)
+{
+    (void)self;
+    *reason = TRUING_REASON_EXCITATION_UNAVAILABLE;
+    return false;
+}
+
+static void test_session_admission_refuses_an_acoustic_subsystem_that_is_not_ready(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    g.acoustic.ready = never_ready;
+    truing_reason_t reason = TRUING_REASON_NONE;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, start(&g, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, reason);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATE_READY, g.orch.state);
+    g.acoustic.ready = NULL;   /* nothing to be ready about: admitted as before */
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+}
+
+/* Two acoustic stations, one per actuator: every spoke is prompted to the station the acoustic
+ * subsystem names for it (spoke 0 LEFT, alternating), never a single hard-coded station. */
+static void test_each_spoke_is_positioned_at_its_own_acoustic_station(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    truing_reason_t reason;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 4000u));
+    for (uint8_t i = 0; i < 32u; ++i) {
+        TEST_ASSERT_EQUAL_INT(truing_acoustic_station_for_spoke(i), g.sctx.spoke_prompt_station[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, g.sctx.spoke_prompt_station[0]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, g.sctx.spoke_prompt_station[1]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, g.sctx.spoke_prompt_station[31]);
 }
 
 /* ABORT calls request_cancel on the acoustic HAL to unwind an in-flight measurement, but at a
@@ -927,6 +970,8 @@ int main(int argc, char **argv)
     RUN_TEST(test_unsafe_adjustment_aborts_before_any_apply);
     RUN_TEST(test_no_progress_and_max_cycles_aborts);
     RUN_TEST(test_abort_and_parameter_rules_at_a_wait);
+    RUN_TEST(test_each_spoke_is_positioned_at_its_own_acoustic_station);
+    RUN_TEST(test_session_admission_refuses_an_acoustic_subsystem_that_is_not_ready);
     RUN_TEST(test_abort_at_a_wait_does_not_carry_a_cancel_into_the_next_session);
     RUN_TEST(test_abort_after_a_runout_entry_does_not_carry_into_the_next_session);
     RUN_TEST(test_state_within_tolerance_skips_apply_and_does_not_remeasure);

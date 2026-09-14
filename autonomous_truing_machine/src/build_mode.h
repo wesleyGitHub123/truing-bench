@@ -25,17 +25,17 @@
  *   INTERACTIVE + MIC      the interactive lifecycle with the PHYSICAL INMP441 front end
  *                          (TRUING_REAL_FRONT_END): the real microphone over I2S replaces
  *                          the synthetic pluck source, opened once at boot and drained
- *                          continuously; every measurement captures a bounded window of
- *                          real audio and the existing DSP runs on it. No excitation
- *                          actuator is built, so the pluck seam is NULL: the capture
- *                          listens for the hand pluck at the station and reports
- *                          NO_ONSET_DETECTED when none arrives. The estimate stays
- *                          suspect / PROVISIONAL_MODE_ID (SPEC 4.4.1): a real front end
- *                          is a real acquisition, not a validated measurement.
+ *                          continuously; every measurement fires the solenoid at the
+ *                          spoke's own acoustic station (LEFT/RIGHT), captures a bounded
+ *                          window of real audio and runs the existing DSP on it. A station
+ *                          whose solenoid the board profile does not declare refuses the
+ *                          session (EXCITATION_UNAVAILABLE); nobody plucks by hand. The
+ *                          estimate stays suspect / PROVISIONAL_MODE_ID (SPEC 4.4.1): a real
+ *                          front end is a real acquisition, not a validated measurement.
  *
  *   FAST DEMO + MIC        the acoustic demonstration: the real INMP441 front end with the
  *                          synthetic acquisition path, and a BOUND on how many spokes are
- *                          plucked (TRUING_ACOUSTIC_DEMO_SPOKES). A few real plucks prove
+ *                          struck (TRUING_ACOUSTIC_DEMO_SPOKES). A few real strikes prove
  *                          the microphone -> DSP path; the remaining tension rows are left
  *                          uncollected because the active layout does not contain them.
  *                          Legal only while that is true - see the run-time guard below.
@@ -65,8 +65,10 @@
 #error "TRUING_SELF_PLAY and TRUING_FAST_DEMO are different images: pick one."
 #endif
 
-/* The physical front end needs a person at the station to pluck, so it cannot be combined
- * with self-play: the auto-operator has no hands. */
+/* The physical front end strikes whatever spoke is physically at the acoustic station, and the
+ * auto-operator can answer a positioning wait but cannot rotate the wheel: under self-play the
+ * solenoid would fire at an unmoved spoke and file the result under the index it was asked for.
+ * A synthetic answer driving a physical action is a wrong attribution, not a demo convenience. */
 #if TRUING_REAL_FRONT_END && TRUING_SELF_PLAY
 #error "TRUING_SELF_PLAY answers its own waits and cannot pluck a spoke: not with TRUING_REAL_FRONT_END."
 #endif

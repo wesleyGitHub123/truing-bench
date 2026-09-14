@@ -59,10 +59,10 @@ static void test_positioning_prompt_must_name_a_station(void)
     p.kind = TRUING_WAIT_POSITION_TO_SPOKE;
     p.target_index = 12u;
     TEST_ASSERT_EQUAL_UINT32(0u, truing_wait_issue(&g_c, &p));
-    p.station = TRUING_STATION_ACOUSTIC;
+    p.station = TRUING_STATION_ACOUSTIC_LEFT;
     TEST_ASSERT_EQUAL_UINT32(1u, truing_wait_issue(&g_c, &p));
     TEST_ASSERT_EQUAL_INT(TRUING_INTENT_CONFIRM_POSITIONED, g_c.prompt.expected_intent);
-    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC, g_c.prompt.station);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, g_c.prompt.station);
     TEST_ASSERT_TRUE(truing_wait_kind_is_positioning(TRUING_WAIT_POSITION_TO_RIM_ANGLE));
     TEST_ASSERT_TRUE(truing_wait_kind_is_positioning(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION));
     TEST_ASSERT_FALSE(truing_wait_kind_is_positioning(TRUING_WAIT_ENTER_RUNOUT));

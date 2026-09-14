@@ -45,6 +45,7 @@
 #define MAX_NAME_LEN   96u
 
 static truing_chain_profile_t g_chain;
+static truing_excitation_profile_t g_excitation;
 static truing_tension_model_profile_t g_profile;
 static truing_fake_clock_t g_fc;
 static truing_clock_if_t g_clock;
@@ -53,6 +54,7 @@ static char g_dir[MAX_PATH_LEN];
 void setUp(void)
 {
     truing_fixture_chain_profile_inmp441(&g_chain);
+    truing_fixture_excitation_profile(&g_excitation);
     truing_fixture_tension_model_profile_complete(&g_profile);
     truing_fake_clock_init(&g_fc, &g_clock, 10u);
 }
@@ -229,8 +231,12 @@ static bool replay_one(const char *dir, const char *name, unsigned *checked)
     }
 
     char schema[64] = { 0 };
-    if (!json_str(&doc, "schema", schema, sizeof(schema)) || strcmp(schema, "truing.acoustic.capture/1") != 0) {
-        (void)snprintf(msg, sizeof(msg), "%s: schema is '%s', expected truing.acoustic.capture/1", name, schema);
+    /* /2 adds excitation provenance (station, fired, pulse_ms, excitation_digest). Replay does not
+     * gate on the excitation digest: layers 2-4 never read it, so the same words replay the same
+     * way whatever struck the spoke. It stays in the bundle as a record of what was captured. */
+    if (!json_str(&doc, "schema", schema, sizeof(schema)) ||
+        (strcmp(schema, "truing.acoustic.capture/2") != 0 && strcmp(schema, "truing.acoustic.capture/1") != 0)) {
+        (void)snprintf(msg, sizeof(msg), "%s: schema is '%s', expected truing.acoustic.capture/2 or /1", name, schema);
         TEST_FAIL_MESSAGE(msg);
     }
 
@@ -283,7 +289,7 @@ static bool replay_one(const char *dir, const char *name, unsigned *checked)
     void *scratch = malloc(bytes);
     TEST_ASSERT_NOT_NULL(scratch);
     const char *detail = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, scratch, bytes, &detail),
+    TEST_ASSERT_TRUE_MESSAGE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, NULL, scratch, bytes, &detail),
                              detail);
     truing_tension_estimate_t e;
     truing_acoustic_real_analyze_words(&a, words, n_words, 1u, &e);

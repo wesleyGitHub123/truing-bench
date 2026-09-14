@@ -16,6 +16,7 @@
 #include "truing_hal/clock_if.h"
 
 static truing_chain_profile_t g_chain;
+static truing_excitation_profile_t g_excitation;
 static truing_tension_model_profile_t g_profile;
 static truing_fake_clock_t g_fc;
 static truing_clock_if_t g_clock;
@@ -23,6 +24,7 @@ static truing_clock_if_t g_clock;
 void setUp(void)
 {
     truing_fixture_chain_profile_inmp441(&g_chain);
+    truing_fixture_excitation_profile(&g_excitation);
     truing_fixture_tension_model_profile_complete(&g_profile);
     truing_fake_clock_init(&g_fc, &g_clock, 10u);
 }
@@ -41,7 +43,7 @@ static void check_case(const acoustic_golden_case_t *c)
     void *scratch = malloc(bytes);
     TEST_ASSERT_NOT_NULL(scratch);
     const char *detail = NULL;
-    TEST_ASSERT_TRUE_MESSAGE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, scratch, bytes, &detail), detail);
+    TEST_ASSERT_TRUE_MESSAGE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, NULL, scratch, bytes, &detail), detail);
     TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_RECORDED, a.source_impl);   /* provenance follows the front end */
 
     truing_tension_estimate_t e;
@@ -121,7 +123,7 @@ static void test_recorded_noise_floor_never_yields_a_tension(void)
     const size_t bytes = truing_acoustic_real_scratch_bytes(&g_chain);
     void *scratch = malloc(bytes);
     const char *detail = NULL;
-    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_profile, &src, NULL, scratch, bytes, &detail));
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, NULL, scratch, bytes, &detail));
     truing_tension_estimate_t e;
     truing_acoustic_real_analyze_words(&a, ACOUSTIC_GOLDEN_NOISE_PCM, n, 1u, &e);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);

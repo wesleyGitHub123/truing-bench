@@ -60,9 +60,11 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
     const int fail0 = *fail;
     ESP_LOGI(TAG, "-- acoustic subsystem (Phase 1f): I2S front end, layers 2-4 on target --");
     truing_chain_profile_t chain;
+    truing_excitation_profile_t excitation;
     truing_tension_model_profile_t profile;
     truing_wheel_class_config_t wheel;
     truing_fixture_chain_profile_inmp441(&chain);
+    truing_fixture_excitation_profile(&excitation);
     truing_fixture_tension_model_profile_complete(&profile);
     truing_fixture_wheel_class_sym32(&wheel);
     truing_clock_if_t clock = { boot_clock_now, NULL };
@@ -133,7 +135,7 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
         truing_audio_buffer_init(&rec, &rctx, acoustic_golden_cases[0].pcm, acoustic_golden_cases[0].n_samples, NULL);
         truing_acoustic_if_t a;
         truing_acoustic_real_ctx_t actx;
-        const bool init_ok = truing_acoustic_real_init(&a, &actx, clock, &chain, &profile, &rec, NULL, scratch, scratch_bytes, &detail);
+        const bool init_ok = truing_acoustic_real_init(&a, &actx, clock, &chain, &excitation, &profile, &rec, NULL, scratch, scratch_bytes, &detail);
         check(pass, fail, init_ok, "acoustic subsystem initialises on a RECORDED front end (provenance follows the source)");
         if (init_ok) {
             bool all_suspect = true, all_segmented = true, all_matched = true, all_model = true;
@@ -254,23 +256,48 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
         }
         /* ---- the same subsystem on the real front end: an honest measurement attempt ---------- */
         if (i2s_ok) {
-            truing_pluck_if_t pluck;
-            truing_pluck_gpio_ctx_t pctx;
-            const bool pl_ok = truing_pluck_gpio_init(&pluck, &pctx, BOARD_PLUCK_ACTUATOR_GPIO);
-            check(pass, fail, pl_ok, "pluck actuator GPIO configured as output (pulse commanded; no actuator is verified)");
+            /* Only a station whose board profile declares its solenoid is ever driven: with
+             * *_PRESENT 0 nothing is fired at boot, and that station's live measurement is
+             * reported NOT PERFORMED rather than attempted (plan A9). */
+            static const int k_present[TRUING_ACOUSTIC_STATIONS] = { BOARD_PLUCK_ACTUATOR_LEFT_PRESENT,
+                                                                     BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT };
+            static const int k_gpio[TRUING_ACOUSTIC_STATIONS] = { BOARD_PLUCK_ACTUATOR_LEFT_GPIO,
+                                                                  BOARD_PLUCK_ACTUATOR_RIGHT_GPIO };
+            static const char *const k_name[TRUING_ACOUSTIC_STATIONS] = { "LEFT", "RIGHT" };
+            truing_pluck_if_t pluck[TRUING_ACOUSTIC_STATIONS];
+            truing_pluck_gpio_ctx_t pctx[TRUING_ACOUSTIC_STATIONS];
+            truing_acoustic_actuators_t actuators;
+            memset(pctx, 0, sizeof(pctx));
+            for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+                actuators.at[i] = NULL;
+                if (k_present[i] && truing_pluck_gpio_init(&pluck[i], &pctx[i], k_gpio[i])) {
+                    actuators.at[i] = &pluck[i];
+                }
+            }
             truing_acoustic_if_t a2;
             truing_acoustic_real_ctx_t actx2;
-            const bool ok2 = truing_acoustic_real_init(&a2, &actx2, clock, &chain, &profile, &i2s, pl_ok ? &pluck : NULL, scratch, scratch_bytes, &detail);
+            const bool ok2 = truing_acoustic_real_init(&a2, &actx2, clock, &chain, &excitation, &profile, &i2s, &actuators,
+                                                       scratch, scratch_bytes, &detail);
             check(pass, fail, ok2 && a2.source_impl == TRUING_SOURCE_REAL, "acoustic subsystem on the I2S front end is a REAL implementation");
-            if (ok2) {
+            /* Spokes 0 and 1 cover both stations through the subsystem's own convention; the slot,
+             * and so the label, come from truing_acoustic_station_for_spoke() rather than from an
+             * assumption that spoke i belongs to slot i. */
+            for (uint8_t spoke = 0u; ok2 && spoke < TRUING_ACOUSTIC_STATIONS; ++spoke) {
+                const int slot = truing_acoustic_station_slot(truing_acoustic_station_for_spoke(spoke));
+                if (slot < 0 || actuators.at[slot] == NULL) {
+                    ESP_LOGW(TAG, "live measurement of spoke %u (%s station): NOT PERFORMED (%s)", (unsigned)spoke,
+                             slot >= 0 ? k_name[slot] : "?",
+                             slot >= 0 && k_present[slot] ? "GPIO init failed" : "no solenoid declared in the board profile");
+                    continue;
+                }
                 truing_tension_estimate_t e;
                 const int64_t t0 = esp_timer_get_time();
-                truing_acoustic_measure(&a2, 0u, &wheel, 1u, &e);
+                truing_acoustic_measure(&a2, spoke, &wheel, 1u, &e);
                 const int64_t dt = esp_timer_get_time() - t0;
-                ESP_LOGI(TAG, "measure_spoke_tension on the live front end: %s / %s (capture %s, %" PRIu32 " words, pluck pulse %u us) in %lld ms",
-                         truing_status_str(e.meta.status), truing_reason_str(e.meta.reason_code),
-                         truing_audio_result_str(actx2.diag.capture_result), actx2.diag.n_captured, pctx.last_pulse_us_measured,
-                         (long long)(dt / 1000));
+                ESP_LOGI(TAG, "measure_spoke_tension spoke %u, actuator %s: %s / %s (capture %s, %" PRIu32 " words, pulse %u us) in %lld ms",
+                         (unsigned)spoke, truing_acoustic_actuator_str(actx2.diag.station), truing_status_str(e.meta.status),
+                         truing_reason_str(e.meta.reason_code), truing_audio_result_str(actx2.diag.capture_result),
+                         actx2.diag.n_captured, pctx[slot].last_pulse_us_measured, (long long)(dt / 1000));
                 check(pass, fail, e.meta.status != TRUING_STATUS_VALID && (e.meta.status != TRUING_STATUS_SUSPECT || isfinite(e.tension_n)),
                       "live measurement reports a status, never a fabricated valid value (P2/P7)");
             }

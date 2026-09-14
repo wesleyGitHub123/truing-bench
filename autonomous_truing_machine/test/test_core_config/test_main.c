@@ -186,6 +186,53 @@ static void test_chain_profile_digest_identifies_the_configuration(void)
     }
 }
 
+/* The excitation profile is its own configuration with its own identity: a pulse change moves
+ * the excitation digest and never the chain digest (and the reverse), which is what keeps a
+ * per-station pulse retune from invalidating DSP evidence. */
+static void test_excitation_profile_is_separate_from_the_chain(void)
+{
+    truing_excitation_profile_t e, e2;
+    truing_chain_profile_t c, c2;
+    const char *field = NULL;
+    truing_fixture_excitation_profile(&e);
+    truing_fixture_chain_profile_inmp441(&c);
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_OK, truing_excitation_profile_check(&e, &field));
+
+    uint8_t ea[TRUING_SHA256_DIGEST_BYTES], eb[TRUING_SHA256_DIGEST_BYTES];
+    uint8_t ca[TRUING_SHA256_DIGEST_BYTES], cb[TRUING_SHA256_DIGEST_BYTES];
+    truing_excitation_profile_digest(&e, ea);
+    truing_chain_profile_digest(&c, ca);
+    for (unsigned slot = 0; slot < TRUING_ACOUSTIC_STATIONS; ++slot) {
+        e2 = e;
+        e2.pulse_ms[slot] += 1.0f;
+        truing_excitation_profile_digest(&e2, eb);
+        TEST_ASSERT_FALSE_MESSAGE(memcmp(ea, eb, sizeof(ea)) == 0, "a changed pulse left the excitation digest unmoved");
+    }
+    c2 = c;
+    c2.gate_start_ms += 10.0f;
+    truing_chain_profile_digest(&c2, cb);
+    TEST_ASSERT_FALSE(memcmp(ca, cb, sizeof(ca)) == 0);
+    truing_excitation_profile_digest(&e, eb);
+    TEST_ASSERT_EQUAL_MEMORY(ea, eb, sizeof(ea));   /* a DSP change does not touch it */
+
+    e2 = e;
+    e2.pulse_ms[1] = 0.0f;   /* zero is no longer "no actuator": absence is a board fact */
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_NOT_POSITIVE, truing_excitation_profile_check(&e2, &field));
+    TEST_ASSERT_EQUAL_STRING("pulse_ms_right", field);
+    e2 = e;
+    e2.pulse_ms[0] = TRUING_EXCITATION_PULSE_MAX_MS + 1.0f;
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_OUT_OF_RANGE, truing_excitation_profile_check(&e2, &field));
+    TEST_ASSERT_EQUAL_STRING("pulse_ms_left", field);
+    e2 = e;
+    e2.excitation_id = 0u;
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_UNSET, truing_excitation_profile_check(&e2, &field));
+
+    TEST_ASSERT_EQUAL_INT(0, truing_acoustic_station_slot(TRUING_STATION_ACOUSTIC_LEFT));
+    TEST_ASSERT_EQUAL_INT(1, truing_acoustic_station_slot(TRUING_STATION_ACOUSTIC_RIGHT));
+    TEST_ASSERT_EQUAL_INT(-1, truing_acoustic_station_slot(TRUING_STATION_RUNOUT));
+    TEST_ASSERT_EQUAL_INT(-1, truing_acoustic_station_slot(TRUING_STATION_UNSET));
+}
+
 static void test_tension_model_profile_completeness(void)
 {
     truing_tension_model_profile_t p;
@@ -248,9 +295,14 @@ static void test_machine_profile_station_geometry(void)
     m.stations[TRUING_STATION_RUNOUT].present = false;
     TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_UNSET, truing_machine_profile_check(&m, &field));
     TEST_ASSERT_EQUAL_STRING("runout", field);
+    /* Both acoustic stations are workflow stations: a spoke is routed to either one. */
+    truing_fixture_machine_profile(&m);
+    m.stations[TRUING_STATION_ACOUSTIC_RIGHT].present = false;
+    TEST_ASSERT_EQUAL_INT(TRUING_CFG_ERR_UNSET, truing_machine_profile_check(&m, &field));
+    TEST_ASSERT_EQUAL_STRING("acoustic_right", field);
     /* Coincident stations are legal (SPEC §10A.3). */
     truing_fixture_machine_profile(&m);
-    m.stations[TRUING_STATION_RUNOUT].angle_rad = m.stations[TRUING_STATION_ACOUSTIC].angle_rad;
+    m.stations[TRUING_STATION_RUNOUT].angle_rad = m.stations[TRUING_STATION_ACOUSTIC_LEFT].angle_rad;
     TEST_ASSERT_EQUAL_INT(TRUING_CFG_OK, truing_machine_profile_check(&m, &field));
     /* The reference station must exist. */
     truing_fixture_machine_profile(&m);
@@ -280,6 +332,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_pair_rule_rim_angles_equal_spokes);
     RUN_TEST(test_chain_profile_enforces_fixed_audio_format);
     RUN_TEST(test_chain_profile_digest_identifies_the_configuration);
+    RUN_TEST(test_excitation_profile_is_separate_from_the_chain);
     RUN_TEST(test_tension_model_profile_completeness);
     RUN_TEST(test_tension_model_profile_compatibility);
     RUN_TEST(test_machine_profile_station_geometry);

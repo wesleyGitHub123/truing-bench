@@ -306,6 +306,16 @@ static void test_pluck_fake_counts_commands_and_reports_failures(void)
     TEST_ASSERT_EQUAL_UINT32(2u, ctx.fires);
 }
 
+/* The acoustic subsystem's station convention: spoke 0 is the LEFT actuator's, alternating. */
+static void test_acoustic_station_for_spoke_alternates_from_left(void)
+{
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, truing_acoustic_station_for_spoke(0u));
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, truing_acoustic_station_for_spoke(1u));
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, truing_acoustic_station_for_spoke(30u));
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, truing_acoustic_station_for_spoke(31u));
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, truing_acoustic_station_for_spoke(255u));
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -320,5 +330,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_intent_queue_source);
     RUN_TEST(test_telemetry_ring_drops_on_full_and_never_blocks);
     RUN_TEST(test_session_header_flags_non_real_implementations);
+    RUN_TEST(test_acoustic_station_for_spoke_alternates_from_left);
     return UNITY_END();
 }

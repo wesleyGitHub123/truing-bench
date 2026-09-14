@@ -215,30 +215,40 @@ nothing was added to ask it. See `src/build_mode.h`.
 
 `s3_devkit_mic` / `nano_esp32_mic` add `-DTRUING_REAL_FRONT_END=1`: the interactive image
 with the **physical INMP441 front end**. The microphone is opened once at boot and drained
-continuously by its own core-1 task into a PSRAM ring; each spoke measurement captures one
-bounded window (~1.2 s) of real audio and the existing DSP runs on it. No plucker is built,
-so the operator plucks by hand at the station during the capture window — a spoke nobody
-plucked is reported as `NO_ONSET_DETECTED`, never invented.
+continuously by its own core-1 task into a PSRAM ring; each spoke measurement fires the
+solenoid at that spoke's own acoustic station (spoke 0 → LEFT, alternating), then captures one
+bounded window (~1.2 s) of real audio and runs the existing DSP on it. **There is no hand-pluck
+path.** A station whose solenoid the board profile does not declare
+(`BOARD_PLUCK_ACTUATOR_LEFT/RIGHT_PRESENT`) makes the acoustic subsystem not ready, so
+**`START_TRUING` is refused with `EXCITATION_UNAVAILABLE`**. Both boards ship with both flags 0,
+so today every `*_mic` and `*_fastdemo_mic` image refuses sessions until a station's solenoid
+passes its bench check and the flag is set.
 
-The page tells you **when** to pluck. A measurement is one call by contract, but the station
-sees it as three phases, driven by firmware events and never by a browser timer:
-**Pluck spoke N now** with a draining window bar → **Pluck detected** → **Analysing**. A
-silent attempt re-opens the window and the card says *Attempt 2*, which is the orchestrator's
-bounded retry (SPEC §7.4) made visible — it changes no state, so nothing else reports it. The
+A failed fire is a rejected attempt with the same reason, never an invitation to pluck. The
+page shows the measurement as three phases, driven by firmware events and never by a browser
+timer: **Striking spoke N — left/right actuator** with a draining capture bar → **Window
+closed** → **Analysing**. A retry re-opens the window and the card says *Attempt 2*, which is
+the orchestrator's bounded retry (SPEC §7.4) made visible — it changes no state, so nothing
+else reports it. The
 frames are best-effort: lose them and the ordinary measuring card is what shows, and the
 measurement is identical. See `docs/IMPLEMENTATION_NOTES.md`, "The acoustic measurement
 lifecycle". Every estimate is still `suspect`
 / `PROVISIONAL_MODE_ID`: a real front end means the samples are real, not that mode
 identification or tension accuracy is validated. It is exclusive with self-play — the
-auto-operator has no hands — and `GET /id` reports it as `"mode":"interactive+inmp441"`.
+auto-operator cannot rotate the wheel, so a solenoid would strike an unmoved spoke under the
+wrong index — and `GET /id` reports it as `"mode":"interactive+inmp441"`.
 
 ### The acoustic demonstration (`*_fastdemo_mic`)
 
 `s3_devkit_fastdemo_mic` / `nano_esp32_fastdemo_mic` set **both** `-DTRUING_FAST_DEMO=1` and
 `-DTRUING_REAL_FRONT_END=1`: the real microphone with the synthetic acquisition path, and a
-**bound on how many spokes are plucked** (`TRUING_ACOUSTIC_DEMO_SPOKES`, 3). You pluck a few
-spokes by hand to show that the INMP441 → DSP path works; the remaining tension rows are left
-uncollected; the runout sweep is untouched and the real solver runs on it.
+**bound on how many spokes are struck** (`TRUING_ACOUSTIC_DEMO_SPOKES`, 3). The station
+solenoids strike a few spokes to show that the INMP441 → DSP path works; the remaining tension
+rows are left uncollected; the runout sweep is untouched and the real solver runs on it. Like
+every real-front-end image it refuses sessions until both stations' solenoids are declared.
+Its synthetic navigation also never moves the wheel, so its three "spokes" are one physical
+spoke. Reconciling that is plan gate G-demo, before it is a demonstration of more than one
+spoke.
 
 This is the one combination that needs an argument, because real tension from the wheel in
 front of you and synthetic runout from a simulated rim describe two different objects, and a
@@ -247,8 +257,8 @@ row vector built from both would be a wheel that does not exist. It is contained
 `n_mt_identified == false` (asserted by the bring-up self-test in `src/bringup_artifact.c`),
 so `art_select_layout()` returns `TENSION_ABSENT` and admission masks every tension row out
 before the solver sees it. Rule R1 then compares the active row set against a layout mask that
-holds no tension rows at all, so **how many spokes were plucked cannot change whether the
-state is admissible.** The real plucks are displayed evidence, never solver input.
+holds no tension rows at all, so **how many spokes were struck cannot change whether the
+state is admissible.** The real strikes are displayed evidence, never solver input.
 
 That condition is *checked, not assumed*. `tension_targets_this_pass()` asks the calculation
 which layout it would select — `select_layout` is a pure query — and applies the bound only

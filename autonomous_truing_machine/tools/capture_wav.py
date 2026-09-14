@@ -39,7 +39,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CAPTURES = os.path.join(REPO_ROOT, "test", "fixtures", "acoustic", "captures")
 CAMPAIGN = os.path.join(CAPTURES, "_campaign")
 DEFAULT_OUT = os.path.join(CAPTURES, "_wav")
-SCHEMA = "truing.acoustic.capture/1"
+SCHEMAS = ("truing.acoustic.capture/2", "truing.acoustic.capture/1")
 
 # The capture words are I2S 24-in-32: the sample sits in the upper 24 bits, so `word >> 8`
 # is the signed 24-bit value and 2**23 is its full scale. Matches audio_source_if.h.
@@ -70,9 +70,9 @@ def resolve(token):
 def load(meta_path):
     with open(meta_path, "r", encoding="utf-8") as fh:
         meta = json.load(fh)
-    if meta.get("schema") != SCHEMA:
+    if meta.get("schema") not in SCHEMAS:
         raise SystemExit("%s speaks schema %r, this tool speaks %r"
-                         % (meta_path, meta.get("schema"), SCHEMA))
+                         % (meta_path, meta.get("schema"), SCHEMAS))
     pcm_path = os.path.join(os.path.dirname(os.path.abspath(meta_path)),
                             meta.get("pcm") or (os.path.splitext(os.path.basename(meta_path))[0] + ".pcm"))
     if not os.path.isfile(pcm_path):

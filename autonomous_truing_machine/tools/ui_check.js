@@ -135,8 +135,8 @@ const S = (x) => Object.assign({
   init_error: 'NONE', start_refusal: 'NONE',
 }, x);
 const WAITS = [
-  { wait_id: 1, kind: 'CONFIRM_SPOKE0_AT_STATION', expected_intent: 'CONFIRM_POSITIONED', station: 'acoustic', target_index: 0, timeout_ms: 0 },
-  { wait_id: 2, kind: 'POSITION_TO_SPOKE', expected_intent: 'CONFIRM_POSITIONED', station: 'acoustic', target_index: 17, timeout_ms: 0 },
+  { wait_id: 1, kind: 'CONFIRM_SPOKE0_AT_STATION', expected_intent: 'CONFIRM_POSITIONED', station: 'acoustic_left', target_index: 0, timeout_ms: 0 },
+  { wait_id: 2, kind: 'POSITION_TO_SPOKE', expected_intent: 'CONFIRM_POSITIONED', station: 'acoustic_right', target_index: 17, timeout_ms: 0 },
   { wait_id: 3, kind: 'POSITION_TO_RIM_INDEX', expected_intent: 'CONFIRM_POSITIONED', station: 'runout', target_index: 9, timeout_ms: 0 },
   { wait_id: 4, kind: 'POSITION_TO_RIM_ANGLE', expected_intent: 'CONFIRM_POSITIONED', station: 'runout', target_angle_rad: 1.9635, timeout_ms: 0 },
   { wait_id: 5, kind: 'ENTER_RUNOUT', expected_intent: 'SUBMIT_RUNOUT', station: 'runout', target_index: 12, timeout_ms: 0 },
@@ -158,6 +158,13 @@ function answerBtn() {
 }
 const txt = (id) => byId[id].textContent;
 const feedText = (id) => byId[id].children.map(d => d.textContent).join('\n');
+
+// ---- two acoustic stations: the prompt names which one, in words ------------------------
+sandbox.handle(PROV);
+sandbox.handle(S({ active_wait: WAITS[1] }));
+ok(txt('statusbody').indexOf('right acoustic station') >= 0 || JSON.stringify(byId).indexOf('right acoustic station') >= 0,
+   'a spoke prompt names its acoustic station (right acoustic station), not the raw id', txt('statusbody'));
+ok(JSON.stringify(byId).indexOf('acoustic_right') < 0, 'the raw station id acoustic_right never reaches the page');
 
 // ---- every wait kind renders and answers with its own wait_id -------------------------
 sandbox.handle(PROV);
@@ -512,8 +519,9 @@ ok(byId['demobanner'].className.indexOf('hide') < 0,
 ok(txt('b-start') === 'Start Fast Demo', 'the acoustic demonstration image is still a Fast Demo');
 ok(txt('i-mode').indexOf('FAST DEMO + REAL MIC') >= 0,
   'the identity line distinguishes the real microphone from a fully synthetic demo');
-ok(txt('acqnote').indexOf('pluck 3 spokes by hand') >= 0,
-  'the selector explains that you pluck a few spokes by hand');
+ok(txt('acqnote').indexOf('solenoids strike 3 spokes') >= 0,
+  'the selector explains that the station solenoids strike a few spokes');
+ok(txt('acqnote').indexOf('by hand') < 0, 'and never that anyone plucks by hand');
 ok(txt('acqnote').indexOf('not in the active solver layout') >= 0,
   'the selector gives the reason the rest are left uncollected');
 ok(txt('acqnote').indexOf('measures all 32 spokes') < 0,
@@ -527,8 +535,8 @@ const PROV_ACOUSTIC = Object.assign({}, PROV, {
   tension_sample_limit: 3, tension_sampled: 3, tension_omitted_by_layout: true,
 });
 sandbox.handle(PROV_ACOUSTIC);
-ok(txt('rundl').indexOf('3 of 32 spokes plucked') >= 0,
-  'the page says how many spokes were actually plucked');
+ok(txt('rundl').indexOf('3 of 32 spokes struck') >= 0,
+  'the page says how many spokes were actually struck');
 ok(txt('rundl').indexOf('Remaining tension measurements omitted') >= 0,
   'the page says the rest were omitted, not attempted and lost');
 ok(txt('rundl').indexOf('not part of the active solver layout') >= 0,
@@ -540,7 +548,7 @@ ok(txt('rundl').indexOf('Runout is synthetic in this Fast Demo session') >= 0,
 
 // An ordinary run carries no bound, and must not grow a sampling notice out of nowhere.
 sandbox.handle(PROV);
-ok(txt('rundl').indexOf('spokes plucked') < 0,
+ok(txt('rundl').indexOf('spokes struck') < 0,
   'a run with no bound says nothing about bounded sampling');
 ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
   'a run with no bound claims no omission');
@@ -549,7 +557,7 @@ ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
 sandbox.handle(Object.assign({}, PROV, {
   active_layout: 'FULL', tension_sample_limit: 3, tension_sampled: 32, tension_omitted_by_layout: false,
 }));
-ok(txt('rundl').indexOf('32 of 32 spokes plucked') >= 0,
+ok(txt('rundl').indexOf('32 of 32 spokes struck') >= 0,
   'a refused bound reports the full sweep it actually did');
 ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
   'a refused bound claims no omission');
@@ -579,51 +587,38 @@ byId['b-abort'].onclick();
 ok(sent.length === 1 && sent[0].cmd === 'ABORT', 'Abort mid-acquisition sends ABORT', JSON.stringify(sent[0]));
 
 // ---- the acoustic measurement lifecycle -----------------------------------------------------
-// One acoustic call is a window the operator must pluck into and then seconds of arithmetic they
-// must not. The page used to show one card for both, so the only way to learn when to pluck was
-// to guess. These pin that the two now look different, and that losing the frames costs the cue
-// and nothing else.
+// One acoustic call is a strike and a capture window, then seconds of arithmetic. Nobody plucks:
+// each spoke is struck by the solenoid at its own acoustic station, and a station without one is
+// refused by the firmware before any window opens (plan A10). These pin that the card names the
+// actuator that fired, that the phases look different, and that losing frames costs the cue only.
 IDENT.mode = 'interactive+inmp441'; IDENT.acquisition = 'manual';
 IDENT.acquisition_selectable = false; IDENT.real_front_end = true; IDENT.acoustic_demo_spokes = 0;
 sandbox.loadIdent();
 const PH = (x) => Object.assign({
   t: 'event', kind: 'ACOUSTIC_PHASE', ts_ms: 5000, cycle_index: 1, phase: 'LISTENING',
-  spoke_index: 7, excitation: 'HAND', pluck_commanded: false, window_ms: 1000, attempt: 1,
+  spoke_index: 7, actuator: 'RIGHT', fired: true, window_ms: 1000, attempt: 1,
 }, x);
+const noPluckAsk = () => !/pluck/i.test(txt('statusbody'));
 
 sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
 ok(txt('statusbody').indexOf('Capturing and analysing') >= 0,
   'with no phase frame the ordinary measuring card is what shows');
 
-// ARMED is the pluck cue and LISTENING asks for silence -- the opposite of what this page said
-// before 2026-09-08. 49 captures on this chain: striking during the ARMED lead, so the window
-// opens on an already-ringing spoke, cleared the SNR gate 47% of the time against 12.5% for
-// striking into the open window, whose broadband attack saturates the peak list.
-sandbox.handle(PH({ ts_ms: 4800, phase: 'ARMED', window_ms: 2500 }));
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'ARMED is the pluck cue');
-ok(txt('statusbody').indexOf('already ringing') >= 0,
-  'and says why it wants the pluck before the window');
-ok(txt('statusbody').indexOf('Get ready') < 0, 'ARMED no longer tells the operator to wait');
-ok(txt('statusbody').indexOf('ACOUSTIC ARMED') >= 0, 'the armed card names its phase');
-ok(feedText('act').indexOf('PLUCK SPOKE 7 now') >= 0, 'the log carries the pluck cue on ARMED');
-
 sandbox.handle(PH({}));
-ok(txt('statusbody').indexOf('Recording spoke 7') >= 0 &&
-   txt('statusbody').indexOf('hands off') >= 0,
-  'LISTENING says it is recording and asks for hands off');
-ok(txt('statusbody').indexOf('Do not pluck now') >= 0,
-  'and explicitly says not to pluck into the open window');
+ok(txt('statusbody').indexOf('Striking spoke 7') >= 0 && txt('statusbody').indexOf('right actuator') >= 0,
+  'LISTENING names the spoke and the actuator that struck it');
+ok(txt('statusbody').indexOf('Hands off') >= 0, 'and asks for hands off the wheel');
+ok(noPluckAsk(), 'nothing on the listening card asks anyone to pluck', txt('statusbody'));
 ok(byId['status'].className.indexOf('wait') < 0,
   'the listening card is styled as the machine working, not as something asked of you');
 ok(txt('statusbody').indexOf('ACOUSTIC LISTENING') >= 0, 'the card names the phase it is in');
 ok(txt('statusbody').indexOf('Attempt') < 0, 'a first attempt is not labelled as a retry');
-ok(feedText('act').indexOf('recording spoke 7 - hands off') >= 0,
-  'the log says recording, not pluck, once the window is open');
+ok(feedText('act').indexOf('striking spoke 7 (right actuator)') >= 0,
+  'the log says which actuator struck which spoke');
 
-// The retry the orchestrator does silently: same state, no transition, so the ARMED frame of
-// the next attempt is the only thing that can tell the operator to pluck again.
-sandbox.handle(PH({ ts_ms: 6600, phase: 'ARMED', window_ms: 2500, attempt: 2 }));
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a retry re-opens the pluck cue');
+// The retry the orchestrator does silently: same state, no transition, so the next attempt's
+// LISTENING frame is the only thing that reports it.
+sandbox.handle(PH({ ts_ms: 6600, attempt: 2 }));
 ok(txt('statusbody').indexOf('Attempt 2') >= 0,
   'the retry says which attempt it is - nothing else reports this');
 ok(txt('statusbody').indexOf('not heard') >= 0, 'and says why there is another attempt');
@@ -633,47 +628,40 @@ ok(txt('statusbody').indexOf('not heard') >= 0, 'and says why there is another a
 sandbox.handle(PH({ ts_ms: 7700, phase: 'ONSET_DETECTED', window_ms: 0 }));
 ok(txt('statusbody').indexOf('Window closed') >= 0, 'ONSET_DETECTED says the window has closed');
 ok(txt('statusbody').indexOf('may still be a rejection') >= 0,
-  'and does not promise the pluck was good');
-ok(txt('statusbody').indexOf('Pluck detected') < 0, 'it does not claim a confirmed detection');
+  'and does not promise the strike was usable');
 ok(byId['status'].className.indexOf('good') < 0, 'and is not styled as success');
+ok(noPluckAsk(), 'the closed-window card asks no one to pluck', txt('statusbody'));
 ok(txt('statusbody').indexOf('ACOUSTIC ONSET_DETECTED') >= 0
    && txt('statusbody').indexOf('ACOUSTIC LISTENING') < 0,
   'the listening card is replaced once the window has closed, not stacked under it');
 
 sandbox.handle(PH({ ts_ms: 7750, phase: 'ANALYZING', window_ms: 0 }));
 ok(txt('statusbody').indexOf('Analysing spoke 7') >= 0, 'ANALYZING names the work being done');
-ok(txt('statusbody').indexOf('Do not pluck again') >= 0,
-  'and tells the operator the window is shut');
+ok(txt('statusbody').indexOf('hands off') >= 0, 'and keeps hands off the wheel');
 ok(txt('statusbody').indexOf('elapsed') >= 0, 'the analysis shows honest elapsed time');
 
 // A result ends the lifecycle: the cue must not linger over the next thing.
 sandbox.handle({ t: 'event', kind: 'MEASUREMENT_RESULT', channel: 'TENSION', index: 7, ts_ms: 9900,
   status: 'suspect', reason: 'PROVISIONAL_MODE_ID', tension_n: 1000, selected_frequency_hz: 460 });
-ok(txt('statusbody').indexOf('Pluck spoke') < 0, 'a result clears the pluck cue');
+ok(txt('statusbody').indexOf('Striking spoke') < 0, 'a result clears the strike card');
 
 // So does leaving the state, however many frames went missing on the way.
-sandbox.handle(PH({ ts_ms: 10000, phase: 'ARMED', window_ms: 2500 }));
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') >= 0, 'a fresh window re-arms the cue');
+sandbox.handle(PH({ ts_ms: 10000, spoke_index: 6, actuator: 'LEFT' }));
+ok(txt('statusbody').indexOf('Striking spoke 6') >= 0 && txt('statusbody').indexOf('left actuator') >= 0,
+  'a LEFT station spoke names the left actuator');
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 10100,
   from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
 sandbox.handle(S({ current_state: 'POSITION', session_active: true, active_wait: null }));
-ok(txt('statusbody').indexOf('Pluck spoke') < 0,
+ok(txt('statusbody').indexOf('Striking spoke') < 0,
   'leaving the acoustic state ends the window even if its closing frames were dropped');
 
-// An actuated build says so on the frame, so the page never has to guess from a build flag.
+// "Striking" is a claim that a command went out. A capture where nothing was fired (a campaign
+// no-fire control) must never make it.
 sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
-sandbox.handle(PH({ ts_ms: 11000, excitation: 'ACTUATOR', pluck_commanded: true }));
-ok(txt('statusbody').indexOf('Plucking spoke 7') >= 0,
-  'an actuator build says the machine is plucking, not the operator');
-ok(txt('statusbody').indexOf('Pluck spoke 7 now') < 0,
-  'and does not ask a person to do what the actuator just did');
-// The "plucking" claim needs the command to have gone out: an ACTUATOR frame without
-// pluck_commanded is a failed fire, and the page must fall back to the hand-pluck wording.
-sandbox.handle(PH({ ts_ms: 11200, excitation: 'ACTUATOR', pluck_commanded: false }));
-ok(txt('statusbody').indexOf('Plucking spoke 7') < 0,
-  'an attached-but-uncommanded actuator must not claim the machine is plucking');
-ok(txt('statusbody').indexOf('hands off') >= 0,
-  'a failed fire renders the hand-pluck wording, not a false actuator claim');
+sandbox.handle(PH({ ts_ms: 11000, fired: false, actuator: 'NONE' }));
+ok(txt('statusbody').indexOf('Striking') < 0, 'a capture with nothing fired never claims a strike');
+ok(txt('statusbody').indexOf('nothing was fired') >= 0, 'and says plainly that nothing was fired');
+ok(noPluckAsk(), 'and still asks no one to pluck instead', txt('statusbody'));
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 11500,
   from: 'MEASURE_SPOKE_TENSION', to: 'POSITION' });
 
@@ -714,7 +702,7 @@ const REASONS = [
   'NOT_IMPLEMENTED', 'CALIBRATION_MISSING', 'STALE_MEASUREMENT', 'PARTIAL_WHEEL_STATE',
   'ARTIFACT_INVALID', 'STALE_INTENT', 'REQUIRES_ARTIFACT_REGENERATION',
   'MEAN_TENSION_MODEL_UNAVAILABLE', 'TENSION_NOT_VERIFICATION_GRADE', 'CANCELLED',
-  'WHEEL_REFERENCE_LOST', 'CAPTURE_OVERRUN',
+  'WHEEL_REFERENCE_LOST', 'CAPTURE_OVERRUN', 'EXCITATION_UNAVAILABLE',
 ];
 const missing = REASONS.filter(r => !(sandbox.REASON && sandbox.REASON[r]));
 ok(missing.length === 0, 'every firmware reason code has a page translation', missing.join(', '));
@@ -753,11 +741,9 @@ sandbox.loadIdent();
   ok(!threw, 'every frame of a real recorded session is handled without throwing', threw || '');
 
   const fresh = feedText('act').slice(feedStart);
-  // the acoustic cue reached the operator for every demo spoke, both phases
-  ok(/PLUCK SPOKE 0 now/.test(fresh) && /PLUCK SPOKE 1 now/.test(fresh) && /PLUCK SPOKE 2 now/.test(fresh),
-    'replay: ARMED renders the pluck cue for every demo spoke');
-  ok(/recording spoke \d - hands off/.test(fresh),
-    'replay: LISTENING renders the hands-off cue');
+  // every demo spoke's capture window reached the log, naming the spoke it was for
+  ok(/(striking|recording) spoke 0/.test(fresh) && /(striking|recording) spoke 1/.test(fresh) && /(striking|recording) spoke 2/.test(fresh),
+    'replay: LISTENING reaches the log for every demo spoke');
   // every reason the session actually carried reached the operator translated
   const reasonPhrase = { AMBIGUOUS_PEAK: 'Ambiguous peak', VALUE_OUT_OF_RANGE: 'Not enough signal' };
   const carried = new Set(frames.filter(f => f.kind === 'MEASUREMENT_RESULT' && f.reason && f.reason !== 'NONE').map(f => f.reason));

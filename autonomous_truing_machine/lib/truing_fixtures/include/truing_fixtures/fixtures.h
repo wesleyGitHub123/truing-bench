@@ -36,6 +36,8 @@ void truing_fixture_wheel_class_asym36(truing_wheel_class_config_t *out);
 
 void truing_fixture_solver_config(truing_solver_config_t *out, uint8_t n_rim_angles);
 void truing_fixture_chain_profile_inmp441(truing_chain_profile_t *out);
+/* Both acoustic stations' actuators at the pulse the chain profile carried until the split. */
+void truing_fixture_excitation_profile(truing_excitation_profile_t *out);
 
 /* Ideal-string profile with every required parameter established. */
 void truing_fixture_tension_model_profile_complete(truing_tension_model_profile_t *out);

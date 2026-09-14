@@ -32,7 +32,7 @@
  * are derived from those same tables. Adding an intent or a parameter therefore
  * extends the protocol automatically and renaming one renames it on the wire, so the
  * two can never disagree. The cost is that the existing tables are not uniformly
- * cased — statuses and stations are lowercase ("suspect", "acoustic") while reason
+ * cased — statuses and stations are lowercase ("suspect", "acoustic_left") while reason
  * codes, states and intents are uppercase — and that inconsistency is deliberately
  * preserved: a client then reads exactly the tokens that appear in the firmware's
  * logs and bring-up reports, which is worth more than a tidier-looking wire format.

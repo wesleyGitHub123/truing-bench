@@ -20,6 +20,11 @@
  *   strong peaks but none in the f1 band  -> rejected    / FREQ_OUT_OF_RANGE
  *   SNR below the chain's measurement gate-> rejected    / LOW_SNR
  *   model refuses                         -> rejected    / MODEL_REJECTED or NO_F2_PARTNER
+ *   no actuator at the spoke's station,
+ *   or it failed to fire                  -> rejected    / EXCITATION_UNAVAILABLE (no capture)
+ *
+ * Excitation: each acoustic station has its own actuator (truing_acoustic_station_for_spoke()
+ * picks the station, and with it the actuator). There is no hand-pluck fallback.
  */
 #ifndef TRUING_HAL_ACOUSTIC_REAL_H
 #define TRUING_HAL_ACOUSTIC_REAL_H
@@ -55,8 +60,17 @@ typedef struct {
     float    f1_hz, f2_hz, snr_db;
     float    l_eff_m;
     uint32_t capture_us, analysis_us;   /* measured by the clock if it has that resolution */
-    bool     pluck_commanded;
+    uint8_t  station;                   /* truing_station_id_t whose actuator excited these words; UNSET on replay */
+    bool     fired;                     /* that actuator was commanded for this capture */
+    float    pulse_ms;                  /* the pulse it was commanded with; NaN when not fired */
 } truing_acoustic_real_diag_t;
+
+/* The excitation actuators, one per acoustic station, indexed by truing_acoustic_station_slot().
+ * A NULL entry is a station with no actuator installed: its spokes are rejected, never plucked
+ * by hand. */
+typedef struct {
+    truing_pluck_if_t *at[TRUING_ACOUSTIC_STATIONS];
+} truing_acoustic_actuators_t;
 
 /* Told, as it happens, which part of a measurement is running. Deliberately NOT on
  * acoustic_if.h: the orchestrator's contract with the acoustic subsystem is one call in, one
@@ -71,9 +85,10 @@ typedef void (*truing_acoustic_observer_fn)(void *ctx, const truing_telemetry_ev
 typedef struct {
     truing_clock_if_t                  clock;
     const truing_chain_profile_t      *chain;
+    const truing_excitation_profile_t *excitation;
     const truing_tension_model_profile_t *profile;   /* session-fixed (SPEC 12.3.1) */
     truing_audio_source_if_t          *source;
-    truing_pluck_if_t                 *pluck;        /* NULL: no actuator; the capture still runs */
+    truing_pluck_if_t                 *actuator[TRUING_ACOUSTIC_STATIONS];   /* NULL: none at that station */
     truing_dsp_params_t                params;
     truing_dsp_workspace_t             dsp;
     int32_t                           *words;        /* capture buffer, n_capture words */
@@ -91,11 +106,9 @@ typedef struct {
     /* Phase observation (optional; NULL means the subsystem is silent as before). */
     truing_acoustic_observer_fn        observer;
     void                              *observer_ctx;
-    /* Optional lead-in before the capture window opens (SPEC §9.1 is one call; this is
-     * internal to it). 0 or a NULL delay_fn: behave exactly as before. */
-    uint32_t                           pluck_lead_ms;
-    void                             (*delay_fn)(void *ctx, uint32_t ms);
-    void                              *delay_ctx;
+    /* This attempt's excitation, as reported on its phase frames (diag keeps the capture's). */
+    uint8_t                            attempt_station;
+    bool                               attempt_fired;
     /* The orchestrator retries by calling again with the same spoke, so consecutive calls for
      * one spoke in one cycle ARE the attempts. Counting them here is what lets the station say
      * "attempt 2" without the orchestrator having to report its own retry bookkeeping. */
@@ -123,20 +136,14 @@ size_t truing_acoustic_real_scratch_bytes(const truing_chain_profile_t *chain);
  * source refuses the system format, or the scratch is too small. An incomplete tension-model
  * profile does NOT fail init: every measurement then reports CALIBRATION_MISSING (SPEC 11.3.1). */
 bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *ctx, truing_clock_if_t clock,
-                               const truing_chain_profile_t *chain, const truing_tension_model_profile_t *profile,
-                               truing_audio_source_if_t *source, truing_pluck_if_t *pluck, void *scratch, size_t scratch_bytes,
+                               const truing_chain_profile_t *chain, const truing_excitation_profile_t *excitation,
+                               const truing_tension_model_profile_t *profile, truing_audio_source_if_t *source,
+                               const truing_acoustic_actuators_t *actuators, void *scratch, size_t scratch_bytes,
                                const char **detail);
 /* Attach (or, with NULL, detach) the phase observer. Wired by the composition root after init,
  * never by the orchestrator. Safe to leave unset: the subsystem then emits nothing at all. */
 void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx);
 
-/* Give the station a lead-in before each hand-pluck window: an ARMED phase event is emitted
- * and `delay_fn(delay_ctx, lead_ms)` performs the wait (vTaskDelay on target) before LISTENING.
- * Skipped when an actuator did the excitation - nobody to count in - and a no-op when lead_ms
- * is 0 or delay_fn is NULL, which is how host tests and replay keep the old timing. Wired by
- * the composition root after init, like the observer. */
-void truing_acoustic_real_set_pluck_lead(truing_acoustic_if_t *self, uint32_t lead_ms,
-                                         void (*delay_fn)(void *ctx, uint32_t ms), void *delay_ctx);
 
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */

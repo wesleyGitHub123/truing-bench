@@ -33,7 +33,9 @@ extern "C" {
 #endif
 
 #define TRUING_BLOB_MAGIC          0x46435254u   /* "TRCF" as little-endian u32 */
-#define TRUING_BLOB_SCHEMA_VERSION 2u   /* 2: Phase 1f chain-profile DSP constants and tension-profile L_eff bounds */
+#define TRUING_BLOB_SCHEMA_VERSION 3u   /* 2: Phase 1f chain-profile DSP constants and tension-profile L_eff bounds
+                                          * 3: two acoustic stations (machine profile layout); excitation moved out of the
+                                          *    chain profile into its own kind */
 #define TRUING_BLOB_HEADER_BYTES   14u
 /* Upper bound on any encoded blob (largest payload is the wheel class, < 128 bytes). */
 #define TRUING_BLOB_MAX_BYTES      256u
@@ -45,6 +47,7 @@ typedef enum {
     TRUING_BLOB_KIND_CHAIN_PROFILE = 3,
     TRUING_BLOB_KIND_TENSION_MODEL_PROFILE = 4,
     TRUING_BLOB_KIND_MACHINE_PROFILE = 5,
+    TRUING_BLOB_KIND_EXCITATION_PROFILE = 6,
     TRUING_BLOB_KIND__COUNT
 } truing_blob_kind_t;
 
@@ -67,6 +70,7 @@ size_t truing_blob_encode_solver(const truing_solver_config_t *cfg, uint8_t *buf
 size_t truing_blob_encode_chain_profile(const truing_chain_profile_t *p, uint8_t *buf, size_t cap);
 size_t truing_blob_encode_tension_model_profile(const truing_tension_model_profile_t *p, uint8_t *buf, size_t cap);
 size_t truing_blob_encode_machine_profile(const truing_machine_profile_t *p, uint8_t *buf, size_t cap);
+size_t truing_blob_encode_excitation_profile(const truing_excitation_profile_t *p, uint8_t *buf, size_t cap);
 
 /* Decoders write `out` only on success. */
 truing_blob_result_t truing_blob_decode_wheel_class(const uint8_t *buf, size_t len, truing_wheel_class_config_t *out);
@@ -74,6 +78,7 @@ truing_blob_result_t truing_blob_decode_solver(const uint8_t *buf, size_t len, t
 truing_blob_result_t truing_blob_decode_chain_profile(const uint8_t *buf, size_t len, truing_chain_profile_t *out);
 truing_blob_result_t truing_blob_decode_tension_model_profile(const uint8_t *buf, size_t len, truing_tension_model_profile_t *out);
 truing_blob_result_t truing_blob_decode_machine_profile(const uint8_t *buf, size_t len, truing_machine_profile_t *out);
+truing_blob_result_t truing_blob_decode_excitation_profile(const uint8_t *buf, size_t len, truing_excitation_profile_t *out);
 
 /* Header inspection + integrity check without decoding the payload. */
 truing_blob_result_t truing_blob_peek(const uint8_t *buf, size_t len, truing_blob_kind_t *kind_out,

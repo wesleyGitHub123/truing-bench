@@ -42,34 +42,20 @@ typedef enum {
 } truing_event_channel_t;
 
 /* One acoustic measurement is a single call by contract (SPEC §9.1), but from the station it is
- * two very different things back to back: a window in which a person must pluck, and seconds of
- * arithmetic during which they must not. Nothing outside the subsystem could tell those apart,
- * so an operator was shown one card for both and had to guess. These say which is happening.
+ * two very different things back to back: the station's solenoid strikes and a capture window is
+ * open, then seconds of arithmetic. Nothing outside the subsystem could tell those apart. These
+ * say which is happening.
  *
  * Purely observational, best-effort like all telemetry (SPEC §12.2): dropping every one of them
  * changes no measurement and no timing. The capture window is opened and closed by the firmware
  * on its own clock; a browser that never hears about it still gets the same result. */
 typedef enum {
-    TRUING_ACOUSTIC_PHASE_LISTENING = 0,   /* the capture window is OPEN: pluck now */
+    TRUING_ACOUSTIC_PHASE_LISTENING = 0,   /* the actuator was commanded; the capture window is OPEN */
     TRUING_ACOUSTIC_PHASE_ONSET_DETECTED,  /* an excitation was found in the capture */
     TRUING_ACOUSTIC_PHASE_ANALYZING,       /* the window is closed; the FFT is running */
-    /* Optional lead-in before LISTENING: the window is NOT open yet. The capture is
-     * fixed-length and cannot end early on a pluck, so without this the operator gets no
-     * warning and the cue has to cross the network before the ~1 s window closes. window_ms
-     * carries the lead. Appended last so LISTENING/ONSET_DETECTED/ANALYZING keep their values. */
-    TRUING_ACOUSTIC_PHASE_ARMED,
     TRUING_ACOUSTIC_PHASE__COUNT
 } truing_acoustic_phase_t;
 
-/* Where the excitation comes from, as a fact reported by the firmware rather than a guess made
- * by the page. The actuator case has no implementation yet; carrying it now is what lets one
- * arrive as a pluck_if implementation plus one wiring line, with no wire or UI change. */
-typedef enum {
-    TRUING_EXCITATION_NONE = 0,   /* no actuator, no station: replayed or bring-up audio */
-    TRUING_EXCITATION_HAND,       /* a person plucks at the station */
-    TRUING_EXCITATION_ACTUATOR,   /* an attached actuator was commanded */
-    TRUING_EXCITATION__COUNT
-} truing_excitation_t;
 
 #define TRUING_EVT_TEXT_MAX 40u
 
@@ -108,8 +94,8 @@ typedef struct {
         struct {
             uint8_t  phase;            /* truing_acoustic_phase_t */
             uint8_t  spoke_index;
-            uint8_t  excitation;       /* truing_excitation_t */
-            bool     pluck_commanded;  /* an actuator was fired for this attempt */
+            uint8_t  station;          /* truing_station_id_t: whose actuator serves this spoke; UNSET on replay */
+            bool     fired;            /* that actuator was commanded for this attempt */
             uint32_t window_ms;        /* LISTENING: how long the window stays open */
             uint32_t attempt;          /* 1-based, counting consecutive calls for this spoke */
         } acoustic;
@@ -147,7 +133,8 @@ uint16_t truing_telemetry_ring_count(const truing_telemetry_ring_ctx_t *ctx);
 
 const char *truing_event_kind_str(truing_event_kind_t k);
 const char *truing_acoustic_phase_str(truing_acoustic_phase_t p);
-const char *truing_excitation_str(truing_excitation_t e);
+/* "LEFT" / "RIGHT" for an acoustic station, "NONE" for anything else (replay, bring-up). */
+const char *truing_acoustic_actuator_str(uint8_t station);
 
 #ifdef __cplusplus
 }

@@ -269,7 +269,7 @@ static void test_encode_wait_prompt_names_feature_and_station(void)
     ev.u.wait.wait_id = 6u;
     ev.u.wait.kind = TRUING_WAIT_POSITION_TO_SPOKE;
     ev.u.wait.expected_intent = TRUING_INTENT_CONFIRM_POSITIONED;
-    ev.u.wait.station = TRUING_STATION_ACOUSTIC;
+    ev.u.wait.station = TRUING_STATION_ACOUSTIC_LEFT;
     ev.u.wait.target_index = 13u;
 
     size_t len = truing_wire_encode_event(&ev, g_buf, sizeof(g_buf));
@@ -277,7 +277,7 @@ static void test_encode_wait_prompt_names_feature_and_station(void)
     truing_json_doc_t d;
     reparse(len, &d);
     /* The prompt is a nested object; check it survived and carries both facts. */
-    TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"station\":\"acoustic\""));
+    TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"station\":\"acoustic_left\""));
     TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"target_index\":13"));
     TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"kind\":\"POSITION_TO_SPOKE\""));
     TEST_ASSERT_NOT_NULL(strstr(g_buf, "\"expected_intent\":\"CONFIRM_POSITIONED\""));
@@ -303,9 +303,9 @@ static void test_encode_navigation_event_renders_unvouched_rotation_as_null(void
     TEST_ASSERT_EQUAL_INT(TRUING_JSON_NULL, truing_json_get(&d, "rotation_rad", &v));
 }
 
-/* The acoustic lifecycle on the wire. A page reading these has to be able to tell "pluck now"
- * from "stop plucking, I am thinking", and to know which spoke and which attempt it is looking
- * at, from the frame alone. */
+/* The acoustic lifecycle on the wire. A page reading these has to be able to tell "the window is
+ * open" from "the window closed, I am thinking", and to know which spoke, which station's actuator
+ * and which attempt it is looking at, from the frame alone. */
 static void test_encode_acoustic_phase_event(void)
 {
     truing_telemetry_event_t ev;
@@ -315,8 +315,8 @@ static void test_encode_acoustic_phase_event(void)
     ev.cycle_index = 2u;
     ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_LISTENING;
     ev.u.acoustic.spoke_index = 7u;
-    ev.u.acoustic.excitation = (uint8_t)TRUING_EXCITATION_HAND;
-    ev.u.acoustic.pluck_commanded = false;
+    ev.u.acoustic.station = (uint8_t)TRUING_STATION_ACOUSTIC_RIGHT;
+    ev.u.acoustic.fired = true;
     ev.u.acoustic.window_ms = 1000u;
     ev.u.acoustic.attempt = 2u;
 
@@ -325,36 +325,33 @@ static void test_encode_acoustic_phase_event(void)
     assert_str_field(&d, "t", "event");
     assert_str_field(&d, "kind", "ACOUSTIC_PHASE");
     assert_str_field(&d, "phase", "LISTENING");
-    assert_str_field(&d, "excitation", "HAND");
+    assert_str_field(&d, "actuator", "RIGHT");
     TEST_ASSERT_EQUAL_UINT32(7u, (uint32_t)num_field(&d, "spoke_index"));
     TEST_ASSERT_EQUAL_UINT32(1000u, (uint32_t)num_field(&d, "window_ms"));
     TEST_ASSERT_EQUAL_UINT32(2u, (uint32_t)num_field(&d, "attempt"));
     truing_json_value_t v;
-    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "pluck_commanded", &v));
-    TEST_ASSERT_FALSE(v.boolean);
+    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "fired", &v));
+    TEST_ASSERT_TRUE(v.boolean);
+    TEST_ASSERT_FALSE(truing_json_get(&d, "excitation", &v) == TRUING_JSON_STRING);   /* the hand-pluck field is gone */
 
-    /* An actuated build says so on the same frame, which is why the page needs no build flag. */
+    /* The LEFT station on a later phase; replayed words (no station) say NONE, not a guess. */
     ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ANALYZING;
-    ev.u.acoustic.excitation = (uint8_t)TRUING_EXCITATION_ACTUATOR;
-    ev.u.acoustic.pluck_commanded = true;
+    ev.u.acoustic.station = (uint8_t)TRUING_STATION_ACOUSTIC_LEFT;
     ev.u.acoustic.window_ms = 0u;
     reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
     assert_str_field(&d, "phase", "ANALYZING");
-    assert_str_field(&d, "excitation", "ACTUATOR");
-    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "pluck_commanded", &v));
-    TEST_ASSERT_TRUE(v.boolean);
+    assert_str_field(&d, "actuator", "LEFT");
     TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)num_field(&d, "window_ms"));
+    ev.u.acoustic.station = (uint8_t)TRUING_STATION_UNSET;
+    ev.u.acoustic.fired = false;
+    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
+    assert_str_field(&d, "actuator", "NONE");
+    TEST_ASSERT_EQUAL_INT(TRUING_JSON_BOOL, truing_json_get(&d, "fired", &v));
+    TEST_ASSERT_FALSE(v.boolean);
 
     ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ONSET_DETECTED;
     reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
     assert_str_field(&d, "phase", "ONSET_DETECTED");
-
-    /* ARMED precedes LISTENING and carries the lead-in (before the window opens) in window_ms. */
-    ev.u.acoustic.phase = (uint8_t)TRUING_ACOUSTIC_PHASE_ARMED;
-    ev.u.acoustic.window_ms = 2500u;
-    reparse(truing_wire_encode_event(&ev, g_buf, sizeof(g_buf)), &d);
-    assert_str_field(&d, "phase", "ARMED");
-    TEST_ASSERT_EQUAL_UINT32(2500u, (uint32_t)num_field(&d, "window_ms"));
 }
 
 static void test_encode_log_event_bounds_untermined_text(void)

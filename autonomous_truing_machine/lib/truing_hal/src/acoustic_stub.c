@@ -44,7 +44,13 @@ void truing_acoustic_stub_init(truing_acoustic_if_t *self, truing_acoustic_stub_
     self->measure_spoke_tension = stub_measure;
     self->request_cancel = stub_cancel;
     self->reset_session = stub_reset_session;
+    self->ready = NULL;
     self->ctx = ctx;
+}
+
+truing_station_id_t truing_acoustic_station_for_spoke(uint8_t spoke_id)
+{
+    return (spoke_id % 2u) == 0u ? TRUING_STATION_ACOUSTIC_LEFT : TRUING_STATION_ACOUSTIC_RIGHT;
 }
 
 /* ---- null-safe wrappers ----------------------------------------------------------- */
@@ -75,4 +81,15 @@ void truing_acoustic_reset_session(truing_acoustic_if_t *self)
     if (self != NULL && self->reset_session != NULL) {
         self->reset_session(self);
     }
+}
+
+bool truing_acoustic_ready(truing_acoustic_if_t *self, truing_reason_t *reason)
+{
+    if (reason != NULL) {
+        *reason = TRUING_REASON_NONE;
+    }
+    if (self == NULL || self->ready == NULL) {
+        return true;
+    }
+    return self->ready(self, reason);
 }

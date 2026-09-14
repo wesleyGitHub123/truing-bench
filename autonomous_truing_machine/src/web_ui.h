@@ -176,8 +176,8 @@ static const char TRUING_WEB_UI_HTML[] =
 ".prog{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;margin:11px 0 5px}\n"
 ".prog i{display:block;height:100%;border-radius:3px;background:var(--run);\n"
 " transition:width .35s ease}\n"
-/* The listening window drains right to left: the bar is time you have LEFT to pluck, not work
-   already done, so it must not be confused with the run-progress bar above. */
+/* The listening window drains right to left: the bar is capture time LEFT, not work already
+   done, so it must not be confused with the run-progress bar above. */
 ".lwin{height:10px;border-radius:5px;background:var(--bg);overflow:hidden;margin:12px 0 6px}\n"
 ".lwin i{display:block;height:100%;border-radius:5px;background:var(--warn);\n"
 " transition:width .1s linear}\n"
@@ -383,8 +383,8 @@ static const char TRUING_WEB_UI_HTML[] =
 " PROVISIONAL_MODE_ID:['Provisional measurement',\n"
 "  'The frequency is usable for the current research workflow, but the vibration mode has '+\n"
 "  'not yet been fully validated (SPEC 4.4.1).'],\n"
-" LOW_SNR:['Weak signal','The pluck was too quiet against the noise floor to trust.'],\n"
-" NO_ONSET_DETECTED:['No pluck detected','Nothing that looks like a pluck was captured.'],\n"
+" LOW_SNR:['Weak signal','The ring-down was too quiet against the noise floor to trust.'],\n"
+" NO_ONSET_DETECTED:['No strike detected','Nothing that looks like a strike was captured.'],\n"
 " AMBIGUOUS_PEAK:['Ambiguous peak',\n"
 "  'More than one candidate frequency was equally plausible.'],\n"
 " FREQ_OUT_OF_RANGE:['Frequency out of range',\n"
@@ -396,8 +396,10 @@ static const char TRUING_WEB_UI_HTML[] =
 " PARTIAL_WHEEL_STATE:['Incomplete wheel state',\n"
 "  'Some spokes or rim positions have no usable measurement.'],\n"
 " CAPTURE_OVERRUN:['Capture overrun','Audio samples were lost during the capture.'],\n"
+" EXCITATION_UNAVAILABLE:['Actuator unavailable',\n"
+"  'The solenoid for this spoke is not installed or did not fire, so nothing was measured.'],\n"
 " ONSET_COUNT_MISMATCH:['Multiple onsets',\n"
-"  'The capture held more than one strike; a single clean pluck is needed.'],\n"
+"  'The capture held more than one strike; a single clean strike is needed.'],\n"
 " NO_F2_PARTNER:['No second partial',\n"
 "  'The tension model needs a second harmonic and none was found near the expected place.'],\n"
 " MODEL_REJECTED:['Model rejected the reading',\n"
@@ -548,7 +550,7 @@ static const char TRUING_WEB_UI_HTML[] =
 " el('acqnote').textContent=auto\n"
 "  ?('Positioning and runout are done by the synthetic implementations, so the machine '+\n"
 "    'covers the whole rim without stopping. '+\n"
-"    (acqBound()?('You pluck '+acqBound()+' spokes by hand on the real microphone; the rest '+\n"
+"    (acqBound()?('The station solenoids strike '+acqBound()+' spokes on the real microphone; the rest '+\n"
 "      'are left uncollected because tension is not in the active solver layout.')\n"
 "     :'It measures all 32 spokes as well.')+' Not a physical result.')\n"
 "  :'The machine stops and asks you to position the wheel and read the dial gauges, exactly '+\n"
@@ -668,22 +670,13 @@ static const char TRUING_WEB_UI_HTML[] =
    the browser started. Losing them costs the cue and nothing else: render() falls back to the
    ordinary busy card, and the measurement is unaffected either way. */
 " if(k==='ACOUSTIC_PHASE'){\n"
-"  phase={p:f.phase,idx:f.spoke_index,exc:f.excitation,cmd:f.pluck_commanded,\n"
+"  phase={p:f.phase,idx:f.spoke_index,act:f.actuator,fired:f.fired===true,\n"
 "   win:f.window_ms||0,att:f.attempt||1,at:Date.now()};\n"
-/*  ARMED is the pluck cue, not a warm-up. Measured over 49 captures on this chain: striking
-    during this lead, so the window opens on an already-ringing spoke, clears the SNR gate
-    47% of the time against 12.5% for striking once the window is open. The attack transient
-    is broadband - inside the analysis window it saturates the peak list and buries the
-    fundamental. The quiet ring-down is the part worth recording. */
-"  if(f.phase==='ARMED'){lastIdx=f.spoke_index;\n"
-"   act('PLUCK SPOKE '+f.spoke_index+' now'+(f.attempt>1?' - attempt '+f.attempt:''),\n"
-"    't-warn',f.ts_ms);}\n"
-"  else if(f.phase==='LISTENING'){lastIdx=f.spoke_index;\n"
-/*  'Plucking' claims a command went out, and pluck_commanded is the truth of that claim: an
-    actuator that is wired but whose fire() failed must fall back to the hand-pluck wording -
-    exactly as the firmware does, by running the ARMED lead-in for that attempt. */
-"   act((f.excitation==='ACTUATOR'&&f.pluck_commanded?'plucking spoke ':'recording spoke ')+f.spoke_index+\n"
-"    (f.excitation==='ACTUATOR'&&f.pluck_commanded?'':' - hands off'),'t-nav',f.ts_ms);}\n"
+"  if(f.phase==='LISTENING'){lastIdx=f.spoke_index;\n"
+/*  'Striking' is a claim that a command went out, and `fired` is the truth of it. An actuator
+    whose fire() failed never reaches this frame: the firmware rejects that attempt first. */
+"   act((f.fired===true?'striking spoke '+f.spoke_index+' ('+actName(f.actuator)+')'\n"
+"    :'recording spoke '+f.spoke_index+' - nothing was fired'),'t-nav',f.ts_ms);}\n"
 /*  ONSET_DETECTED means only that the detector picked a sample in the finished capture, not
     that a good pluck landed - the peak/SNR gates run AFTER it. Say what is true. */
 "  else if(f.phase==='ONSET_DETECTED')\n"
@@ -714,18 +707,20 @@ static const char TRUING_WEB_UI_HTML[] =
 " if(k==='LOG'){dbg(f.text,'',f.ts_ms);return;}\n"
 " dbg(k,'',f.ts_ms);}\n"
 
+"function stn(s){return String(s||'?').split('_').reverse().join(' ');}\n"
+"function actName(a){return a==='LEFT'?'left actuator':(a==='RIGHT'?'right actuator':'no actuator');}\n"
 "function waitLine(w){\n"
 " if(w.kind==='APPLY_ADJUSTMENT')\n"
 "  return 'turn spoke '+w.target_index+' by '+w.display_turns_rev+' rev';\n"
 " if(w.kind==='ENTER_RUNOUT')return 'enter dial readings for rim index '+w.target_index;\n"
-" if(w.kind==='CONFIRM_SPOKE0_AT_STATION')return 'put spoke 0 at the '+w.station+' station';\n"
-" return 'position spoke '+w.target_index+' at the '+w.station+' station';}\n"
+" if(w.kind==='CONFIRM_SPOKE0_AT_STATION')return 'put spoke 0 at the '+stn(w.station)+' station';\n"
+" return 'position spoke '+w.target_index+' at the '+stn(w.station)+' station';}\n"
 
 "function startTick(){if(tick)return;\n"
 " tick=setInterval(function(){var e=el('elapsed'),b=el('lbar'),r=el('lrem');\n"
 "  if(!e&&!b){clearInterval(tick);tick=null;return;}\n"
 "  if(e)e.textContent=((Date.now()-busySince)/1000).toFixed(1)+' s elapsed';\n"
-/*  The bar drains: it is time LEFT to pluck. Anchored to the frame's arrival, so a late frame
+/*  The bar drains: it is capture time LEFT. Anchored to the frame's arrival, so a late frame
     shows a correspondingly shorter window rather than a full one that lies. */
 "  if(b&&phase&&phase.win){var gone=Date.now()-phase.at;\n"
 "   b.style.width=Math.max(0,100-100*gone/phase.win).toFixed(1)+'%';\n"
@@ -786,38 +781,28 @@ static const char TRUING_WEB_UI_HTML[] =
    card only while a phase is live; without these frames everything below is exactly as it was,
    which is what makes the cue a bonus rather than a dependency. */
 " if(phase&&s&&s.session_active&&curState==='MEASURE_SPOKE_TENSION'){\n"
-/*  'Plucking' is a claim about a command that went out: excitation says what is wired,
-    pluck_commanded says whether it fired. The page says "plucking" only on both. */
-"  var act1=phase.exc==='ACTUATOR'&&phase.cmd;stopTick();\n"
-/*  ARMED asks for the pluck; LISTENING asks for silence. That is the opposite of what this
-    page said before 2026-09-08, and the campaign in captures/_campaign is why. */
-"  if(phase.p==='ARMED'){c.className='card wait';\n"
-"   put(p,'p','head w','Pluck spoke '+phase.idx+' now');\n"
-"   put(p,'p','sub','One firm pluck, while this bar runs down. The machine records just '+\n"
-"    'after it, and it needs the spoke already ringing - a pluck struck into the open '+\n"
-"    'window is mostly rejected.');\n"
-"   var ab=put(p,'div','lwin');ab.id='lwinbox';put(ab,'i').id='lbar';\n"
-"   var ar=put(p,'div','el','');ar.id='lrem';\n"
-"   if(phase.att>1)put(p,'div','att','Attempt '+phase.att+' - the last one was not heard');\n"
-"   put(p,'div','enum','ACOUSTIC ARMED');startTick();return;}\n"
-"  if(phase.p==='LISTENING'){c.className=act1?'card wait':'card busy';\n"
-"   put(p,'p','head '+(act1?'w':'b'),act1?'Plucking spoke '+phase.idx\n"
-"    :'Recording spoke '+phase.idx+' - hands off');\n"
-"   put(p,'p','sub',act1?'The actuator was commanded; the machine is listening.'\n"
-"    :'Capturing the ring-down. Do not pluck now and do not touch the wheel.');\n"
+/*  Only a frame that says an actuator fired may say "striking". Nobody at the station plucks:
+    the solenoid did the excitation, so the one instruction worth giving is to keep hands off. */
+"  stopTick();\n"
+"  if(phase.p==='LISTENING'){c.className='card busy';\n"
+"   put(p,'p','head b',phase.fired?'Striking spoke '+phase.idx+' - '+actName(phase.act)\n"
+"    :'Recording spoke '+phase.idx+' - nothing was fired');\n"
+"   put(p,'p','sub',phase.fired?'The '+actName(phase.act)+' was commanded; the machine is recording '+\n"
+"    'the ring-down. Hands off the wheel.'\n"
+"    :'No actuator was commanded for this capture. Hands off the wheel.');\n"
 "   var lb=put(p,'div','lwin');lb.id='lwinbox';put(lb,'i').id='lbar';\n"
 "   var rr=put(p,'div','el','');rr.id='lrem';\n"
 "   if(phase.att>1)put(p,'div','att','Attempt '+phase.att+' - the last one was not heard');\n"
 "   put(p,'div','enum','ACOUSTIC LISTENING');startTick();return;}\n"
 "  if(phase.p==='ONSET_DETECTED'){c.className='card busy';\n"
 "   put(p,'p','head b','Window closed - spoke '+phase.idx);\n"
-"   put(p,'p','sub','The capture window has closed. Stop plucking. Checking now whether a '+\n"
-"    'usable pluck landed in it - the result may still be a rejection.');\n"
+"   put(p,'p','sub','The capture window has closed. Checking now whether the strike produced '+\n"
+"    'a usable ring-down - the result may still be a rejection.');\n"
 "   put(put(p,'div','shim'),'i');\n"
 "   put(p,'div','enum','ACOUSTIC ONSET_DETECTED');return;}\n"
 "  if(phase.p==='ANALYZING'){c.className='card busy';\n"
 "   put(p,'p','head b','Analysing spoke '+phase.idx);\n"
-"   put(p,'p','sub','The window is closed. Do not pluck again until asked.');\n"
+"   put(p,'p','sub','The window is closed. Keep hands off the wheel until asked.');\n"
 "   put(put(p,'div','shim'),'i');\n"
 "   var e2=put(p,'div','el','0.0 s elapsed');e2.id='elapsed';\n"
 "   put(p,'div','enum','ACOUSTIC ANALYZING');startTick();return;}}\n"
@@ -962,7 +947,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "  row(h,'Runout entry','Manual dial entry','');}\n"
 " if(prov.tension_sample_limit){\n"
 "  row(h,'Acoustic sampling',\n"
-"   prov.tension_sampled+' of '+(ws2.n_spokes||'?')+' spokes plucked',\n"
+"   prov.tension_sampled+' of '+(ws2.n_spokes||'?')+' spokes struck',\n"
 "   'Bounded demonstration; limit '+prov.tension_sample_limit);\n"
 "  if(prov.tension_omitted_by_layout){\n"
 "   var ab=put(h,'div','warnbox');\n"
@@ -998,22 +983,22 @@ static const char TRUING_WEB_UI_HTML[] =
 
 "function describe(w){switch(w.kind){\n"
 " case 'CONFIRM_SPOKE0_AT_STATION':\n"
-"  return 'Rotate the wheel so spoke 0 is at the '+w.station+' station, then confirm.';\n"
+"  return 'Rotate the wheel so spoke 0 is at the '+stn(w.station)+' station, then confirm.';\n"
 " case 'POSITION_TO_SPOKE':\n"
 "  return 'Rotate the wheel until spoke '+w.target_index+' is aligned with the '+\n"
-"   w.station+' station.';\n"
+"   stn(w.station)+' station.';\n"
 " case 'POSITION_TO_RIM_INDEX':\n"
-"  return 'Rotate the wheel until rim index '+w.target_index+' is at the '+w.station+\n"
+"  return 'Rotate the wheel until rim index '+w.target_index+' is at the '+stn(w.station)+\n"
 "   ' station.';\n"
 " case 'POSITION_TO_RIM_ANGLE':\n"
-"  return 'Rotate the wheel so rim angle '+w.target_angle_rad+' rad is at the '+w.station+\n"
+"  return 'Rotate the wheel so rim angle '+w.target_angle_rad+' rad is at the '+stn(w.station)+\n"
 "   ' station.';\n"
 " case 'ENTER_RUNOUT':\n"
 "  return 'Read both dial gauges for rim index '+w.target_index+' and enter them below.';\n"
 " case 'APPLY_ADJUSTMENT':\n"
-"  return 'Turn the nipple on spoke '+w.target_index+' at the '+w.station+' station by '+\n"
+"  return 'Turn the nipple on spoke '+w.target_index+' at the '+stn(w.station)+' station by '+\n"
 "   'the amount shown, then confirm.';\n"
-" default: return w.kind+' (index '+w.target_index+', station '+w.station+')';}}\n"
+" default: return w.kind+' (index '+w.target_index+', station '+stn(w.station)+')';}}\n"
 
 "function showTab(t){tab=t;\n"
 " el('v-op').className=t==='op'?'':'hide';\n"

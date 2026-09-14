@@ -179,7 +179,7 @@ static bool next_measurement_target(truing_orchestrator_t *o, truing_nav_target_
         if (wanted) {
             t->kind = TRUING_NAV_TARGET_SPOKE;
             t->index = i;
-            t->station = TRUING_STATION_ACOUSTIC;
+            t->station = truing_acoustic_station_for_spoke(i);
             return true;
         }
     }
@@ -350,6 +350,13 @@ static truing_reason_t session_admission(truing_orchestrator_t *o, uint32_t *art
     if (o->deps.calc == NULL || o->deps.calc->model_available == NULL ||
         !o->deps.calc->model_available(o->deps.calc, o->deps.wheel, &o->solver, &reason, artifact_id, fp)) {
         return reason != TRUING_REASON_NONE ? reason : TRUING_REASON_ARTIFACT_INVALID;
+    }
+    /* A session measures every spoke it is bounded to, so a subsystem that cannot excite one is
+     * refused here rather than discovered spoke by spoke. The orchestrator does not know what
+     * "ready" means - actuators, a front end - only that the subsystem says so. */
+    reason = TRUING_REASON_NONE;
+    if (!truing_acoustic_ready(o->deps.acoustic, &reason)) {
+        return reason != TRUING_REASON_NONE ? reason : TRUING_REASON_EXCITATION_UNAVAILABLE;
     }
     return TRUING_REASON_NONE;
 }
