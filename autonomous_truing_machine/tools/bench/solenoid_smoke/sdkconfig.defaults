@@ -1,0 +1,3 @@
+# The bench sketch takes single-key commands, so the console must be the USB-Serial/JTAG
+# port for input too. The default (UART0 primary, USJ secondary) is output-only on USB.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
