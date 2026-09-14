@@ -81,21 +81,27 @@ static void flush_input(void)
 }
 
 /* Duty ramp from full to 0 over release_ms, in RAMP_STEPS steps. release_ms == 0 is a single
- * hard cutoff -- the original behaviour, kept as the default. */
-static void release(channel_t *ch, uint32_t release_ms)
+ * hard cutoff -- the original behaviour, kept as the default. Returns false the moment any
+ * underlying call fails, so a driver error can never read back as a clean release. */
+static bool release(channel_t *ch, uint32_t release_ms)
 {
     if (release_ms == 0u) {
-        ledc_set_duty_and_update(LEDC_MODE, ch->channel, 0, 0);
-        return;
+        return ledc_set_duty_and_update(LEDC_MODE, ch->channel, 0, 0) == ESP_OK;
     }
     const uint32_t step_us = (release_ms * 1000u) / RAMP_STEPS;
     for (uint32_t i = 1; i <= RAMP_STEPS; i++) {
         const uint32_t duty = (i >= RAMP_STEPS) ? 0u : LEDC_FULL_DUTY - (LEDC_FULL_DUTY * i) / RAMP_STEPS;
-        ledc_set_duty_and_update(LEDC_MODE, ch->channel, duty, 0);
+        if (ledc_set_duty_and_update(LEDC_MODE, ch->channel, duty, 0) != ESP_OK) {
+            return false;
+        }
         esp_rom_delay_us(step_us);
     }
+    return true;
 }
 
+/* Every step's return is checked. A driver failure is reported as a failed fire, never logged
+ * as though the pulse went out -- the earlier revision silently counted these as fires because
+ * ledc_set_duty_and_update()'s result went unchecked; the gate was never actually driven. */
 static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t release_ms)
 {
     const int64_t since_ms = (esp_timer_get_time() - g_last_end_us) / 1000;
@@ -103,11 +109,17 @@ static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t release_ms)
         vTaskDelay(pdMS_TO_TICKS(MIN_GAP_MS - (uint32_t)since_ms));
     }
     const int64_t t0 = esp_timer_get_time();
-    ledc_set_duty_and_update(LEDC_MODE, ch->channel, LEDC_FULL_DUTY, 0);
+    const esp_err_t on_err = ledc_set_duty_and_update(LEDC_MODE, ch->channel, LEDC_FULL_DUTY, 0);
     vTaskDelay(pdMS_TO_TICKS(pulse_ms));
     const int64_t t_hold_end = esp_timer_get_time();
-    release(ch, release_ms);
+    const bool release_ok = release(ch, release_ms);
     g_last_end_us = esp_timer_get_time();
+    if (on_err != ESP_OK || !release_ok) {
+        ESP_LOGE(TAG, "%s (GPIO %d): FAILED, no pulse delivered (on=%s release_ok=%d) -- gate was not driven",
+                  ch->name, ch->gpio, esp_err_to_name(on_err), (int)release_ok);
+        flush_input();
+        return;
+    }
     ch->fires++;
     ESP_LOGI(TAG, "%s #%u (GPIO %d): commanded %u ms hold + %u ms release, measured hold %lld us, "
                   "total %lld us", ch->name, ch->fires, ch->gpio, (unsigned)pulse_ms, (unsigned)release_ms,
@@ -176,6 +188,12 @@ static void ledc_setup(void)
         .hpoint = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&right_ch));
+
+    /* ledc_set_duty_and_update() -- used for every duty change below, ramp or instant -- is
+     * documented to require this once, first. Without it every call fails with "Fade service
+     * not installed" and the gate is never actually driven; fire() now catches that failure
+     * instead of logging a fire that didn't happen, but this is the actual fix. */
+    ESP_ERROR_CHECK(ledc_fade_func_install(0));
 }
 
 void app_main(void)
