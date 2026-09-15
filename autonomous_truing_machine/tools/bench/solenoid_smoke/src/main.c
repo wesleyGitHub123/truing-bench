@@ -28,7 +28,24 @@
  *
  * Every pulse logs its channel, that channel's running count, the push/release ramps used and
  * the esp_timer-measured hold width. Keys typed while a pulse is out are discarded, so holding
- * a key down cannot queue a burst, and fires are spaced at least MIN_GAP_MS apart. */
+ * a key down cannot queue a burst, and fires are spaced at least MIN_GAP_MS apart.
+ *
+ * Manual jog: a live duty knob, held indefinitely, independent of the timed push/hold/release
+ * above -- for watching the actuator's own response as duty is walked up or down by hand, one
+ * step at a time, rather than programming a ramp length and firing it. IMPORTANT: this steps
+ * PWM duty, not an analog voltage. The gate itself is still switched hard between 0 V and
+ * 3.3 V at LEDC_FREQ_HZ the whole time; there is no capacitor at the gate node (and the S3 has
+ * no onboard DAC) to smooth that into a real DC level, so a meter on the gate would read a
+ * fixed-amplitude square wave whose pulse width is changing, not a rising line. What DOES ramp
+ * smoothly is the coil current -- the solenoid's own inductance integrates a switching period
+ * far shorter than its electrical time constant into a genuinely smooth average -- which is
+ * also the thing that sets how hard the plunger pulls. Every jog step logs the duty and the
+ * average voltage that duty corresponds to (duty/FULL_DUTY * 3.3 V), labelled "avg" because
+ * that is what it is -- an average, not a gate measurement.
+ *
+ *   c        select the channel jog acts on (announces the new selection, fires nothing)
+ *   u / d    jog the selected channel's live duty up / down one step (0 floor, full-duty ceiling)
+ *   x        kill -- force both channels' live duty to 0 immediately */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -61,6 +78,8 @@
 #define LEDC_FULL_DUTY  ((1u << 10) - 1u)  /* matches LEDC_RES_BITS */
 #define LEDC_FREQ_HZ    20000u             /* above audible range; far above coil bandwidth */
 #define RAMP_STEPS      20u
+#define GATE_MV         3300u              /* 3.3 V rail, in millivolts, for the avg-voltage log */
+#define MANUAL_DUTY_STEP ((LEDC_FULL_DUTY * 5u) / 100u)  /* ~5% of full duty per jog step */
 
 static const char *TAG = "solenoid_bench";
 
@@ -69,14 +88,21 @@ typedef struct {
     int gpio;
     ledc_channel_t channel;
     unsigned fires;
+    uint32_t live_duty;  /* current jog/hold duty, tracked so status() and 'c' can report it */
 } channel_t;
 
-static channel_t g_left = { "LEFT", LEFT_GPIO, LEDC_CHANNEL_0, 0u };
-static channel_t g_right = { "RIGHT", RIGHT_GPIO, LEDC_CHANNEL_1, 0u };
+static channel_t g_left = { "LEFT", LEFT_GPIO, LEDC_CHANNEL_0, 0u, 0u };
+static channel_t g_right = { "RIGHT", RIGHT_GPIO, LEDC_CHANNEL_1, 0u, 0u };
+static channel_t *g_manual_ch = &g_left;
 static uint32_t g_shot_ms = SHOT_MS_INIT;
 static uint32_t g_push_ms = PUSH_MS_INIT;
 static uint32_t g_release_ms = RELEASE_MS_INIT;
 static int64_t g_last_end_us;
+
+static uint32_t mv_for_duty(uint32_t duty)
+{
+    return (uint32_t)(((uint64_t)duty * GATE_MV) / LEDC_FULL_DUTY);
+}
 
 static void flush_input(void)
 {
@@ -108,6 +134,25 @@ static bool ramp_duty(channel_t *ch, uint32_t from_duty, uint32_t to_duty, uint3
     return true;
 }
 
+/* Sets and holds an absolute duty -- the manual-jog primitive. Unlike ramp_duty() it does not
+ * return to 0 on its own; the duty stays exactly where it's set until the next jog, kill or
+ * fire(). Checked and logged the same way as every other duty write, with the average voltage
+ * that duty corresponds to (see the "Manual jog" note above the key list for what that is and
+ * is not measuring). */
+static bool set_live_duty(channel_t *ch, uint32_t new_duty)
+{
+    const bool ok = ledc_set_duty_and_update(LEDC_MODE, ch->channel, new_duty, 0) == ESP_OK;
+    if (!ok) {
+        ESP_LOGE(TAG, "%s (GPIO %d): jog FAILED at duty %u/%u -- gate may not be at the commanded level",
+                  ch->name, ch->gpio, (unsigned)new_duty, (unsigned)LEDC_FULL_DUTY);
+        return false;
+    }
+    ch->live_duty = new_duty;
+    ESP_LOGI(TAG, "%s (GPIO %d): duty %u/%u, avg ~%u mV", ch->name, ch->gpio, (unsigned)new_duty,
+             (unsigned)LEDC_FULL_DUTY, (unsigned)mv_for_duty(new_duty));
+    return true;
+}
+
 /* Every step's return is checked. A driver failure is reported as a failed fire, never logged
  * as though the pulse went out -- an earlier revision silently counted these as fires because
  * ledc_set_duty_and_update()'s result went unchecked; the gate was never actually driven. */
@@ -124,9 +169,15 @@ static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t push_ms, uint32_t re
     const int64_t t_hold_end = esp_timer_get_time();
     const bool release_ok = ramp_duty(ch, LEDC_FULL_DUTY, 0, release_ms);
     g_last_end_us = esp_timer_get_time();
+    /* A timed fire always intends to leave the gate at 0. On success that's exactly where
+     * release_ok's last step put it; on failure the real hardware duty is whatever the last
+     * successful write left behind, which live_duty can no longer promise to reflect -- 'x'
+     * (kill) is the honest way back to a known state after a FAILED line. */
+    ch->live_duty = 0u;
     if (!push_ok || !release_ok) {
-        ESP_LOGE(TAG, "%s (GPIO %d): FAILED, pulse incomplete (push_ok=%d release_ok=%d) -- gate may not "
-                  "have been driven as commanded", ch->name, ch->gpio, (int)push_ok, (int)release_ok);
+        ESP_LOGE(TAG, "%s (GPIO %d): FAILED, pulse incomplete (push_ok=%d release_ok=%d) -- gate state is "
+                  "not known, press x to force both channels to 0", ch->name, ch->gpio, (int)push_ok,
+                 (int)release_ok);
         flush_input();
         return;
     }
@@ -141,14 +192,17 @@ static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t push_ms, uint32_t re
 static void help(void)
 {
     ESP_LOGI(TAG, "keys: l/r shot LEFT/RIGHT | L/R 500 ms hold | a 10 alternating (any key aborts) | "
-                  "+/- shot width | {/} push ramp | [/] release ramp | s status | ? help");
+                  "+/- shot width | {/} push ramp | [/] release ramp | s status | "
+                  "c/u/d/x manual jog (select/up/down/kill) | ? help");
 }
 
 static void status(void)
 {
     ESP_LOGI(TAG, "shot width %u ms | push ramp %u ms (0 = instant full duty) | release ramp %u ms "
-                  "(0 = instant cutoff) | LEFT fired %u | RIGHT fired %u", (unsigned)g_shot_ms,
-             (unsigned)g_push_ms, (unsigned)g_release_ms, g_left.fires, g_right.fires);
+                  "(0 = instant cutoff) | LEFT fired %u, duty %u/%u | RIGHT fired %u, duty %u/%u | "
+                  "jog selected: %s", (unsigned)g_shot_ms, (unsigned)g_push_ms, (unsigned)g_release_ms,
+             g_left.fires, (unsigned)g_left.live_duty, (unsigned)LEDC_FULL_DUTY, g_right.fires,
+             (unsigned)g_right.live_duty, (unsigned)LEDC_FULL_DUTY, g_manual_ch->name);
 }
 
 static void alternating_run(void)
@@ -278,6 +332,31 @@ void app_main(void)
         case '[':
             g_release_ms = (g_release_ms < RELEASE_MS_STEP) ? 0u : g_release_ms - RELEASE_MS_STEP;
             status();
+            break;
+        /* Manual jog: a live, held duty, independent of the timed shot/push/release above.
+         * See the header comment for what this is and is not driving at the gate. */
+        case 'c':
+            g_manual_ch = (g_manual_ch == &g_left) ? &g_right : &g_left;
+            ESP_LOGI(TAG, "jog now selects %s (currently duty %u/%u)", g_manual_ch->name,
+                     (unsigned)g_manual_ch->live_duty, (unsigned)LEDC_FULL_DUTY);
+            break;
+        case 'u': {
+            const uint32_t next = (g_manual_ch->live_duty > LEDC_FULL_DUTY - MANUAL_DUTY_STEP)
+                                       ? LEDC_FULL_DUTY
+                                       : g_manual_ch->live_duty + MANUAL_DUTY_STEP;
+            set_live_duty(g_manual_ch, next);
+            break;
+        }
+        case 'd': {
+            const uint32_t next =
+                (g_manual_ch->live_duty < MANUAL_DUTY_STEP) ? 0u : g_manual_ch->live_duty - MANUAL_DUTY_STEP;
+            set_live_duty(g_manual_ch, next);
+            break;
+        }
+        case 'x':
+            ESP_LOGW(TAG, "KILL -- forcing both channels to duty 0");
+            set_live_duty(&g_left, 0u);
+            set_live_duty(&g_right, 0u);
             break;
         case 's': status(); break;
         case '?': case 'h': help(); break;
