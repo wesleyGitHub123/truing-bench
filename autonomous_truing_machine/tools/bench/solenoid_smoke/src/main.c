@@ -9,26 +9,43 @@
  *
  *   - "push ms": duty 0 -> full before the hold. 0 = instant full duty (the plunger's own
  *     speed is what limits how fast it reaches the spoke).
- *   - "release ms": duty full -> 0 after the hold. A push solenoid retracts on its own spring
- *     once current stops, and how fast that current collapses through the flyback path (hard
- *     cutoff vs. a duty ramp) is a real, previously uncontrolled variable in how sharp or soft
- *     the release looks and sounds. 0 = instant cutoff, the original behaviour.
+ *   - "release ms": duty full -> 0 after the hold, BEFORE the brake stage below. Measured: this
+ *     only moves WHEN the plunger lets go, not how fast it snaps back once it does. A solenoid's
+ *     holding force stays high until the gap opens and current drops well below the spring
+ *     force, so the ramp spends most of its length not yet releasing, then crosses that
+ *     threshold near its own end -- the actual mechanical release, once it starts, happens at
+ *     roughly the same speed regardless of how this ramp was shaped. Kept for exploring that
+ *     delay and because it's still needed as the approach into the brake stage. 0 = instant.
+ *
+ *   - "brake duty / brake ms": THIS is the one that can actually change how hard the plunger
+ *     hits its stop. After the release ramp above reaches "brake duty" (not necessarily 0), the
+ *     gate is HELD at that duty for "brake ms" before the final instant cutoff -- sustained
+ *     partial current during the plunger's actual travel, opposing the spring the whole way
+ *     back, the same idea as a soft-close door damper resisting the door instead of letting it
+ *     swing free and slam. Finding a duty that meaningfully slows the impact without preventing
+ *     release at all is a bench question with no formula -- jog (below) is one way to find
+ *     roughly where holding force stops being total. Both default to 0, which collapses exactly
+ *     to the old release-ramp-to-instant-cutoff behaviour.
  *
  * Nothing fires on boot. Every activation is one keystroke, so a single observation can be
  * repeated as often as it takes to be sure of it:
  *
- *   l / r    one shot on LEFT / RIGHT at the current shot width, push ramp and release ramp
+ *   l / r    one shot on LEFT / RIGHT at the current shot width, push ramp, release ramp and
+ *            brake
  *   L / R    500 ms hold on LEFT / RIGHT (read V_DS on the meter during it)
  *   a        10 alternating shots, LEFT first, 3 s apart; any key aborts
  *   + / -    shot width +/- 5 ms (5 ms floor, no ceiling)
  *   { / }    push ramp -/+ 5 ms (0 ms floor = instant full duty; no ceiling)
  *   [ / ]    release ramp -/+ 5 ms (0 ms floor = instant cutoff; no ceiling)
- *   s        status: shot width, push ramp, release ramp, per-channel fire counts
+ *   k / K    brake duty -/+ ~5% of full duty (0 floor, full-duty ceiling)
+ *   m / M    brake hold time -/+ 5 ms (0 ms floor = no brake stage; no ceiling)
+ *   s        status: shot width, push/release/brake settings, per-channel fire counts
  *   ? / h    this help
  *
- * Every pulse logs its channel, that channel's running count, the push/release ramps used and
- * the esp_timer-measured hold width. Keys typed while a pulse is out are discarded, so holding
- * a key down cannot queue a burst, and fires are spaced at least MIN_GAP_MS apart.
+ * Every pulse logs its channel, that channel's running count, the push/release/brake settings
+ * used and the esp_timer-measured time in each stage. Keys typed while a pulse is out are
+ * discarded, so holding a key down cannot queue a burst, and fires are spaced at least
+ * MIN_GAP_MS apart.
  *
  * Manual jog: a live duty knob, held indefinitely, independent of the timed push/hold/release
  * above -- for watching the actuator's own response as duty is walked up or down by hand, one
@@ -69,6 +86,9 @@
 #define PUSH_MS_STEP    5u
 #define RELEASE_MS_INIT 0u
 #define RELEASE_MS_STEP 5u
+#define BRAKE_DUTY_INIT 0u
+#define BRAKE_MS_INIT   0u
+#define BRAKE_MS_STEP   5u
 #define RUN_SHOTS       10
 #define RUN_GAP_MS      3000u
 #define MIN_GAP_MS      250u
@@ -80,6 +100,7 @@
 #define RAMP_STEPS      20u
 #define GATE_MV         3300u              /* 3.3 V rail, in millivolts, for the avg-voltage log */
 #define MANUAL_DUTY_STEP ((LEDC_FULL_DUTY * 5u) / 100u)  /* ~5% of full duty per jog step */
+#define BRAKE_DUTY_STEP  ((LEDC_FULL_DUTY * 5u) / 100u)  /* ~5% of full duty per brake-duty step */
 
 static const char *TAG = "solenoid_bench";
 
@@ -97,6 +118,8 @@ static channel_t *g_manual_ch = &g_left;
 static uint32_t g_shot_ms = SHOT_MS_INIT;
 static uint32_t g_push_ms = PUSH_MS_INIT;
 static uint32_t g_release_ms = RELEASE_MS_INIT;
+static uint32_t g_brake_duty = BRAKE_DUTY_INIT;
+static uint32_t g_brake_ms = BRAKE_MS_INIT;
 static int64_t g_last_end_us;
 
 static uint32_t mv_for_duty(uint32_t duty)
@@ -155,8 +178,15 @@ static bool set_live_duty(channel_t *ch, uint32_t new_duty)
 
 /* Every step's return is checked. A driver failure is reported as a failed fire, never logged
  * as though the pulse went out -- an earlier revision silently counted these as fires because
- * ledc_set_duty_and_update()'s result went unchecked; the gate was never actually driven. */
-static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t push_ms, uint32_t release_ms)
+ * ledc_set_duty_and_update()'s result went unchecked; the gate was never actually driven.
+ *
+ * Four stages: push (0 -> full), hold (pulse_ms at full), approach (full -> brake_duty, over
+ * release_ms) and brake (held at brake_duty for brake_ms), then an instant final cutoff to 0.
+ * brake_duty = brake_ms = 0 collapses the last two stages exactly to the pre-brake behaviour:
+ * approach ramps all the way to 0, and the immediately following cutoff-to-0 is a harmless
+ * repeat of what the ramp's own last step already set. */
+static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t push_ms, uint32_t release_ms, uint32_t brake_duty,
+                  uint32_t brake_ms)
 {
     const int64_t since_ms = (esp_timer_get_time() - g_last_end_us) / 1000;
     if (since_ms < (int64_t)MIN_GAP_MS) {
@@ -167,53 +197,63 @@ static void fire(channel_t *ch, uint32_t pulse_ms, uint32_t push_ms, uint32_t re
     const int64_t t_push_end = esp_timer_get_time();
     vTaskDelay(pdMS_TO_TICKS(pulse_ms));
     const int64_t t_hold_end = esp_timer_get_time();
-    const bool release_ok = ramp_duty(ch, LEDC_FULL_DUTY, 0, release_ms);
+    const bool approach_ok = ramp_duty(ch, LEDC_FULL_DUTY, brake_duty, release_ms);
+    const int64_t t_approach_end = esp_timer_get_time();
+    vTaskDelay(pdMS_TO_TICKS(brake_ms));
+    const bool cutoff_ok = ledc_set_duty_and_update(LEDC_MODE, ch->channel, 0, 0) == ESP_OK;
     g_last_end_us = esp_timer_get_time();
-    /* A timed fire always intends to leave the gate at 0. On success that's exactly where
-     * release_ok's last step put it; on failure the real hardware duty is whatever the last
-     * successful write left behind, which live_duty can no longer promise to reflect -- 'x'
-     * (kill) is the honest way back to a known state after a FAILED line. */
+    const bool release_ok = approach_ok && cutoff_ok;
+    /* A timed fire always intends to leave the gate at 0. On success that's exactly where the
+     * final cutoff put it; on failure the real hardware duty is whatever the last successful
+     * write left behind, which live_duty can no longer promise to reflect -- 'x' (kill) is the
+     * honest way back to a known state after a FAILED line. */
     ch->live_duty = 0u;
     if (!push_ok || !release_ok) {
-        ESP_LOGE(TAG, "%s (GPIO %d): FAILED, pulse incomplete (push_ok=%d release_ok=%d) -- gate state is "
-                  "not known, press x to force both channels to 0", ch->name, ch->gpio, (int)push_ok,
-                 (int)release_ok);
+        ESP_LOGE(TAG, "%s (GPIO %d): FAILED, pulse incomplete (push_ok=%d approach_ok=%d cutoff_ok=%d) -- "
+                  "gate state is not known, press x to force both channels to 0", ch->name, ch->gpio,
+                 (int)push_ok, (int)approach_ok, (int)cutoff_ok);
         flush_input();
         return;
     }
     ch->fires++;
-    ESP_LOGI(TAG, "%s #%u (GPIO %d): commanded %u ms push + %u ms hold + %u ms release, measured push %lld "
-                  "us, hold %lld us, total %lld us", ch->name, ch->fires, ch->gpio, (unsigned)push_ms,
-             (unsigned)pulse_ms, (unsigned)release_ms, (long long)(t_push_end - t0),
-             (long long)(t_hold_end - t_push_end), (long long)(g_last_end_us - t0));
+    ESP_LOGI(TAG, "%s #%u (GPIO %d): cmd push %u + hold %u + approach %u ms -> brake %u/%u duty for %u ms -> "
+                  "cutoff | meas push %lld, hold %lld, approach %lld, brake+cutoff %lld, total %lld us",
+             ch->name, ch->fires, ch->gpio, (unsigned)push_ms, (unsigned)pulse_ms, (unsigned)release_ms,
+             (unsigned)brake_duty, (unsigned)LEDC_FULL_DUTY, (unsigned)brake_ms,
+             (long long)(t_push_end - t0), (long long)(t_hold_end - t_push_end),
+             (long long)(t_approach_end - t_hold_end), (long long)(g_last_end_us - t_approach_end),
+             (long long)(g_last_end_us - t0));
     flush_input();
 }
 
 static void help(void)
 {
     ESP_LOGI(TAG, "keys: l/r shot LEFT/RIGHT | L/R 500 ms hold | a 10 alternating (any key aborts) | "
-                  "+/- shot width | {/} push ramp | [/] release ramp | s status | "
-                  "c/u/d/x manual jog (select/up/down/kill) | ? help");
+                  "+/- shot width | {/} push ramp | [/] release ramp | k/K brake duty | m/M brake ms | "
+                  "s status | c/u/d/x manual jog (select/up/down/kill) | ? help");
 }
 
 static void status(void)
 {
-    ESP_LOGI(TAG, "shot width %u ms | push ramp %u ms (0 = instant full duty) | release ramp %u ms "
-                  "(0 = instant cutoff) | LEFT fired %u, duty %u/%u | RIGHT fired %u, duty %u/%u | "
-                  "jog selected: %s", (unsigned)g_shot_ms, (unsigned)g_push_ms, (unsigned)g_release_ms,
+    ESP_LOGI(TAG, "shot width %u ms | push ramp %u ms (0 = instant full duty) | release ramp %u ms | "
+                  "brake %u/%u duty (avg ~%u mV) for %u ms (0 ms = no brake, instant cutoff) | "
+                  "LEFT fired %u, duty %u/%u | RIGHT fired %u, duty %u/%u | jog selected: %s",
+             (unsigned)g_shot_ms, (unsigned)g_push_ms, (unsigned)g_release_ms, (unsigned)g_brake_duty,
+             (unsigned)LEDC_FULL_DUTY, (unsigned)mv_for_duty(g_brake_duty), (unsigned)g_brake_ms,
              g_left.fires, (unsigned)g_left.live_duty, (unsigned)LEDC_FULL_DUTY, g_right.fires,
              (unsigned)g_right.live_duty, (unsigned)LEDC_FULL_DUTY, g_manual_ch->name);
 }
 
 static void alternating_run(void)
 {
-    ESP_LOGI(TAG, "alternating run: %d shots at %u ms push + %u ms hold + %u ms release, %u ms apart, "
-                  "LEFT first -- any key aborts", RUN_SHOTS, (unsigned)g_push_ms, (unsigned)g_shot_ms,
-             (unsigned)g_release_ms, (unsigned)RUN_GAP_MS);
+    ESP_LOGI(TAG, "alternating run: %d shots at %u ms push + %u ms hold + %u ms release + brake %u/%u for "
+                  "%u ms, %u ms apart, LEFT first -- any key aborts", RUN_SHOTS, (unsigned)g_push_ms,
+             (unsigned)g_shot_ms, (unsigned)g_release_ms, (unsigned)g_brake_duty, (unsigned)LEDC_FULL_DUTY,
+             (unsigned)g_brake_ms, (unsigned)RUN_GAP_MS);
     for (int i = 1; i <= RUN_SHOTS; i++) {
         const bool left = (i % 2) == 1;
         ESP_LOGI(TAG, "run shot %d/%d -> %s", i, RUN_SHOTS, left ? "LEFT" : "RIGHT");
-        fire(left ? &g_left : &g_right, g_shot_ms, g_push_ms, g_release_ms);
+        fire(left ? &g_left : &g_right, g_shot_ms, g_push_ms, g_release_ms, g_brake_duty, g_brake_ms);
         uint8_t c;
         if (i < RUN_SHOTS && usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(RUN_GAP_MS)) > 0) {
             ESP_LOGW(TAG, "run aborted after shot %d/%d", i, RUN_SHOTS);
@@ -294,15 +334,15 @@ void app_main(void)
             continue;
         }
         switch (c) {
-        case 'l': fire(&g_left, g_shot_ms, g_push_ms, g_release_ms); break;
-        case 'r': fire(&g_right, g_shot_ms, g_push_ms, g_release_ms); break;
+        case 'l': fire(&g_left, g_shot_ms, g_push_ms, g_release_ms, g_brake_duty, g_brake_ms); break;
+        case 'r': fire(&g_right, g_shot_ms, g_push_ms, g_release_ms, g_brake_duty, g_brake_ms); break;
         case 'L':
             ESP_LOGI(TAG, "LEFT hold -- read V_DS now");
-            fire(&g_left, HOLD_PULSE_MS, g_push_ms, g_release_ms);
+            fire(&g_left, HOLD_PULSE_MS, g_push_ms, g_release_ms, g_brake_duty, g_brake_ms);
             break;
         case 'R':
             ESP_LOGI(TAG, "RIGHT hold -- read V_DS now");
-            fire(&g_right, HOLD_PULSE_MS, g_push_ms, g_release_ms);
+            fire(&g_right, HOLD_PULSE_MS, g_push_ms, g_release_ms, g_brake_duty, g_brake_ms);
             break;
         case 'a': alternating_run(); break;
         /* No ceiling on any of the three knobs -- only enough floor/overflow guard that a run
@@ -331,6 +371,26 @@ void app_main(void)
             break;
         case '[':
             g_release_ms = (g_release_ms < RELEASE_MS_STEP) ? 0u : g_release_ms - RELEASE_MS_STEP;
+            status();
+            break;
+        /* Brake: the duty held during the plunger's return travel, and for how long. Unlike the
+         * release ramp this one is bounded at the top by full duty -- there is no duty above
+         * full, and holding at full is already "never released at all" for brake_ms. */
+        case 'K':
+            g_brake_duty = (g_brake_duty > LEDC_FULL_DUTY - BRAKE_DUTY_STEP) ? LEDC_FULL_DUTY
+                                                                             : g_brake_duty + BRAKE_DUTY_STEP;
+            status();
+            break;
+        case 'k':
+            g_brake_duty = (g_brake_duty < BRAKE_DUTY_STEP) ? 0u : g_brake_duty - BRAKE_DUTY_STEP;
+            status();
+            break;
+        case 'M':
+            g_brake_ms = (g_brake_ms > UINT32_MAX - BRAKE_MS_STEP) ? UINT32_MAX : g_brake_ms + BRAKE_MS_STEP;
+            status();
+            break;
+        case 'm':
+            g_brake_ms = (g_brake_ms < BRAKE_MS_STEP) ? 0u : g_brake_ms - BRAKE_MS_STEP;
             status();
             break;
         /* Manual jog: a live, held duty, independent of the timed shot/push/release above.
