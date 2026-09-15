@@ -42,6 +42,9 @@
  * repeated as often as it takes to be sure of it:
  *
  *   l / r    one shot on LEFT / RIGHT with the whole profile below
+ *   b / v    baseline shot on LEFT / RIGHT -- push/release/brake/catch forced to 0 regardless
+ *            of the tuned knobs below, so a tuned attempt can be A/B'd against plain
+ *            push-hold-instant-cutoff without re-zeroing (and losing) whatever is dialled in
  *   L / R    same, but a HOLD_PULSE_MS hold (read V_DS on the meter during it)
  *   a        10 alternating shots, LEFT first, 3 s apart; any key aborts
  *   + / -    shot width +/- 5 ms (5 ms floor, no ceiling)
@@ -295,7 +298,8 @@ static void fire(channel_t *ch, const shot_profile_t *p)
 
 static void help(void)
 {
-    ESP_LOGI(TAG, "keys: l/r shot LEFT/RIGHT | L/R long hold | a 10 alternating (any key aborts) | "
+    ESP_LOGI(TAG, "keys: l/r shot LEFT/RIGHT | b/v baseline (raw, ignores every knob below) | "
+                  "L/R long hold | a 10 alternating (any key aborts) | "
                   "+/- shot width | {/} push ramp | [/] release ramp | k/K brake duty | m/M brake ms | "
                   "g/G catch duty | t/T catch delay | w/W catch width | s status | "
                   "c/u/d/x manual jog (select/up/down/kill) | ? help");
@@ -313,6 +317,27 @@ static void status(void)
              (unsigned)g_shot.catch_delay_ms, g_left.fires, (unsigned)g_left.live_duty,
              (unsigned)LEDC_FULL_DUTY, g_right.fires, (unsigned)g_right.live_duty,
              (unsigned)LEDC_FULL_DUTY, g_manual_ch->name);
+}
+
+/* A/B reference: fires with every ramp/brake/catch stage forced to 0 -- the plain, original
+ * push/hold/instant-cutoff behaviour -- regardless of whatever the tuned knobs currently hold.
+ * Shot width is kept as-is, so a baseline and a tuned attempt differ in exactly the stages being
+ * tested, nothing else. Without this, comparing against "no extras" means re-zeroing every knob
+ * and losing whatever was being dialled in. */
+static void fire_baseline(channel_t *ch)
+{
+    const shot_profile_t p = {
+        .hold_ms = g_shot.hold_ms,
+        .push_ms = 0u,
+        .release_ms = 0u,
+        .brake_duty = 0u,
+        .brake_ms = 0u,
+        .catch_duty = 0u,
+        .catch_delay_ms = 0u,
+        .catch_width_ms = 0u,
+    };
+    ESP_LOGI(TAG, "BASELINE (raw push/hold/instant-cutoff, no ramps/brake/catch) -- %s", ch->name);
+    fire(ch, &p);
 }
 
 static void alternating_run(void)
@@ -429,6 +454,8 @@ void app_main(void)
         switch (c) {
         case 'l': fire(&g_left, &g_shot); break;
         case 'r': fire(&g_right, &g_shot); break;
+        case 'b': fire_baseline(&g_left); break;
+        case 'v': fire_baseline(&g_right); break;
         case 'L': {
             ESP_LOGI(TAG, "LEFT hold -- read V_DS now");
             shot_profile_t p = g_shot;
