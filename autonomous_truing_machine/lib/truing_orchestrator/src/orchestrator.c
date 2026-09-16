@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "truing/debug_code.h"
+#include "truing_hal/acoustic_real.h"
 #include "truing_hal/records.h"
 
 static const char *const k_step_str[] = { "ADVANCED", "IDLE", "WAITING_OPERATOR", "DELAY", "POLL_NAVIGATION", "TERMINAL" };
@@ -828,6 +830,41 @@ truing_intent_verdict_t truing_orch_submit_intent(truing_orchestrator_t *o, cons
         case TRUING_INTENT_ABORT:
             o->abort_requested = true;
             break;
+        case TRUING_INTENT_DEBUG: {
+            /* Bench-driven, session-free (SPEC §12.5): fires the same one-call acoustic contract
+             * the orchestrator's own MEASURE_SPOKE_TENSION state uses, with the same wheel
+             * geometry dependency -- but the estimate is scratch, discarded right here. It must
+             * never become wheel state, never participate in retry/settle bookkeeping, and
+             * never reach the solver or admission path (rule 4, docs/DEV_NOTES.md). The result is
+             * read back only through the existing /debug/capture.json /.pcm evidence seam. */
+            const truing_debug_code_t code = (truing_debug_code_t)intent->payload.debug.code;
+            if (code == TRUING_DEBUG_CODE_MEASURE_ONCE) {
+                const int32_t arg = intent->payload.debug.arg;
+                if (o->deps.wheel == NULL || arg < 0 || arg >= (int32_t)o->deps.wheel->n_spokes) {
+                    /* TRUING_INTENT_DEBUG is a known, admissible intent (debug_channel_enabled
+                     * already passed); it's this specific code+arg pairing that fails a
+                     * precondition, so REJECT_SESSION_ADMISSION's "admissible in this state, but
+                     * a precondition failed" fits -- REJECT_UNKNOWN reads as "not a recognized
+                     * intent at all," which isn't the case here. */
+                    v = TRUING_INTENT_REJECT_SESSION_ADMISSION;
+                    if (reason_out != NULL) {
+                        *reason_out = TRUING_REASON_VALUE_OUT_OF_RANGE;
+                    }
+                    break;
+                }
+                truing_tension_estimate_t scratch;
+                truing_acoustic_real_mark_debug_measurement(o->deps.acoustic);
+                truing_acoustic_measure(o->deps.acoustic, (uint8_t)arg, o->deps.wheel, 0u, &scratch);
+            } else {
+                /* Same reasoning as above: the intent is a recognized DEBUG intent, only the
+                 * code value inside it isn't implemented yet. */
+                v = TRUING_INTENT_REJECT_SESSION_ADMISSION;
+                if (reason_out != NULL) {
+                    *reason_out = TRUING_REASON_NOT_IMPLEMENTED;
+                }
+            }
+            break;
+        }
         default:
             break;
         }

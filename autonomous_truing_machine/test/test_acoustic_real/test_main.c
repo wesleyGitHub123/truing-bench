@@ -1069,6 +1069,49 @@ static void test_workflow_with_real_acoustic_layers_reaches_converged_geometric_
            (unsigned long)r->actx.calls, (unsigned long)r->actx.estimates);
 }
 
+/* ---- SPEC §12.5 MEASURE_ONCE provenance: debug_triggered ------------------------------------
+ *
+ * The safety discriminator the debug channel's capture evidence carries: a capture the
+ * orchestrator's own state machine produced must read debug_triggered == false, one the debug
+ * channel's MEASURE_ONCE produced must read true, and the mark must not outlive the ONE
+ * measurement it was set for. */
+static void test_debug_triggered_marks_only_the_measurement_it_was_set_for(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+
+    truing_tension_estimate_t e;
+    truing_acoustic_capture_view_t v;
+
+    /* An ordinary, orchestrator-driven measurement: nothing marked it. */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.debug_triggered);
+
+    /* MEASURE_ONCE's own call shape: mark, then measure. */
+    truing_acoustic_real_mark_debug_measurement(&a);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.debug_triggered);
+
+    /* One-shot: the very next measurement, unmarked, reads false again. */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.debug_triggered);
+
+    /* A no-op for anything that is not this implementation -- must not crash. */
+    truing_acoustic_if_t sim;
+    truing_acoustic_synthetic_ctx_t simctx;
+    truing_acoustic_synthetic_init(&sim, &simctx, g_clock, 32u, TRUING_TENSION_MODEL_IDEAL_STRING, 1u);
+    truing_acoustic_real_mark_debug_measurement(&sim);
+    src.close(&src);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1092,6 +1135,7 @@ int main(void)
     RUN_TEST(test_capture_pending_is_false_after_an_analyze_words_replay);
     RUN_TEST(test_capture_pending_is_false_for_a_non_real_implementation);
     RUN_TEST(test_reset_session_discards_state_no_measurement_consumed);
+    RUN_TEST(test_debug_triggered_marks_only_the_measurement_it_was_set_for);
     RUN_TEST(test_workflow_with_real_acoustic_layers_reaches_converged_geometric_only);
     return UNITY_END();
 }

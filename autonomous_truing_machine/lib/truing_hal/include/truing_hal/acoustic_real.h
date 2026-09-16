@@ -73,6 +73,12 @@ typedef struct {
     uint32_t capture_overrun_events;
     uint32_t ring_age_us;
     uint32_t worst_read_gap_us;
+    /* True iff this capture was fired by the debug channel's MEASURE_ONCE (SPEC §12.5), not by
+     * the orchestrator's own state machine. A safety discriminator: it must never be easy for
+     * campaign tooling, or any future report generator reading /debug/capture.json, to mistake
+     * a bench-triggered capture for real session evidence. Defaults false; set only by
+     * truing_acoustic_real_mark_debug_measurement() and consumed exactly once. */
+    bool     debug_triggered;
 } truing_acoustic_real_diag_t;
 
 /* The excitation actuators, one per acoustic station, indexed by truing_acoustic_station_slot().
@@ -133,6 +139,11 @@ typedef struct {
     uint32_t                           last_attempt;
     truing_status_t                    last_status;
     truing_reason_t                    last_reason;
+    /* One-shot: set by truing_acoustic_real_mark_debug_measurement(), read and cleared by the
+     * very next measure_run() -- AFTER that call's diag reset, never before it, so it survives
+     * to land in the diag it was meant to mark rather than being wiped by it. A call that never
+     * arrives leaves this false, which is the ordinary (non-debug) case. */
+    bool                                debug_triggered_pending;
     /* capture_seq bumps the instant the buffer starts changing (SPEC §12.5); last_status/
      * last_reason are not written until note_outcome() runs, which can be well after that --
      * analyze() alone is seconds of arithmetic. outcome_seq catches up to capture_seq exactly
@@ -161,6 +172,14 @@ bool truing_acoustic_real_init(truing_acoustic_if_t *self, truing_acoustic_real_
  * never by the orchestrator. Safe to leave unset: the subsystem then emits nothing at all. */
 void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx);
 
+/* Mark the NEXT measurement on this interface as debug-triggered (SPEC §12.5 MEASURE_ONCE):
+ * its diag.debug_triggered will read true, once, and then the flag clears itself. Called by
+ * the orchestrator's debug dispatch immediately before truing_acoustic_measure(), never by the
+ * measurement path itself. A no-op for anything that is not this implementation, mirroring
+ * every other truing_acoustic_real_* query below. Not part of acoustic_if.h: the orchestrator's
+ * contract with the acoustic subsystem stays one call in, one estimate out (SPEC §9.1) -- this
+ * is provenance, wired the same way the observer is, and changes no measurement outcome. */
+void truing_acoustic_real_mark_debug_measurement(truing_acoustic_if_t *self);
 
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */

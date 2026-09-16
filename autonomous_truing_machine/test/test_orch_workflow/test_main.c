@@ -6,6 +6,7 @@
 #include <unity.h>
 
 #include "../support/test_records.h"
+#include "truing/debug_code.h"
 #include "truing_calc/calc_if.h"
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/acoustic_if.h"
@@ -945,6 +946,74 @@ static void test_state_within_tolerance_skips_apply_and_does_not_remeasure(void)
     TEST_ASSERT_EQUAL_UINT32(1u, g.sctx.state_entries[TRUING_STATE_VERIFY]);
 }
 
+/* ---- SPEC §12.5 MEASURE_ONCE: the debug channel's one-shot acoustic measurement, with no
+ * orchestrator session (docs/DEV_NOTES.md rule 4: wheel state is data -- it holds measurements,
+ * it does not acquire them). Fired here right after rig_build(), before any START_TRUING and
+ * with the session machinery never touched, to demonstrate the "no session" half of the claim
+ * as well as the "does not mutate wheel_state" half. */
+static truing_intent_t debug_intent(truing_debug_code_t code, int32_t arg)
+{
+    truing_intent_t i;
+    memset(&i, 0, sizeof(i));
+    i.type = TRUING_INTENT_DEBUG;
+    i.payload.debug.code = (uint16_t)code;
+    i.payload.debug.arg = arg;
+    return i;
+}
+
+static void test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_untouched(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    g.orch.deps.debug_channel_enabled = true;   /* SPEC §12.5: development only, set explicitly */
+
+    const truing_wheel_state_t before = g.orch.wheel_state;
+    const uint32_t calls_before = g.actx.calls;
+
+    truing_reason_t reason = TRUING_REASON_NONE;
+    truing_intent_t once = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, 3);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &once, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NONE, reason);
+
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1u, g.actx.calls);   /* exactly one acoustic call */
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));   /* untouched */
+
+    /* A second call fires again -- MEASURE_ONCE is repeatable, not a latch. */
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &once, &reason));
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 2u, g.actx.calls);
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
+}
+
+static void test_measure_once_with_bad_spoke_or_code_fails_safely(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    g.orch.deps.debug_channel_enabled = true;
+    const truing_wheel_state_t before = g.orch.wheel_state;
+    const uint32_t calls_before = g.actx.calls;
+
+    /* Out of range for a 32-spoke wheel (valid indices 0..31). */
+    truing_reason_t reason = TRUING_REASON_NONE;
+    truing_intent_t oob = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, 99);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, truing_orch_submit_intent(&g.orch, &oob, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, reason);
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);   /* never reached the acoustic call */
+
+    /* Negative, still out of range. */
+    reason = TRUING_REASON_NONE;
+    truing_intent_t neg = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, -1);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, truing_orch_submit_intent(&g.orch, &neg, &reason));
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);
+
+    /* Unrecognized debug code, valid spoke. */
+    reason = TRUING_REASON_NONE;
+    truing_intent_t bad_code = debug_intent((truing_debug_code_t)77, 0);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, truing_orch_submit_intent(&g.orch, &bad_code, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NOT_IMPLEMENTED, reason);
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);
+
+    /* No crash, no mutation, whatever the failure. */
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -975,5 +1044,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_abort_at_a_wait_does_not_carry_a_cancel_into_the_next_session);
     RUN_TEST(test_abort_after_a_runout_entry_does_not_carry_into_the_next_session);
     RUN_TEST(test_state_within_tolerance_skips_apply_and_does_not_remeasure);
+    RUN_TEST(test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_untouched);
+    RUN_TEST(test_measure_once_with_bad_spoke_or_code_fails_safely);
     return UNITY_END();
 }

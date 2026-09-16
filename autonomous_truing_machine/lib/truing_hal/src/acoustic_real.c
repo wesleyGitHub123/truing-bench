@@ -304,6 +304,10 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     c->diag.station = c->attempt_station;
     c->diag.fired = true;
     c->diag.pulse_ms = pulse_ms;
+    /* Consumed exactly once, and only after the reset above: a flag applied before it would
+     * have been wiped by the memset it was meant to survive (SPEC §12.5). */
+    c->diag.debug_triggered = c->debug_triggered_pending;
+    c->debug_triggered_pending = false;
     if (act->fire_report != NULL) {
         truing_pluck_fire_report_t rpt;
         if (act->fire_report(act, &rpt)) {
@@ -440,6 +444,14 @@ void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoust
     c->observer_ctx = observer_ctx;
 }
 
+void truing_acoustic_real_mark_debug_measurement(truing_acoustic_if_t *self)
+{
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return;
+    }
+    ((truing_acoustic_real_ctx_t *)self->ctx)->debug_triggered_pending = true;
+}
+
 static void real_cancel(truing_acoustic_if_t *self)
 {
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
@@ -492,6 +504,11 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
     c->diag.snr_db = NAN;
     c->diag.l_eff_m = NAN;
     c->diag.pulse_ms = NAN;
+    /* Same one-shot rule as measure_run(): read after the reset, then cleared, so a mark left
+     * over from some other path can never bleed into a capture it was not meant for. Replay
+     * never originates a MEASURE_ONCE call itself, so this is ordinarily a no-op. */
+    c->diag.debug_triggered = c->debug_triggered_pending;
+    c->debug_triggered_pending = false;
     c->capture_seq++;   /* replay overwrites the same buffer a dump would be reading */
     memcpy(c->words, words, (size_t)n * sizeof(int32_t));
     c->diag.n_captured = n;

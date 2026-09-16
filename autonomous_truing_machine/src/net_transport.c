@@ -435,6 +435,11 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     /* Provenance: which board, which build, and above all whether these words came off a
      * microphone or out of the synthetic source (SPEC §6.2). */
     truing_json_str(&w, "source", truing_source_impl_str(truing_demo_acoustic_source()));
+    /* Unconditional, never gated like the optional audio-diagnostic block below: a safety
+     * discriminator so campaign tooling, or any future report generator reading this document,
+     * can never mistake a bench-triggered MEASURE_ONCE capture (SPEC §12.5) for real session
+     * evidence by its absence. */
+    truing_json_bool(&w, "debug_triggered", v.diag.debug_triggered);
     truing_json_str(&w, "board", BOARD_NAME);
     truing_json_str(&w, "build", TRUING_BUILD_REV);
     truing_json_str(&w, "ui", TRUING_UI_HASH);
