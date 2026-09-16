@@ -40,6 +40,12 @@
  *                          uncollected because the active layout does not contain them.
  *                          Legal only while that is true - see the run-time guard below.
  *
+ *   FAST DEMO + MIC +      the campaign bench variant of the line above (TRUING_CAMPAIGN_DEBUG):
+ *   CAMPAIGN               same wiring, plus the debug channel (SPEC §12.5) so MEASURE_ONCE can
+ *                          drive a single station capture outside a session for bench
+ *                          characterization (docs/SOLENOID_CAMPAIGN.md). Only this dedicated
+ *                          build carries it; the demo image the audience sees never does.
+ *
  * Fast demo is deliberately NOT self-play with a nicer label. Self-play leaves the REAL
  * manual implementations in place and has a robot press the buttons, which is right for a
  * test rig and wrong for a demonstration: provenance would record runout_manual/REAL for
@@ -99,9 +105,28 @@
 #error "TRUING_ACOUSTIC_DEMO_SPOKES is the fast-demo acoustic image only: the real machine measures every spoke."
 #endif
 
+#ifndef TRUING_CAMPAIGN_DEBUG
+#define TRUING_CAMPAIGN_DEBUG 0
+#endif
+
+/* TRUING_CAMPAIGN_DEBUG unlocks the debug channel (SPEC §12.5: development/bring-up only,
+ * never the demonstration script) on the acoustic-demo image family, so MEASURE_ONCE-style
+ * bench characterization (single capture, no session, docs/SOLENOID_CAMPAIGN.md) can be run
+ * against the same real INMP441 front end and station excitation the demo uses, without a
+ * full session's positioning and runout waits in the way. It is legal only stacked on top of
+ * the acoustic demonstration combination — a bench build, not a new image family — and the
+ * demo image itself (`nano_esp32_fastdemo_mic`) must never carry it: that image is what gets
+ * shown to an audience, and the debug channel is a bench tool, not a script that runs
+ * unattended in front of one. */
+#if TRUING_CAMPAIGN_DEBUG && !(TRUING_FAST_DEMO && TRUING_REAL_FRONT_END)
+#error "TRUING_CAMPAIGN_DEBUG is the acoustic-demo bench variant only: it needs both TRUING_FAST_DEMO and TRUING_REAL_FRONT_END."
+#endif
+
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441+campaign"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441"
 #elif TRUING_FAST_DEMO
 #define TRUING_BUILD_MODE_STR "fastdemo"

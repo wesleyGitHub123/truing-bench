@@ -518,6 +518,14 @@ static void demo_task(void *arg)
                       "uncollected while the active layout is TENSION_ABSENT. Not a physical wheel measurement.",
                  (int)TRUING_ACOUSTIC_DEMO_SPOKES);
     }
+    /* False in every image but the campaign bench build: TRUING_CAMPAIGN_DEBUG is the only
+     * thing that ever sets this true, so TRUING_INTENT_DEBUG (SPEC §12.5, MEASURE_ONCE) stays
+     * unreachable everywhere else, including the demo image the audience sees. */
+    deps.debug_channel_enabled = TRUING_CAMPAIGN_DEBUG ? true : false;
+    if (TRUING_CAMPAIGN_DEBUG) {
+        ESP_LOGW(TAG, "CAMPAIGN DEBUG BUILD: the debug channel is enabled (SPEC 12.5). Bench "
+                      "characterization only, never the demonstration script.");
+    }
     /* The interface structs are re-initialised IN PLACE when the path changes, so these
      * pointers stay valid and keep pointing at whichever implementation is wired now. */
     s.deps = deps;
