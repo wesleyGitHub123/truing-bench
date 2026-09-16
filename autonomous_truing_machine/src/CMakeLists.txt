@@ -6,7 +6,7 @@ idf_component_register(
     SRCS ${app_sources}
     INCLUDE_DIRS "."
     REQUIRES nvs_flash esp_psram esp_hw_support esp_system spi_flash esp_timer log esp_driver_i2s esp_driver_gpio
-             esp_wifi esp_netif esp_event esp_http_server
+             esp_driver_gptimer esp_wifi esp_netif esp_event esp_http_server
 )
 
 # The recorded campaign excerpts used by the on-target acoustic parity check (SPEC §14.2) are

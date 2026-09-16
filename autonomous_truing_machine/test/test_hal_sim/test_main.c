@@ -306,6 +306,32 @@ static void test_pluck_fake_counts_commands_and_reports_failures(void)
     TEST_ASSERT_EQUAL_UINT32(2u, ctx.fires);
 }
 
+/* fire_report is additive and optional on the vtable (SPEC-adjacent seam, pluck_if.h): a fresh
+ * pluck_if_t must have it set to something callable, never left as whatever garbage was on the
+ * caller's stack - the two lines below are the actual regression this guards, since it was a
+ * real bug class the first time a new function-pointer field was added to this struct. */
+static void test_pluck_fake_reports_the_completed_fire_not_the_attempted_one(void)
+{
+    truing_pluck_if_t pl;
+    truing_pluck_fake_ctx_t ctx;
+    truing_pluck_fire_report_t rpt;
+
+    truing_pluck_fake_init(&pl, &ctx, true);
+    TEST_ASSERT_NOT_NULL(pl.fire_report);   /* the vtable slot is populated, not left uninitialised */
+    TEST_ASSERT_FALSE(pl.fire_report(&pl, &rpt));   /* nothing has fired yet */
+
+    TEST_ASSERT_TRUE(pl.fire(&pl, 12.5f));
+    TEST_ASSERT_TRUE(pl.fire_report(&pl, &rpt));
+    TEST_ASSERT_EQUAL_UINT32(12500u, rpt.pulse_us_measured);   /* commanded width, exactly */
+    TEST_ASSERT_FALSE(rpt.hardware_timed);   /* the fake is not hardware, and does not claim to be */
+
+    /* A failed fire never completed, so it must not clobber the last real report. */
+    ctx.fail_next = true;
+    TEST_ASSERT_FALSE(pl.fire(&pl, 999.0f));
+    TEST_ASSERT_TRUE(pl.fire_report(&pl, &rpt));
+    TEST_ASSERT_EQUAL_UINT32(12500u, rpt.pulse_us_measured);
+}
+
 /* The acoustic subsystem's station convention: spoke 0 is the LEFT actuator's, alternating. */
 static void test_acoustic_station_for_spoke_alternates_from_left(void)
 {
@@ -323,6 +349,7 @@ int main(int argc, char **argv)
     UNITY_BEGIN();
     RUN_TEST(test_fake_clock);
     RUN_TEST(test_pluck_fake_counts_commands_and_reports_failures);
+    RUN_TEST(test_pluck_fake_reports_the_completed_fire_not_the_attempted_one);
     RUN_TEST(test_acoustic_stub_returns_status_not_a_number);
     RUN_TEST(test_acoustic_synthetic_is_provisional_and_storable);
     RUN_TEST(test_runout_stub_reports_every_capability_absent);

@@ -136,6 +136,10 @@ static void test_capture_evidence_replays_to_the_same_measurement(void)
     TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_RIGHT, v.diag.station);
     TEST_ASSERT_TRUE(v.diag.fired);
     TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[1], v.diag.pulse_ms);
+    /* pluck_fake reports too (deterministic: the commanded width, exactly) - this is the same
+     * fire_report seam pluck_gpio uses to report its hardware-timed measurement on target. */
+    TEST_ASSERT_TRUE(v.diag.pulse_measured);
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)(g_excitation.pulse_ms[1] * 1000.0f), v.diag.pulse_us_measured);
 
     /* Take the evidence away exactly as a dump would, then replay it. */
     const uint32_t n = v.n_words;
@@ -336,6 +340,44 @@ static void test_each_spoke_fires_only_its_own_stations_actuator(void)
     TEST_ASSERT_EQUAL_FLOAT(35.0f, g_pctx[1].last_pulse_ms);
     TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_RIGHT, g_obs.ev[0].u.acoustic.station);
     TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    src.close(&src);
+}
+
+static bool minimal_available(truing_pluck_if_t *self) { (void)self; return true; }
+static bool minimal_fire(truing_pluck_if_t *self, float pulse_ms) { (void)self; return pulse_ms > 0.0f; }
+
+/* fire_report is optional per pluck_if.h -- NULL means "not supported". An actuator that
+ * predates this seam, or simply never implements it, must still let a measurement complete
+ * cleanly: fired stays true, but nothing claims a measured width that was never reported. */
+static void test_an_actuator_without_fire_report_still_measures_cleanly(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+
+    truing_pluck_if_t minimal;
+    memset(&minimal, 0, sizeof(minimal));
+    minimal.impl_name = "minimal_no_report";
+    minimal.source_impl = TRUING_SOURCE_REAL;
+    minimal.available = minimal_available;
+    minimal.fire = minimal_fire;
+    minimal.fire_report = NULL;   /* the case under test */
+
+    truing_acoustic_actuators_t act;
+    act.at[0] = &minimal;
+    act.at[1] = &minimal;
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &act, g_scratch, g_scratch_bytes, &detail));
+
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.fired);
+    TEST_ASSERT_FALSE(v.diag.pulse_measured);       /* no report available -- must stay false */
+    TEST_ASSERT_EQUAL_UINT32(0u, v.diag.pulse_us_measured);
     src.close(&src);
 }
 
@@ -836,6 +878,7 @@ int main(void)
     RUN_TEST(test_phase_events_report_the_measurement_lifecycle_in_order);
     RUN_TEST(test_a_silent_capture_reports_listening_but_never_an_onset);
     RUN_TEST(test_each_spoke_fires_only_its_own_stations_actuator);
+    RUN_TEST(test_an_actuator_without_fire_report_still_measures_cleanly);
     RUN_TEST(test_a_failed_fire_rejects_the_attempt_before_any_capture);
     RUN_TEST(test_a_missing_actuator_rejects_its_station_and_is_not_ready);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);

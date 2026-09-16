@@ -63,6 +63,8 @@ typedef struct {
     uint8_t  station;                   /* truing_station_id_t whose actuator excited these words; UNSET on replay */
     bool     fired;                     /* that actuator was commanded for this capture */
     float    pulse_ms;                  /* the pulse it was commanded with; NaN when not fired */
+    bool     pulse_measured;            /* the actuator reported a measured width for this fire */
+    uint32_t pulse_us_measured;         /* that measured width, in us; 0 unless pulse_measured */
 } truing_acoustic_real_diag_t;
 
 /* The excitation actuators, one per acoustic station, indexed by truing_acoustic_station_slot().

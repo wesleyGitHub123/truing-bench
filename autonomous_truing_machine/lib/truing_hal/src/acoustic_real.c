@@ -304,6 +304,13 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     c->diag.station = c->attempt_station;
     c->diag.fired = true;
     c->diag.pulse_ms = pulse_ms;
+    if (act->fire_report != NULL) {
+        truing_pluck_fire_report_t rpt;
+        if (act->fire_report(act, &rpt)) {
+            c->diag.pulse_measured = true;
+            c->diag.pulse_us_measured = rpt.pulse_us_measured;
+        }
+    }
     c->capture_seq++;   /* the buffer is about to change under any reader (SPEC §12.5) */
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
     c->diag.capture_result = r;
