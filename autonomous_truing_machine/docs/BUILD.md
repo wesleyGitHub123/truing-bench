@@ -282,12 +282,26 @@ The record says what it holds and why: provenance carries `tension_sample_limit`
 so three tension records on a 32-spoke wheel can never be read as a wheel that was measured
 and mostly failed.
 
+### The campaign bench variant (`nano_esp32_fastdemo_mic_campaign`)
+
+Same wiring as `nano_esp32_fastdemo_mic` above, plus `-DTRUING_CAMPAIGN_DEBUG=1`. This is the
+only environment where `deps.debug_channel_enabled` is ever set true, which is what makes
+`TRUING_INTENT_DEBUG` (SPEC §12.5) admissible at all — everywhere else, including the demo
+image itself, it rejects with `REJECT_DEBUG_DISABLED` regardless of anything a client sends.
+Admission is still further restricted to `TRUING_STATE_READY` with no session running, so
+`MEASURE_ONCE` (the one debug code currently defined, `docs/SOLENOID_CAMPAIGN_PLAN.md` item
+10) can fire a single station capture for bench characterization, but can never be reached
+once a real session has started. `GET /id` reports this image as
+`"mode":"fastdemo+inmp441+campaign"`. Nano-only: campaign bench work runs against the board
+the INMP441 is actually wired to (`docs/SOLENOID_CAMPAIGN.md`); there is no DevKit variant.
+
 ```bash
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit_fastdemo -t upload   # accelerated demonstration
 pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the physical-path image
 pio run -d %USERPROFILE%\truing_ws -e nano_esp32_mic -t upload        # the physical INMP441 front end
 pio run -d %USERPROFILE%\truing_ws -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
+pio run -d %USERPROFILE%\truing_ws -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant
 ```
 
 The boot banner says which one is running, and so does `GET /id`:
