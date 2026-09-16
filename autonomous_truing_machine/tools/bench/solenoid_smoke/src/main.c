@@ -47,6 +47,10 @@
  *            push-hold-instant-cutoff without re-zeroing (and losing) whatever is dialled in
  *   L / R    same, but a HOLD_PULSE_MS hold (read V_DS on the meter during it)
  *   a        10 alternating shots, LEFT first, 3 s apart; any key aborts
+ *   A        one-person V_DS check: alternating long holds (baseline profile), each with a
+ *            lead-in announcement first so the meter goes on target BEFORE it fires -- unlike
+ *            l/r/L/R this doesn't require you to already be on the right MOSFET when you press
+ *            the key; any key aborts
  *   + / -    shot width +/- 5 ms (5 ms floor, no ceiling)
  *   { / }    push ramp -/+ 5 ms (0 ms floor = instant full duty; no ceiling)
  *   [ / ]    release ramp -/+ 5 ms (0 ms floor = instant; no ceiling)
@@ -114,6 +118,9 @@
 #define CATCH_MS_STEP    1u   /* 1 ms: the transient this has to land inside is short */
 #define RUN_SHOTS        10
 #define RUN_GAP_MS       3000u
+#define VDS_LEADIN_MS    4000u  /* time to get the meter on target before the hold fires */
+#define VDS_HOLD_MS      4000u  /* long enough for a stable multimeter reading */
+#define VDS_CYCLES       2      /* LEFT/RIGHT cycles -- 2 holds per channel */
 #define MIN_GAP_MS       250u
 
 #define LEDC_MODE       LEDC_LOW_SPEED_MODE
@@ -299,9 +306,9 @@ static void fire(channel_t *ch, const shot_profile_t *p)
 static void help(void)
 {
     ESP_LOGI(TAG, "keys: l/r shot LEFT/RIGHT | b/v baseline (raw, ignores every knob below) | "
-                  "L/R long hold | a 10 alternating (any key aborts) | "
-                  "+/- shot width | {/} push ramp | [/] release ramp | k/K brake duty | m/M brake ms | "
-                  "g/G catch duty | t/T catch delay | w/W catch width | s status | "
+                  "L/R long hold | a 10 alternating | A one-person V_DS check (lead-in + long "
+                  "holds) | +/- shot width | {/} push ramp | [/] release ramp | k/K brake duty | "
+                  "m/M brake ms | g/G catch duty | t/T catch delay | w/W catch width | s status | "
                   "c/u/d/x manual jog (select/up/down/kill) | ? help");
 }
 
@@ -319,15 +326,14 @@ static void status(void)
              (unsigned)LEDC_FULL_DUTY, g_manual_ch->name);
 }
 
-/* A/B reference: fires with every ramp/brake/catch stage forced to 0 -- the plain, original
- * push/hold/instant-cutoff behaviour -- regardless of whatever the tuned knobs currently hold.
- * Shot width is kept as-is, so a baseline and a tuned attempt differ in exactly the stages being
- * tested, nothing else. Without this, comparing against "no extras" means re-zeroing every knob
- * and losing whatever was being dialled in. */
-static void fire_baseline(channel_t *ch)
+/* Every ramp/brake/catch stage forced to 0 -- the plain push/hold/instant-cutoff behaviour --
+ * with the given hold. Shared by fire_baseline() (A/B reference, keeps the tuned shot width) and
+ * vds_check_run() (a long fixed hold for meter reads), so "what a clean shot looks like" is
+ * defined in exactly one place. */
+static shot_profile_t baseline_profile(uint32_t hold_ms)
 {
     const shot_profile_t p = {
-        .hold_ms = g_shot.hold_ms,
+        .hold_ms = hold_ms,
         .push_ms = 0u,
         .release_ms = 0u,
         .brake_duty = 0u,
@@ -336,6 +342,17 @@ static void fire_baseline(channel_t *ch)
         .catch_delay_ms = 0u,
         .catch_width_ms = 0u,
     };
+    return p;
+}
+
+/* A/B reference: fires with every ramp/brake/catch stage forced to 0 -- the plain, original
+ * push/hold/instant-cutoff behaviour -- regardless of whatever the tuned knobs currently hold.
+ * Shot width is kept as-is, so a baseline and a tuned attempt differ in exactly the stages being
+ * tested, nothing else. Without this, comparing against "no extras" means re-zeroing every knob
+ * and losing whatever was being dialled in. */
+static void fire_baseline(channel_t *ch)
+{
+    const shot_profile_t p = baseline_profile(g_shot.hold_ms);
     ESP_LOGI(TAG, "BASELINE (raw push/hold/instant-cutoff, no ramps/brake/catch) -- %s", ch->name);
     fire(ch, &p);
 }
@@ -357,6 +374,41 @@ static void alternating_run(void)
         }
     }
     ESP_LOGI(TAG, "alternating run done");
+}
+
+/* One-person V_DS check: alternating long holds, each with a lead-in announcement first. The
+ * problem this solves: 'l'/'r'/'L'/'R' fire the instant the key is received, so by the time you
+ * look up at the meter the window may already be over, and a short hold gives the display no
+ * time to settle even if you don't miss it. Here the countdown happens BEFORE the hold, so the
+ * probes go on the right MOSFET while it's still off, and the hold itself is long enough to read
+ * a stable value once it's on. Runs the baseline profile -- push/release/brake/catch stages are
+ * irrelevant to a steady-state hold, and forcing them off keeps a catch pulse from firing well
+ * after the operator has already moved to the next channel. */
+static void vds_check_run(void)
+{
+    const int total = VDS_CYCLES * 2;
+    ESP_LOGI(TAG, "V_DS check: %d holds (%d LEFT/RIGHT cycles), %u ms lead-in then %u ms hold each -- "
+                  "any key aborts", total, VDS_CYCLES, (unsigned)VDS_LEADIN_MS, (unsigned)VDS_HOLD_MS);
+    for (int i = 1; i <= total; i++) {
+        const bool left = (i % 2) == 1;
+        channel_t *ch = left ? &g_left : &g_right;
+        ESP_LOGI(TAG, "%d/%d: get the meter on %s (GPIO %d) now -- hold starts in %u ms", i, total, ch->name,
+                 ch->gpio, (unsigned)VDS_LEADIN_MS);
+        uint8_t c;
+        if (usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(VDS_LEADIN_MS)) > 0) {
+            ESP_LOGW(TAG, "V_DS check aborted during lead-in, %d/%d", i, total);
+            flush_input();
+            return;
+        }
+        ESP_LOGI(TAG, "%s (GPIO %d) holding now (%u ms) -- read V_DS", ch->name, ch->gpio,
+                 (unsigned)VDS_HOLD_MS);
+        const shot_profile_t p = baseline_profile(VDS_HOLD_MS);
+        fire(ch, &p);
+        if (i < total) {
+            ESP_LOGI(TAG, "hold done -- next lead-in starts now");
+        }
+    }
+    ESP_LOGI(TAG, "V_DS check done");
 }
 
 /* Duty knobs are clamped at full duty -- there is no duty above full. Time knobs have no
@@ -471,6 +523,7 @@ void app_main(void)
             break;
         }
         case 'a': alternating_run(); break;
+        case 'A': vds_check_run(); break;
         case '+': g_shot.hold_ms = ms_up(g_shot.hold_ms, SHOT_MS_STEP); status(); break;
         case '-': g_shot.hold_ms = ms_down(g_shot.hold_ms, SHOT_MS_STEP, SHOT_MS_MIN); status(); break;
         case '}': g_shot.push_ms = ms_up(g_shot.push_ms, PUSH_MS_STEP); status(); break;
