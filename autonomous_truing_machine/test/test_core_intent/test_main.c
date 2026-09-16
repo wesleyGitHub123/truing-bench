@@ -150,6 +150,10 @@ static void test_per_intent_admissibility(void)
     i.type = TRUING_INTENT_DEBUG;
     TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_DEBUG_DISABLED, truing_intent_admissible(TRUING_STATE_READY, &g_c, &i, false));
     TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_intent_admissible(TRUING_STATE_READY, &g_c, &i, true));
+    /* Enabled is not enough on its own: a session running (any state but READY) must still
+     * refuse DEBUG, so MEASURE_ONCE can never land mid-session (SOLENOID_CAMPAIGN_PLAN.md). */
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_STATE, truing_intent_admissible(TRUING_STATE_WAIT_FOR_OPERATOR, &g_c, &i, true));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_STATE, truing_intent_admissible(TRUING_STATE_MEASURE_SPOKE_TENSION, &g_c, &i, true));
 
     i.type = TRUING_INTENT_UNSET;
     TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_UNKNOWN, truing_intent_admissible(TRUING_STATE_READY, &g_c, &i, true));

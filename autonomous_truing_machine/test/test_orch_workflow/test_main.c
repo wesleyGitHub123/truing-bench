@@ -964,6 +964,7 @@ static truing_intent_t debug_intent(truing_debug_code_t code, int32_t arg)
 static void test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_untouched(void)
 {
     rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);   /* DEBUG is admitted only in READY, with no session (plan doc) */
     g.orch.deps.debug_channel_enabled = true;   /* SPEC §12.5: development only, set explicitly */
 
     const truing_wheel_state_t before = g.orch.wheel_state;
@@ -986,6 +987,7 @@ static void test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_unt
 static void test_measure_once_with_bad_spoke_or_code_fails_safely(void)
 {
     rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);   /* DEBUG is admitted only in READY, with no session (plan doc) */
     g.orch.deps.debug_channel_enabled = true;
     const truing_wheel_state_t before = g.orch.wheel_state;
     const uint32_t calls_before = g.actx.calls;
@@ -1011,6 +1013,29 @@ static void test_measure_once_with_bad_spoke_or_code_fails_safely(void)
     TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);
 
     /* No crash, no mutation, whatever the failure. */
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
+}
+
+/* The regression this admission change exists for: MEASURE_ONCE must never be reachable once
+ * a real session is running (SOLENOID_CAMPAIGN_PLAN.md -- "DEBUG admitted only in READY with
+ * no session"), so a bench-triggered capture can never land mid-session and be mistaken for
+ * one of that session's own measurements. */
+static void test_measure_once_is_refused_once_a_session_is_running(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    g.orch.deps.debug_channel_enabled = true;
+
+    truing_reason_t reason = TRUING_REASON_NONE;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));
+    TEST_ASSERT_NOT_EQUAL(TRUING_STATE_READY, g.orch.state);   /* a session is now running */
+
+    const truing_wheel_state_t before = g.orch.wheel_state;
+    const uint32_t calls_before = g.actx.calls;
+    reason = TRUING_REASON_NONE;
+    truing_intent_t once = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, 0);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_STATE, truing_orch_submit_intent(&g.orch, &once, &reason));
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);   /* never reached the acoustic call */
     TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
 }
 
@@ -1046,5 +1071,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_state_within_tolerance_skips_apply_and_does_not_remeasure);
     RUN_TEST(test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_untouched);
     RUN_TEST(test_measure_once_with_bad_spoke_or_code_fails_safely);
+    RUN_TEST(test_measure_once_is_refused_once_a_session_is_running);
     return UNITY_END();
 }

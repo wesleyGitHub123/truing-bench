@@ -156,8 +156,15 @@ truing_intent_verdict_t truing_intent_admissible(truing_state_t state, truing_wa
     }
 
     case TRUING_INTENT_DEBUG:
-        /* SPEC §12.5: development only; never in the demonstration flow. */
-        return debug_channel_enabled ? TRUING_INTENT_ADMIT_ACCEPT : TRUING_INTENT_REJECT_DEBUG_DISABLED;
+        /* SPEC §12.5: development only; never in the demonstration flow. Per the solenoid
+         * campaign plan (docs/SOLENOID_CAMPAIGN_PLAN.md), DEBUG is admitted only in READY with
+         * no session -- MEASURE_ONCE must never be reachable once a real session is running,
+         * so a bench-triggered capture can never land mid-session and be mistaken for one of
+         * that session's own measurements. */
+        if (!debug_channel_enabled) {
+            return TRUING_INTENT_REJECT_DEBUG_DISABLED;
+        }
+        return state == TRUING_STATE_READY ? TRUING_INTENT_ADMIT_ACCEPT : TRUING_INTENT_REJECT_STATE;
 
     default:
         return TRUING_INTENT_REJECT_UNKNOWN;
