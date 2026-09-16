@@ -28,6 +28,11 @@ void truing_orch_demo_start(void);
  * subsystem's source_impl through truing_demo_acoustic_source(), and the dump records it. */
 bool truing_demo_last_capture(truing_acoustic_capture_view_t *out);
 uint32_t truing_demo_capture_seq(void);
+/* True iff a capture exists whose outcome is not yet settled - an attempt is mid-flight and
+ * truing_demo_last_capture()'s status/reason may still describe the PREVIOUS attempt even
+ * though the words are the new one's. The debug HTTP handlers check this before reading
+ * anything (SPEC §12.5/§13.3): a 409 here, not a half-finished 200. */
+bool truing_demo_capture_pending(void);
 truing_source_impl_t truing_demo_acoustic_source(void);
 
 /* The acoustic chain configuration the measurement ran under. Its digest is what lets a

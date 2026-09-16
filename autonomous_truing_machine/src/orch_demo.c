@@ -159,6 +159,11 @@ uint32_t truing_demo_capture_seq(void)
     return truing_acoustic_real_capture_seq(&s.acoustic);
 }
 
+bool truing_demo_capture_pending(void)
+{
+    return truing_acoustic_real_capture_pending(&s.acoustic);
+}
+
 truing_source_impl_t truing_demo_acoustic_source(void)
 {
     return s.acoustic.source_impl;

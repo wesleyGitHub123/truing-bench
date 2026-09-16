@@ -398,6 +398,13 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     truing_acoustic_capture_view_t v;
     no_store(req);
     httpd_resp_set_type(req, "application/json");
+    /* Checked before anything else: an attempt can be mid-flight (words landing, outcome not
+     * yet settled), which is a different state from nothing-ever-captured. 409, not a 404 or a
+     * half-finished 200 (SPEC §12.5/§13.3). */
+    if (truing_demo_capture_pending()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"capture outcome not yet settled\"}");
+    }
     if (!truing_demo_last_capture(&v)) {
         httpd_resp_set_status(req, "404 Not Found");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"nothing captured yet\"}");
@@ -412,7 +419,9 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     /* The writer, not snprintf: a NaN has no JSON form and it writes null, which is what an
      * unmeasured frequency actually means. Hand-formatting these has produced `nan` in a
      * JSON document before. */
-    char body[1024];
+    /* 1024 was already tight before the five audio-diagnostic fields below (SPEC §12.5); sized
+     * up rather than risking truing_json_finish() failing the response on a long build/UI hash. */
+    char body[1536];
     truing_json_writer_t w;
     truing_json_init(&w, body, sizeof(body));
     truing_json_obj_open(&w, NULL);
@@ -462,6 +471,15 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     truing_json_f32(&w, "onset_threshold", v.diag.onset_threshold, 8u);
     truing_json_u32(&w, "capture_us", v.diag.capture_us);
     truing_json_u32(&w, "analysis_us", v.diag.analysis_us);
+    /* The front end's own per-capture diagnostics (audio_source_if.h capture_report), when it
+     * reported any -- additive detail alongside capture_result, never a new decision. */
+    if (v.diag.audio_report) {
+        truing_json_u32(&w, "pre_roll_words_delivered", v.diag.pre_roll_words_delivered);
+        truing_json_u32(&w, "pre_roll_words_configured", v.diag.pre_roll_words_configured);
+        truing_json_u32(&w, "capture_overrun_events", v.diag.capture_overrun_events);
+        truing_json_u32(&w, "ring_age_us", v.diag.ring_age_us);
+        truing_json_u32(&w, "worst_read_gap_us", v.diag.worst_read_gap_us);
+    }
     truing_json_obj_close(&w);
     size_t len = 0u;
     if (!truing_json_finish(&w, &len)) {
@@ -475,6 +493,14 @@ static esp_err_t capture_pcm_handler(httpd_req_t *req)
 {
     truing_acoustic_capture_view_t v;
     no_store(req);
+    /* Same gate as capture_meta_handler, checked first: an attempt mid-flight is a different
+     * state from nothing-ever-captured, and streaming its half-written words would be exactly
+     * the half-finished read this seam exists to refuse (SPEC §12.5/§13.3). */
+    if (truing_demo_capture_pending()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"capture outcome not yet settled\"}");
+    }
     if (!truing_demo_last_capture(&v)) {
         httpd_resp_set_status(req, "404 Not Found");
         httpd_resp_set_type(req, "application/json");

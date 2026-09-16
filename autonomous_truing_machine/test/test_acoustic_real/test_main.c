@@ -381,6 +381,90 @@ static void test_an_actuator_without_fire_report_still_measures_cleanly(void)
     src.close(&src);
 }
 
+/* ---- audio front-end diagnostics (SPEC §9.4, capture_report on audio_source_if.h) --------
+ *
+ * capture_report is optional on the vtable, the same shape and NULL-safety as pluck_if.h's
+ * fire_report: a source that cannot report per-capture diagnostics leaves it NULL, and
+ * acoustic_real.c must not crash or fabricate numbers when that is the case. A source that CAN
+ * report hands its numbers all the way through to the capture view untouched. */
+static truing_audio_capture_report_t g_audio_report;
+static bool g_audio_report_available;
+
+static bool fake_capture_report(truing_audio_source_if_t *self, truing_audio_capture_report_t *out)
+{
+    (void)self;
+    if (!g_audio_report_available || out == NULL) {
+        return false;
+    }
+    *out = g_audio_report;
+    return true;
+}
+
+static void test_capture_report_reaches_the_capture_view_when_the_source_provides_one(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    TEST_ASSERT_NULL(src.capture_report);   /* the synthetic front end has none of its own */
+
+    memset(&g_audio_report, 0, sizeof(g_audio_report));
+    g_audio_report.pre_roll_words_delivered = 111u;
+    g_audio_report.pre_roll_words_configured = 256u;
+    g_audio_report.capture_overrun_events = 2u;
+    g_audio_report.ring_age_us = 4321u;
+    g_audio_report.worst_read_gap_us = 9876u;
+    g_audio_report_available = true;
+    src.capture_report = fake_capture_report;   /* the case under test: a source that CAN report */
+
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.audio_report);
+    TEST_ASSERT_EQUAL_UINT32(111u, v.diag.pre_roll_words_delivered);
+    TEST_ASSERT_EQUAL_UINT32(256u, v.diag.pre_roll_words_configured);
+    TEST_ASSERT_EQUAL_UINT32(2u, v.diag.capture_overrun_events);
+    TEST_ASSERT_EQUAL_UINT32(4321u, v.diag.ring_age_us);
+    TEST_ASSERT_EQUAL_UINT32(9876u, v.diag.worst_read_gap_us);
+
+    /* A source that has nothing to say about THIS capture (returns false) must not leave a
+     * stale true, or stale numbers, behind - diag was reset for the new attempt. */
+    g_audio_report_available = false;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.audio_report);
+    TEST_ASSERT_EQUAL_UINT32(0u, v.diag.pre_roll_words_delivered);
+    TEST_ASSERT_EQUAL_UINT32(0u, v.diag.capture_overrun_events);
+    src.close(&src);
+}
+
+/* NULL capture_report (the ordinary case for the synthetic and recorded-buffer sources) must
+ * leave audio_report false without crashing - the audio-seam mirror of
+ * test_an_actuator_without_fire_report_still_measures_cleanly below. */
+static void test_a_source_without_capture_report_leaves_audio_report_false(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    TEST_ASSERT_NULL(src.capture_report);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.audio_report);
+    TEST_ASSERT_EQUAL_UINT32(0u, v.diag.capture_overrun_events);
+    src.close(&src);
+}
+
 /* A fire() that fails is a rejected attempt with a reason, before any window opens: no phase frame
  * claims an excitation, nothing is captured, the previous capture stays readable, the other station
  * is untouched, and the next attempt (the orchestrator's re-excitation, SPEC §7.4) fires normally.
@@ -660,6 +744,122 @@ static void test_the_capture_view_survives_a_calibration_missing_early_return(vo
     src.close(&src);
 }
 
+/* ---- outcome-pending gate (SPEC §12.5/§13.3: no half-finished read) ----------------------
+ *
+ * capture_seq bumps the instant the buffer starts changing (measure_run(), before excitation
+ * even resolves whether the capture will succeed); last_status/last_reason are not written
+ * until note_outcome() runs, well after analyze() -- seconds of arithmetic in between. On
+ * target the httpd task and the measuring task are different priorities, so a concurrent
+ * /debug/capture.* read can land in that window and see new words next to a stale outcome.
+ * The host has one thread, so these tests reach the same window by probing FROM INSIDE the
+ * source's capture() call: that is the exact point in the sequence a concurrent reader would
+ * be caught at (capture_seq already bumped, outcome_seq not yet caught up), without needing
+ * real OS threads to get there. */
+static truing_acoustic_if_t *g_probe_acoustic;
+static bool g_pending_seen_during_capture;
+static truing_audio_result_t (*g_probe_orig_capture)(truing_audio_source_if_t *, int32_t *, uint32_t,
+                                                      const volatile bool *, uint32_t *);
+
+static truing_audio_result_t probe_capture(truing_audio_source_if_t *self, int32_t *words, uint32_t n_words,
+                                           const volatile bool *cancel, uint32_t *n_captured)
+{
+    g_pending_seen_during_capture = truing_acoustic_real_capture_pending(g_probe_acoustic);
+    return g_probe_orig_capture(self, words, n_words, cancel, n_captured);
+}
+
+static void test_capture_pending_is_true_only_while_the_capture_is_in_flight(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));   /* nothing measured yet */
+
+    g_probe_acoustic = &a;
+    g_probe_orig_capture = src.capture;
+    src.capture = probe_capture;
+
+    g_pending_seen_during_capture = false;
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(g_pending_seen_during_capture);              /* the exposure window was real */
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));  /* and it closed before the call returned */
+
+    /* Not a one-shot: a second measurement re-opens and re-closes the same window. */
+    g_pending_seen_during_capture = false;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_TRUE(g_pending_seen_during_capture);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));
+
+    src.capture = g_probe_orig_capture;
+    src.close(&src);
+}
+
+/* An attempt that returns before ever calling source->capture() (cancelled, or the actuator
+ * failed to fire) never bumps capture_seq, so there is nothing for outcome_seq to lag behind -
+ * pending must stay false throughout, not just settle back to false afterwards. */
+static void test_capture_pending_stays_false_across_early_return_paths_that_never_capture(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+
+    truing_acoustic_request_cancel(&a);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));
+
+    g_pctx[0].fail_next = true;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));
+
+    /* the retry captures normally and still settles by the time the call returns */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));
+    src.close(&src);
+}
+
+/* The replay entry point (truing_acoustic_real_analyze_words, used by bring-up and the golden
+ * replay harness) also bumps capture_seq around its own arithmetic; it must settle exactly the
+ * same way real_measure() does, or a replayed capture would report itself pending forever. */
+static void test_capture_pending_is_false_after_an_analyze_words_replay(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 465.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    static int32_t words[4800];
+    memset(words, 0, sizeof(words));
+    truing_tension_estimate_t re;
+    truing_acoustic_real_analyze_words(&a, words, 4800u, 1u, &re);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&a));
+    src.close(&src);
+}
+
+/* Anything that is not this implementation, or nothing at all, has no pending capture to
+ * report - mirrors truing_acoustic_real_capture_seq()'s own NULL/type-check pattern. */
+static void test_capture_pending_is_false_for_a_non_real_implementation(void)
+{
+    truing_acoustic_if_t sim;
+    truing_acoustic_synthetic_ctx_t simctx;
+    truing_acoustic_synthetic_init(&sim, &simctx, g_clock, 32u, TRUING_TENSION_MODEL_IDEAL_STRING, 1u);
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(&sim));
+    TEST_ASSERT_FALSE(truing_acoustic_real_capture_pending(NULL));
+}
+
 static void test_status_rules_calibration_cancel_overrun_silence_format(void)
 {
     truing_audio_source_if_t src;
@@ -879,12 +1079,18 @@ int main(void)
     RUN_TEST(test_a_silent_capture_reports_listening_but_never_an_onset);
     RUN_TEST(test_each_spoke_fires_only_its_own_stations_actuator);
     RUN_TEST(test_an_actuator_without_fire_report_still_measures_cleanly);
+    RUN_TEST(test_capture_report_reaches_the_capture_view_when_the_source_provides_one);
+    RUN_TEST(test_a_source_without_capture_report_leaves_audio_report_false);
     RUN_TEST(test_a_failed_fire_rejects_the_attempt_before_any_capture);
     RUN_TEST(test_a_missing_actuator_rejects_its_station_and_is_not_ready);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);
     RUN_TEST(test_a_cancelled_measurement_emits_no_phase_at_all);
     RUN_TEST(test_the_capture_view_survives_an_aborted_attempt);
     RUN_TEST(test_the_capture_view_survives_a_calibration_missing_early_return);
+    RUN_TEST(test_capture_pending_is_true_only_while_the_capture_is_in_flight);
+    RUN_TEST(test_capture_pending_stays_false_across_early_return_paths_that_never_capture);
+    RUN_TEST(test_capture_pending_is_false_after_an_analyze_words_replay);
+    RUN_TEST(test_capture_pending_is_false_for_a_non_real_implementation);
     RUN_TEST(test_reset_session_discards_state_no_measurement_consumed);
     RUN_TEST(test_workflow_with_real_acoustic_layers_reaches_converged_geometric_only);
     return UNITY_END();

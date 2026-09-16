@@ -65,6 +65,14 @@ typedef struct {
     float    pulse_ms;                  /* the pulse it was commanded with; NaN when not fired */
     bool     pulse_measured;            /* the actuator reported a measured width for this fire */
     uint32_t pulse_us_measured;         /* that measured width, in us; 0 unless pulse_measured */
+    /* The front end's own per-capture diagnostics (audio_source_if.h capture_report), when it
+     * can report them -- additive detail alongside capture_result, never a new decision. */
+    bool     audio_report;              /* the source reported per-capture audio diagnostics */
+    uint32_t pre_roll_words_delivered;
+    uint32_t pre_roll_words_configured;
+    uint32_t capture_overrun_events;
+    uint32_t ring_age_us;
+    uint32_t worst_read_gap_us;
 } truing_acoustic_real_diag_t;
 
 /* The excitation actuators, one per acoustic station, indexed by truing_acoustic_station_slot().
@@ -125,6 +133,13 @@ typedef struct {
     uint32_t                           last_attempt;
     truing_status_t                    last_status;
     truing_reason_t                    last_reason;
+    /* capture_seq bumps the instant the buffer starts changing (SPEC §12.5); last_status/
+     * last_reason are not written until note_outcome() runs, which can be well after that --
+     * analyze() alone is seconds of arithmetic. outcome_seq catches up to capture_seq exactly
+     * once, unconditionally, at the end of the attempt that moved it, so a reader can tell the
+     * two apart: outcome_seq != capture_seq means an attempt's bookkeeping is still in flight
+     * and last_status/last_reason may still describe the PREVIOUS attempt. */
+    uint32_t                           outcome_seq;
 } truing_acoustic_real_ctx_t;
 
 /* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace).
@@ -185,6 +200,14 @@ bool truing_acoustic_real_last_capture(const truing_acoustic_if_t *self, truing_
 
 /* The sequence number alone, for the before/after check around a long read. */
 uint32_t truing_acoustic_real_capture_seq(const truing_acoustic_if_t *self);
+
+/* True iff a capture exists whose outcome bookkeeping (last_status/last_reason) has not yet
+ * caught up to the words already sitting in the buffer -- an attempt is mid-flight. A reader
+ * that observes this should not trust truing_acoustic_real_last_capture() yet: the words may be
+ * the new attempt's while last_status/last_reason still describe the previous one (SPEC
+ * §12.5/§13.3: a dump must describe the attempt it is evidence of, not a mix of two). False
+ * for anything that is not this implementation, mirroring truing_acoustic_real_capture_seq(). */
+bool truing_acoustic_real_capture_pending(const truing_acoustic_if_t *self);
 
 #ifdef __cplusplus
 }

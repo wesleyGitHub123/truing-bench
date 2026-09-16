@@ -43,6 +43,7 @@ typedef struct {
     int64_t                  last_read_us;
     bool                     open;
     volatile bool            stop;
+    truing_audio_capture_report_t last_report;   /* this capture's diagnostics (SPEC 9.4) */
 } i2s_ctx_t;
 
 static i2s_ctx_t s_ctx;   /* one front end per board */
@@ -130,12 +131,18 @@ static truing_audio_result_t i2s_capture(truing_audio_source_if_t *self, int32_t
      * overtake this copy in the microseconds it takes. */
     xSemaphoreTake(c->lock, portMAX_DELAY);
     const uint32_t head = c->ring_head;
+    /* Sampled in the same critical section as head/pre, so it describes the ring's staleness at
+     * the exact instant this capture's pre-roll tail was actually taken from it. */
+    const int64_t ring_sample_us = esp_timer_get_time();
     uint32_t pre = c->cfg.pre_trigger_words < c->ring_filled ? c->cfg.pre_trigger_words : c->ring_filled;
     if (pre > n_words) pre = n_words;
     for (uint32_t i = 0; i < pre; ++i) {
         const uint32_t idx = (head + c->ring_cap - pre + i) % c->ring_cap;
         words[i] = c->ring[idx];
     }
+    c->last_report.pre_roll_words_delivered = pre;
+    c->last_report.pre_roll_words_configured = c->cfg.pre_trigger_words;
+    c->last_report.ring_age_us = c->last_read_us != 0 ? (uint32_t)(ring_sample_us - c->last_read_us) : 0u;
     c->cap_out = words;
     c->cap_total = n_words;
     c->cap_written = pre;
@@ -165,12 +172,25 @@ static truing_audio_result_t i2s_capture(truing_audio_source_if_t *self, int32_t
             return TRUING_AUDIO_ERR_TIMEOUT;
         }
     }
+    /* The per-capture overrun delta and the driver's lifetime worst read gap, as of this
+     * capture -- additional diagnostic detail on top of the OVERRUN decision below, not part
+     * of it (SPEC 9.4 still discards an overrun capture regardless of what this reports). */
+    c->last_report.capture_overrun_events = c->overrun_events - c->cap_overruns_at_start;
+    c->last_report.worst_read_gap_us = c->stats.max_read_gap_us;
     if (n_captured != NULL) *n_captured = n_words;
     if (c->overrun_events != c->cap_overruns_at_start) {
         c->stats.capture_overruns++;
         return TRUING_AUDIO_ERR_OVERRUN;
     }
     return TRUING_AUDIO_OK;
+}
+
+static bool i2s_capture_report(truing_audio_source_if_t *self, truing_audio_capture_report_t *out)
+{
+    const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
+    if (c == NULL || out == NULL) return false;
+    *out = c->last_report;
+    return true;
 }
 
 static void i2s_close(truing_audio_source_if_t *self)
@@ -267,6 +287,7 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     self->format = i2s_format;
     self->open = i2s_open;
     self->capture = i2s_capture;
+    self->capture_report = i2s_capture_report;
     self->close = i2s_close;
     self->ctx = c;
     ESP_LOGI(TAG, "I2S RX enabled: 48 kHz, 24-in-32 mono, mic on GPIO bclk=%d ws=%d din=%d "
@@ -287,6 +308,17 @@ void truing_audio_i2s_stats(const truing_audio_source_if_t *self, truing_audio_i
     }
     *out = c->stats;
     out->overrun_events = c->overrun_events;
+}
+
+void truing_audio_i2s_capture_report(const truing_audio_source_if_t *self, truing_audio_capture_report_t *out)
+{
+    const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
+    if (out == NULL) return;
+    if (c == NULL) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    *out = c->last_report;
 }
 
 void truing_audio_i2s_deinit(truing_audio_source_if_t *self)

@@ -41,6 +41,18 @@ typedef enum {
 
 typedef struct truing_audio_source_if truing_audio_source_if_t;
 
+/* What the front end can additionally say about the capture just completed, when it can
+ * measure it. Additive and optional, the same shape and NULL-safety as
+ * truing_pluck_if_t.fire_report (pluck_if.h): a source that cannot report leaves the vtable
+ * slot NULL, and a caller must check for that before calling through it. */
+typedef struct {
+    uint32_t pre_roll_words_delivered;   /* pre-trigger words actually copied into this capture */
+    uint32_t pre_roll_words_configured;  /* the source's configured pre-trigger depth, for shortfall */
+    uint32_t capture_overrun_events;     /* per-capture delta of driver overrun events (not just a bool) */
+    uint32_t ring_age_us;                /* how stale the ring was when this capture's pre-roll tail was read */
+    uint32_t worst_read_gap_us;          /* driver-lifetime worst gap between drain reads, as of this capture */
+} truing_audio_capture_report_t;
+
 struct truing_audio_source_if {
     const char          *impl_name;
     truing_source_impl_t source_impl;
@@ -52,6 +64,10 @@ struct truing_audio_source_if {
      * samples during the capture (the words are then not to be analysed). `cancel` is polled. */
     truing_audio_result_t (*capture)(truing_audio_source_if_t *self, int32_t *words, uint32_t n_words,
                                      const volatile bool *cancel, uint32_t *n_captured);
+    /* Optional; NULL if this implementation cannot report per-capture diagnostics. Describes
+     * the capture() just completed, not the one about to happen -- call it only after
+     * capture() has returned. */
+    bool (*capture_report)(truing_audio_source_if_t *self, truing_audio_capture_report_t *out);
     void (*close)(truing_audio_source_if_t *self);
     void *ctx;
 };

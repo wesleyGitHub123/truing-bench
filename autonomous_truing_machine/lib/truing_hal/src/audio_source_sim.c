@@ -110,6 +110,7 @@ void truing_audio_buffer_init(truing_audio_source_if_t *self, truing_audio_buffe
     self->format = buf_format;
     self->open = buf_open;
     self->capture = buf_capture;
+    self->capture_report = NULL;   /* this front end cannot report per-capture diagnostics */
     self->close = buf_close;
     self->ctx = ctx;
 }
@@ -196,6 +197,7 @@ void truing_audio_synthetic_init(truing_audio_source_if_t *self, truing_audio_sy
     self->format = syn_format;
     self->open = syn_open;
     self->capture = syn_capture;
+    self->capture_report = NULL;   /* this front end cannot report per-capture diagnostics */
     self->close = syn_close;
     self->ctx = ctx;
 }

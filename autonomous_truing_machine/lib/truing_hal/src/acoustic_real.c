@@ -315,6 +315,20 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     const truing_audio_result_t r = c->source->capture(c->source, c->words, c->n_capture, &c->cancel_requested, &got);
     c->diag.capture_result = r;
     c->diag.n_captured = got;
+    /* The front end's own diagnostics for the capture that just happened, when it can report
+     * them -- additive, and never a substitute for the OVERRUN decision the result above
+     * already made (SPEC 9.4). */
+    if (c->source->capture_report != NULL) {
+        truing_audio_capture_report_t rpt;
+        if (c->source->capture_report(c->source, &rpt)) {
+            c->diag.audio_report = true;
+            c->diag.pre_roll_words_delivered = rpt.pre_roll_words_delivered;
+            c->diag.pre_roll_words_configured = rpt.pre_roll_words_configured;
+            c->diag.capture_overrun_events = rpt.capture_overrun_events;
+            c->diag.ring_age_us = rpt.ring_age_us;
+            c->diag.worst_read_gap_us = rpt.worst_read_gap_us;
+        }
+    }
     c->diag.capture_us = (truing_clock_now_ms(&c->clock) - t0) * 1000u;
     if (r == TRUING_AUDIO_ERR_CANCELLED || (c->cancel_requested)) {
         c->cancel_requested = false;
@@ -365,6 +379,13 @@ static void real_measure(truing_acoustic_if_t *self, uint8_t spoke_id, const tru
     if (out != NULL && c != NULL && c->capture_seq != seq_before) {
         note_outcome(c, spoke_id, cycle_index, out);
     }
+    /* Unconditional, whether or not note_outcome() actually wrote anything: this is what closes
+     * the window a concurrent reader could otherwise land in, between the words for a new
+     * attempt appearing (capture_seq bumped, in measure_run()) and this attempt's outcome being
+     * settled. After this line, outcome_seq == capture_seq again and the pair is safe to read. */
+    if (c != NULL) {
+        c->outcome_seq = c->capture_seq;
+    }
 }
 
 bool truing_acoustic_real_last_capture(const truing_acoustic_if_t *self, truing_acoustic_capture_view_t *out)
@@ -398,6 +419,15 @@ uint32_t truing_acoustic_real_capture_seq(const truing_acoustic_if_t *self)
         return 0u;
     }
     return ((const truing_acoustic_real_ctx_t *)self->ctx)->capture_seq;
+}
+
+bool truing_acoustic_real_capture_pending(const truing_acoustic_if_t *self)
+{
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return false;
+    }
+    const truing_acoustic_real_ctx_t *c = (const truing_acoustic_real_ctx_t *)self->ctx;
+    return c->capture_seq != c->outcome_seq;
 }
 
 void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoustic_observer_fn fn, void *observer_ctx)
@@ -471,6 +501,10 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
     analyze(self, c, n, cycle_index, 0u, out);
     c->diag.analysis_us = (truing_clock_now_ms(&c->clock) - t1) * 1000u;
     note_outcome(c, 0u, cycle_index, out);
+    /* Same rule as real_measure(): this path also bumps capture_seq and can leave outcome_seq
+     * behind it while analyze() runs, so it must catch up too -- otherwise a replay through
+     * this entry point would report itself pending forever. */
+    c->outcome_seq = c->capture_seq;
 }
 
 static bool real_ready(truing_acoustic_if_t *self, truing_reason_t *reason)
