@@ -1,9 +1,9 @@
 # Solenoid campaign record
 
 The rig registry, the S0/LEFT convention, and the stage log for Phase B's two-station solenoid
-integration. Pre-registered rules, outcome vocabulary and acceptance criteria live in the plan
-that governs this campaign; this file is the running record of what was actually done and
-found, kept current as each stage closes.
+integration. Pre-registered rules, outcome vocabulary and acceptance criteria live in
+`SOLENOID_CAMPAIGN_PLAN.md`, the committed plan that governs this campaign; this file is the
+running record of what was actually done and found, kept current as each stage closes.
 
 Bench-tool findings that are exploratory rather than part of the campaign proper — the gate-
 control (release ramp / brake / catch pulse) investigation into retraction noise — are recorded
