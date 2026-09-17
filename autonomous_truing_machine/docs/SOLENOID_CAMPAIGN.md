@@ -57,7 +57,7 @@ physical truing session.
 | strike point (current) | eyeballed, roughly mid free span | eyeballed, roughly mid free span |
 | per-class standoff order | leading closer, trailing farther **(corrected 2026-09-17 — was reversed)** | leading closer, trailing farther |
 | station angle | not yet measured (B2-M5, per class) | not yet measured (B2-M5, per class) |
-| pulse bracket (B2-M3, 2026-09-17) | leading [40, 85] ms · trailing [40, 110] ms · **station [40, 85] ms** | not yet measured, per class, run first |
+| pulse bracket (B2-M3, 2026-09-17) | leading [40, 85] ms · trailing [40, 110] ms · **station [40, 85] ms** | leading [50, 135] ms · trailing [60, 95] ms · **station [60, 95] ms** |
 | Side (observed, this wheel) | B | A (rotor side) |
 | S0/S1 physical marking | S0 rule declared (C1); mark not yet placed | S1 = whatever the rule leaves at RIGHT; confirmed by exclusion once S0 is marked |
 
@@ -169,11 +169,44 @@ small margin) — the reverse of RIGHT was wrong, LEFT and RIGHT both have leadi
 trailing farther. Corrected in the rig registry above and in `SOLENOID_CAMPAIGN_PLAN.md`.
 
 **Not done yet on LEFT:** M1 (strike geometry per class), M2 (standoff mm per class), M4 (200-
-strike drift), M5 (station angle per class). RIGHT's M3 hasn't started.
+strike drift), M5 (station angle per class).
+
+### B2-M3 — RIGHT station pulse bracket (2026-09-17)
+
+Same method as LEFT (manual bisection on the 5 ms grid, `p_reach` confirmed by a full 10/10
+batch, `p_dwell` bracketed by single-shot redo-on-miss checks). RIGHT-trailing needed several
+redo cycles near its `p_dwell` boundary (four consecutive misses at 95 ms) — consistent with the
+diagonal-presentation alignment difficulty already noted for trailing-class spokes on LEFT, not
+a new finding.
+
+**Results:**
+
+| class | p_reach | p_dwell | bracket |
+|---|---|---|---|
+| RIGHT-leading | 50 ms (10/10) | 135 ms (clean at 135, dwell at 140) | [50, 135] |
+| RIGHT-trailing | 60 ms (10/10) | 95 ms (clean at 95, dwell at 100) | [60, 95] |
+| **RIGHT station** | | | **[60, 95] (intersection)** |
+
+**No G-class trigger for RIGHT** — 35 ms of margin.
+
+**Reach-search note:** at 40/45/50/55 ms, RIGHT-trailing showed inconsistent hits (a mix of
+hits and misses across repeated batches at each width) before 60 ms finally gave a clean 10/10;
+50 ms alone scored 9/10 on a recheck batch. This reads as the unclamped-wheel alignment
+variance discussed for LEFT-trailing, sitting close enough to the true reach threshold that hand
+positioning could tip individual shots either way — not evidence that 60 ms itself is marginal
+(60 ms scored 10/10 twice, once on the original search and once implicitly confirmed by the
+dwell search starting from it).
+
+**Same finding as LEFT:** the fixture's 20 ms default excitation is below `p_reach` on RIGHT
+too (50/60 ms), for the same reason — it simply doesn't push the plunger far enough to arrive.
+
+**M3 is now closed for all four classes, both stations.** Neither station needs `G-class`.
+
+**Not done yet on RIGHT:** M1, M2, M4, M5 (same list as LEFT, above).
 
 ## Next
 
-**RIGHT station's M3** is next (leading and trailing brackets), then M1/M2/M4/M5 for both
-stations, then the two-station checks per Amendment 1 (C3–C4): M6 (wrong-actuator hazard), M7
-(idle rattle), M8 (end-to-end attribution, which also verifies the declared class map). PRESENT
-flips to 1 per station only after it passes.
+**M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
+class where relevant, per Amendment 1 C3), then the two-station checks: M6 (wrong-actuator
+hazard), M7 (idle rattle), M8 (end-to-end attribution, which also verifies the declared class
+map in the Convention section above). PRESENT flips to 1 per station only after it passes.
