@@ -204,6 +204,26 @@ too (50/60 ms), for the same reason — it simply doesn't push the plunger far e
 
 **Not done yet on RIGHT:** M1, M2, M4, M5 (same list as LEFT, above).
 
+### B2-E3 — RIGHT channel, quiet and loaded (2026-09-17)
+
+**Tool used:** `tools/bench/pluck_timing_check`'s `nano_pluck_timing_right` /
+`_right_quiet` envs (the same real-driver T6 harness B1a used for LEFT, extended with a quiet
+mode — see that tool's own commit for why). Fires the real `src/pluck_gpio.c` on RIGHT's GPIO
+(10), 200 times at 20 ms commanded, with and without the two scheduler-pressure load tasks.
+
+**Results (logs committed alongside the tool):**
+
+| condition | fires | worst \|delta\| | mean measured | result |
+|---|---|---|---|---|
+| quiet | 200/200 | 18 µs | 20007 µs | PASS |
+| loaded | 200/200 | 21 µs | 20007 µs | PASS |
+
+Both comfortably inside the 0.5 ms bound; the loaded run's slightly higher worst-case is
+consistent with the load tasks doing something, not a sign of trouble. **LEFT's loaded
+evidence already exists** (`ab02201`, B1a's original T6 run) — its quiet counterpart is not yet
+captured, since B1a only needed to prove the fix holds under adversarial load, not establish a
+quiet baseline. Cheap to add later if wanted for symmetry.
+
 ## Next
 
 **M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
