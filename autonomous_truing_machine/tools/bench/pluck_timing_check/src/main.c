@@ -1,13 +1,14 @@
 /* T6 evidence for 88b6b8b's claim: does the excitation pulse stop stretching under scheduler
- * load once its falling edge is set by a gptimer ISR instead of vTaskDelay?
+ * load once its falling edge is set by a gptimer ISR instead of vTaskDelay? Also drives B2-E3
+ * (campaign plan): 200 fires quiet and 200 under load, per channel, measured widths logged.
  *
  * Compiles and fires the REAL src/pluck_gpio.c directly -- not a reimplementation -- on a spare
- * GPIO, with no orchestrator, no session, and no PRESENT flip (that stays gated on B2). Two
- * "load" tasks run on core 0 at the same priorities the real firmware's httpd (5) and wire_tx
- * (3) use, each alternating a ~3 ms busy-spin with a brief yield -- several such bursts land
- * inside every single 20 ms pulse, denser and more adversarial than the real tasks' actual
- * duty cycle, on purpose. The fire loop itself runs at priority 2, matching where pluck_gpio's
- * fire() is actually called from in orch_demo.
+ * GPIO, with no orchestrator, no session, and no PRESENT flip (that stays gated on B2). Unless
+ * PLUCK_TIMING_QUIET is set, two "load" tasks run on core 0 at the same priorities the real
+ * firmware's httpd (5) and wire_tx (3) use, each alternating a ~3 ms busy-spin with a brief
+ * yield -- several such bursts land inside every single 20 ms pulse, denser and more adversarial
+ * than the real tasks' actual duty cycle, on purpose. The fire loop itself runs at priority 2,
+ * matching where pluck_gpio's fire() is actually called from in orch_demo.
  *
  * Before this fix, fire() ended the pulse with vTaskDelay then gpio_set_level(0): a task at
  * priority 5 or 3 running when the delay expired would hold the CPU and stretch the pulse by
@@ -36,6 +37,12 @@
 #endif
 #ifndef CHANNEL_NAME
 #define CHANNEL_NAME    "LEFT"
+#endif
+/* B2-E3 needs both a quiet run and a loaded run per channel, logged separately -- the load
+ * tasks below are what makes this "loaded"; skipping them gives a genuinely quiet baseline
+ * on the same driver, same pin, same fire count, so the two are comparable. */
+#ifndef PLUCK_TIMING_QUIET
+#define PLUCK_TIMING_QUIET 0
 #endif
 #define PULSE_MS        20.0f   /* representative of the campaign's fixture excitation (20 ms) */
 #define N_FIRES         200     /* matches B2-E3's magnitude */
@@ -129,9 +136,11 @@ static void fire_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "pluck_timing_check -- T6 evidence for 88b6b8b, real pluck_gpio.c, %s channel, "
-                  "GPIO %u, no PRESENT", CHANNEL_NAME, TEST_GPIO);
+    ESP_LOGI(TAG, "pluck_timing_check -- B2-E3, real pluck_gpio.c, %s channel, GPIO %u, no "
+                  "PRESENT, %s run", CHANNEL_NAME, TEST_GPIO, PLUCK_TIMING_QUIET ? "QUIET" : "LOADED");
+#if !PLUCK_TIMING_QUIET
     xTaskCreatePinnedToCore(load_task, "load_high", 1024, NULL, LOAD_HIGH_PRIO, NULL, 0);
     xTaskCreatePinnedToCore(load_task, "load_low", 1024, NULL, LOAD_LOW_PRIO, NULL, 0);
+#endif
     xTaskCreatePinnedToCore(fire_task, "fire", 4096, NULL, FIRE_PRIO, NULL, 0);
 }
