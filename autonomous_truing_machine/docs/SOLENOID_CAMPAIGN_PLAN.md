@@ -31,9 +31,12 @@ number changed, the original is noted inline as "(was …)".
 - Strike geometry repeats within a class.
 - Leading spokes present roughly vertical to the plunger; trailing spokes present diagonally.
 - Standoff depends on class:
-  - **LEFT:** trailing spokes are closer, leading spokes farther.
+  - **LEFT:** leading spokes are closer, trailing spokes farther.
   - **RIGHT:** leading spokes are closer, trailing spokes farther.
-- Each fitting is set to reach the farther class on its side.
+  - **(Corrected 2026-09-17, after B2-M3's LEFT data):** the operator's original description had
+    LEFT reversed (trailing closer). Both sides actually have the same ordering — leading closer,
+    trailing farther — not mirrored as first described. See `SOLENOID_CAMPAIGN.md`'s B2-M3 entry.
+- Each fitting is set to reach the farther class on its side (trailing, on both sides).
 
 ### Facts already in the repo that this lines up with
 - **Sides.** SPEC §6.4.1 defines Side A as the rotor side. On this rig, therefore, **RIGHT = Side A and LEFT = Side B**.
@@ -301,8 +304,8 @@ Shared:
 along its own tower (sets strike point along the spoke's free span), with a 3D-printed fitting
 between extrusion and solenoid (sets plunger-to-spoke standoff). Both eyeballed to roughly mid
 free span. Per Amendment 1's C3, each fitting reaches the farther of its side's two spoke
-classes (LEFT: leading is farther; RIGHT: trailing is farther) — the closer class then sits
-within reach as well; M3 tests whether one pulse serves both.
+classes — trailing, on both sides (corrected 2026-09-17; LEFT was first described backwards) —
+the closer class then sits within reach as well; M3 tests whether one pulse serves both.
 
 **Labelling (operator; done except S0, Amendment 1):**
 1. Label the stations and solenoids LEFT/RIGHT. **Done.**

@@ -53,11 +53,11 @@ physical truing session.
 | gate–source resistor | 10 kΩ (mandatory) | 10 kΩ (mandatory) |
 | flyback diode | present (mandatory; V_DSS 30 V) | present (mandatory) |
 | mount | own cut 4040 extrusion on its own tower (sets strike point along free span) | own cut 4040 extrusion on its own tower |
-| standoff fitting | 3D-printed, set to reach the farther class (leading) | 3D-printed, set to reach the farther class (trailing) |
+| standoff fitting | 3D-printed, set to reach the farther class (trailing) | 3D-printed, set to reach the farther class (trailing) |
 | strike point (current) | eyeballed, roughly mid free span | eyeballed, roughly mid free span |
-| per-class standoff order | trailing closer, leading farther | leading closer, trailing farther |
+| per-class standoff order | leading closer, trailing farther **(corrected 2026-09-17 — was reversed)** | leading closer, trailing farther |
 | station angle | not yet measured (B2-M5, per class) | not yet measured (B2-M5, per class) |
-| pulse bracket | not yet measured (B2-M3, per class, run first) | not yet measured (B2-M3, per class, run first) |
+| pulse bracket (B2-M3, 2026-09-17) | leading [40, 85] ms · trailing [40, 110] ms · **station [40, 85] ms** | not yet measured, per class, run first |
 | Side (observed, this wheel) | B | A (rotor side) |
 | S0/S1 physical marking | S0 rule declared (C1); mark not yet placed | S1 = whatever the rule leaves at RIGHT; confirmed by exclusion once S0 is marked |
 
@@ -131,13 +131,49 @@ of travel distance, which the spoke changes — parked rather than pursued furth
 if B3.0's controls show actuator emissions actually reach the measurement. Not part of the B0
 exit criteria; recorded here only so the stage log shows where the session's time went.
 
+### B2-M3 — LEFT station pulse bracket (2026-09-17)
+
+**Bench tool used:** `tools/bench/solenoid_smoke` (baseline `b` key, `+`/`-` width), same firmware
+family as B0. S0 was marked (LEFT-leading, per Amendment 1 C1) before this ran.
+
+**Method:** manual bisection on the 5 ms `+`/`-` grid. `p_reach` confirmed by 10/10 baseline
+shots at the candidate width, all landing under one clean strike; `p_dwell` found by bisecting
+upward from `p_reach` until dwell (plunger holds pressed against the spoke past a clean tap) or
+a double-hit (spring-return re-strike) first appeared, then narrowing to the grid boundary.
+Widths tested that failed `p_reach`'s 10/10 bar are not part of the bracket even if they showed
+one or two hits (LEFT-leading's 35 ms hit 2/3 attempts, then missed — disqualified for exactly
+this reason).
+
+**Results:**
+
+| class | p_reach | p_dwell | bracket |
+|---|---|---|---|
+| LEFT-leading | 40 ms (10/10) | 85 ms (clean at 85, dwell at 90) | [40, 85] |
+| LEFT-trailing | 40 ms (10/10) | 110 ms (clean at 110, dwell at 115) | [40, 110] |
+| **LEFT station** | | | **[40, 85] (intersection)** |
+
+**No G-class trigger for LEFT** — the two classes' brackets overlap with 45 ms of margin, so one
+pulse can serve both LEFT classes.
+
+**Finding: the fixture's current default excitation (20 ms, `fixtures.c`) is below both LEFT
+classes' `p_reach`.** At this rig's current standoff, a 20 ms pulse does not physically reach
+the spoke at all on LEFT — confirmed directly (20 ms and 25 ms both fell short before the
+sweep found 40 ms). This does not by itself invalidate anything already committed: B3.2's rule
+("3 levels at 25/50/75% of the bracket, plus 20 ms if it falls inside") already excludes 20 ms
+here since it falls outside [40, 85]. Flagged so B3.2's level selection doesn't need to
+rediscover this.
+
+**Correction to Amendment 1's physical description:** the operator's original description had
+LEFT-trailing as the *closer* class; it is actually the **farther** one (leading is closer, by a
+small margin) — the reverse of RIGHT was wrong, LEFT and RIGHT both have leading closer /
+trailing farther. Corrected in the rig registry above and in `SOLENOID_CAMPAIGN_PLAN.md`.
+
+**Not done yet on LEFT:** M1 (strike geometry per class), M2 (standoff mm per class), M4 (200-
+strike drift), M5 (station angle per class). RIGHT's M3 hasn't started.
+
 ## Next
 
-**B2 (per-station bench)** is next, gated only on the S0 mark (operator; mounting is already
-done). Order per Amendment 1 (C3–C4): **M3 first** — per-class pulse brackets, since a station's
-bracket is the intersection of its two classes' brackets and an empty intersection triggers
-**G-class** (a user decision on whether one pulse per station can serve both spoke classes).
-Then M1, M2 and M4–M8 per station (strike geometry, standoff, drift, station angle — all
-per class where relevant), then the two-station checks (wrong-actuator hazard, idle rattle,
-end-to-end attribution — M8 also verifies the declared class map above). PRESENT flips to 1
-per station only after it passes.
+**RIGHT station's M3** is next (leading and trailing brackets), then M1/M2/M4/M5 for both
+stations, then the two-station checks per Amendment 1 (C3–C4): M6 (wrong-actuator hazard), M7
+(idle rattle), M8 (end-to-end attribution, which also verifies the declared class map). PRESENT
+flips to 1 per station only after it passes.
