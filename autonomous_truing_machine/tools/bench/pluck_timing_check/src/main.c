@@ -28,7 +28,15 @@
 
 #include "pluck_gpio.h"
 
+/* TEST_GPIO / CHANNEL_NAME come from platformio.ini's per-channel build_flags (Amendment 1:
+ * B2-E3 needs this run on RIGHT too, not just LEFT). Defaults cover a plain `pio run` with
+ * neither define set. */
+#ifndef TEST_GPIO
 #define TEST_GPIO       9u      /* LEFT's pin -- same pin, same driver, no PRESENT dependency */
+#endif
+#ifndef CHANNEL_NAME
+#define CHANNEL_NAME    "LEFT"
+#endif
 #define PULSE_MS        20.0f   /* representative of the campaign's fixture excitation (20 ms) */
 #define N_FIRES         200     /* matches B2-E3's magnitude */
 #define GAP_MS           50u    /* between fires, so the load tasks are always mid-spin at the moment of firing */
@@ -69,9 +77,10 @@ static void fire_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    ESP_LOGI(TAG, "init ok -- GPIO %u, impl \"%s\". Load tasks are spinning at prio %d and %d. "
-                  "Firing %d pulses at %d ms commanded, %d ms apart.", TEST_GPIO, pluck.impl_name,
-             LOAD_HIGH_PRIO, LOAD_LOW_PRIO, N_FIRES, (int)PULSE_MS, (int)GAP_MS);
+    ESP_LOGI(TAG, "init ok -- %s channel, GPIO %u, impl \"%s\". Load tasks are spinning at prio "
+                  "%d and %d. Firing %d pulses at %d ms commanded, %d ms apart.", CHANNEL_NAME,
+             TEST_GPIO, pluck.impl_name, LOAD_HIGH_PRIO, LOAD_LOW_PRIO, N_FIRES, (int)PULSE_MS,
+             (int)GAP_MS);
 
     uint32_t worst_delta_us = 0u;
     uint32_t n_over_tolerance = 0u;
@@ -120,8 +129,8 @@ static void fire_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "pluck_timing_check -- T6 evidence for 88b6b8b, real pluck_gpio.c, GPIO %u, no PRESENT",
-             TEST_GPIO);
+    ESP_LOGI(TAG, "pluck_timing_check -- T6 evidence for 88b6b8b, real pluck_gpio.c, %s channel, "
+                  "GPIO %u, no PRESENT", CHANNEL_NAME, TEST_GPIO);
     xTaskCreatePinnedToCore(load_task, "load_high", 1024, NULL, LOAD_HIGH_PRIO, NULL, 0);
     xTaskCreatePinnedToCore(load_task, "load_low", 1024, NULL, LOAD_LOW_PRIO, NULL, 0);
     xTaskCreatePinnedToCore(fire_task, "fire", 4096, NULL, FIRE_PRIO, NULL, 0);
