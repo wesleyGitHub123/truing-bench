@@ -257,6 +257,19 @@ practice, not just by source inspection.
 **E1 marked done** on the strength of the above, with the coil-resistance note carried forward
 as an open, explicitly-deferred item rather than a resolved one.
 
+### B2-E2 — 500 ms hold, V_DS quantified (2026-09-17)
+
+**Tool used:** `solenoid_smoke`'s `A` key (one-person V_DS check — 4 s announced lead-in, then a
+4 s hold, cycling LEFT/RIGHT twice). Same tool B0 used for the qualitative pass; this time a
+number was actually read off the meter, closing the gap B0 left open.
+
+**Result:** **0 mV on both channels**, read during a live 4 s hold (not estimated) — comfortably
+under the 50 mV bound. Matches full turn-on for a logic-level MOSFET at these currents (the
+4.5 mΩ R_DS(on) datasheet figure would produce a voltage below most meters' resolution at this
+current, so 0 mV is the expected reading, not evidence the meter isn't working).
+
+**E2 marked done, both channels.**
+
 ## Next
 
 **M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
