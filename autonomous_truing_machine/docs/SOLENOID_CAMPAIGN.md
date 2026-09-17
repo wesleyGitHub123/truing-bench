@@ -14,10 +14,31 @@ out. Not duplicated in both places.
 
 **Spoke 0 is assigned to the LEFT actuator; assignment alternates from there** (spoke 1 → RIGHT,
 spoke 2 → LEFT, ...). "LEFT" and "RIGHT" are rig labels only — this convention is deliberately
-**not** coupled to Side A/B, cassette side, rotor side, or any other mechanical side designation,
-and is **not yet reconciled** with the solver artifact's `indexing_origin`. See
-`IMPLEMENTATION_NOTES.md`'s Known Limitations: that reconciliation is required before any real
-physical truing session and belongs to the later mechanical-designation campaign.
+**not** coupled to Side A/B, cassette side, rotor side, or any other mechanical side designation.
+
+**Amendment 1 (2026-09-17), observed correspondence for this wheel:** the donor wheel is a
+**front disc wheel with the rotor on the RIGHT side**, so per SPEC §6.4.1 (Side A = rotor side),
+**RIGHT = Side A and LEFT = Side B on this rig, in this orientation**. This is a rig fact, not a
+convention change — it would flip if the wheel were mounted the other way round, and A3's
+decoupling from Side A/B stands.
+
+**Spoke classes.** Spokes alternate leading/trailing as well as side, giving four physical
+classes. Counting counter-clockwise from the valve as viewed from the rotor (RIGHT) side — the
+SPEC §6.4 rim-angle direction, which matches the operator's clockwise turning habit — the
+declared class map is:
+
+| i mod 4 | class |
+|---|---|
+| 0 (S0) | LEFT-leading |
+| 1 (S1) | RIGHT-leading |
+| 2 (S2) | LEFT-trailing |
+| 3 (S3) | RIGHT-trailing |
+
+This matches the solver's generator order at **offset 0**: `indexing_origin = (Side B, LEADING)`.
+**Declared, not yet verified** — B2-M8 confirms S0..S3 against this table before it is relied on.
+See `SOLENOID_CAMPAIGN_PLAN.md`'s Amendment 1 (C1–C2) for the full reasoning, and
+`IMPLEMENTATION_NOTES.md`'s Known Limitations for what this does and does not settle for a real
+physical truing session.
 
 ## Rig registry
 
@@ -31,9 +52,17 @@ physical truing session and belongs to the later mechanical-designation campaign
 | gate resistor | 100–150 Ω series | 100–150 Ω series |
 | gate–source resistor | 10 kΩ (mandatory) | 10 kΩ (mandatory) |
 | flyback diode | present (mandatory; V_DSS 30 V) | present (mandatory) |
-| station angle | not yet measured (B2-M5) | not yet measured (B2-M5) |
-| standoff / mount height | not yet set (B2-M2) | not yet set (B2-M2) |
-| S0/S1 physical marking | not yet done — needs mounting | not yet done — needs mounting |
+| mount | own cut 4040 extrusion on its own tower (sets strike point along free span) | own cut 4040 extrusion on its own tower |
+| standoff fitting | 3D-printed, set to reach the farther class (leading) | 3D-printed, set to reach the farther class (trailing) |
+| strike point (current) | eyeballed, roughly mid free span | eyeballed, roughly mid free span |
+| per-class standoff order | trailing closer, leading farther | leading closer, trailing farther |
+| station angle | not yet measured (B2-M5, per class) | not yet measured (B2-M5, per class) |
+| pulse bracket | not yet measured (B2-M3, per class, run first) | not yet measured (B2-M3, per class, run first) |
+| Side (observed, this wheel) | B | A (rotor side) |
+| S0/S1 physical marking | S0 rule declared (C1); mark not yet placed | S1 = whatever the rule leaves at RIGHT; confirmed by exclusion once S0 is marked |
+
+**Donor wheel:** front disc wheel, rotor on the RIGHT side. Expected asymmetric per SPEC §972,
+unverified.
 
 **Shared, declared:** one 12 V / 8 A wall supply, one bulk electrolytic capacitor (470–1000 µF,
 ≥25 V) across the 12 V rail at the point it splits to both solenoids, star ground (source
@@ -46,7 +75,7 @@ sessions in the meantime (A10).
 
 ## Stage log
 
-### B0 — driver channels: electrical validation (2026-09-14 → 2026-09-16)
+### B0 — driver channels: electrical validation, mounting, labelling (2026-09-14 → 2026-09-17)
 
 **Bench tool used:** `tools/bench/solenoid_smoke` + `tools/bench/solenoid_ctl.py` (standalone,
 keystroke-driven — see `tools/bench/README.md` for the full key reference). Not the real
@@ -74,16 +103,24 @@ firmware; no acoustic subsystem, no orchestrator, no session.
 5. **No heating observed** on either MOSFET or solenoid after repeated firing during this
    session (qualitative, by touch; no thermal measurement taken).
 
+**Amendment 1 (2026-09-17) — mounting and labelling were already done, not reported until now.**
+Both solenoids have been mounted since before B0 (each on its own cut 4040 extrusion + a
+3D-printed standoff fitting, per-fitting standoff set to reach the farther of that side's two
+spoke classes) and the stations/solenoids are already labelled LEFT/RIGHT. This was not visible
+in earlier stage-log entries because the operator hadn't yet described the rig in detail; see
+`SOLENOID_CAMPAIGN_PLAN.md`'s Amendment 1 for the full physical description and its consequences
+(spoke classes, the donor wheel's disc rotor, the S0/indexing-origin correspondence).
+
 **Not done in B0, still pending:**
-- Physical mounting of either solenoid to a station on the wheel.
-- Labelling the stations/solenoids LEFT/RIGHT, marking S0 (a spoke LEFT can strike), confirming
-  S1 is RIGHT-only. These need a mount to exist first.
+- Marking S0 (rule declared, Amendment 1 C1: the LEFT-leading spoke immediately
+  counter-clockwise of the valve, viewed from the rotor side) and confirming S1 by exclusion.
 - A quantified V_DS reading (see note above).
 - Unattended-block polyfuse (currently: operator stays present during bench blocks instead).
 
 **Exit assessment:** the driver channels are electrically sound — both fire cleanly, attribute
-correctly, show no cross-talk, and switch fully on (V_DS collapses as expected). B0 is not
-fully closed: the physical mounting and labelling steps remain, blocking B2.
+correctly, show no cross-talk, and switch fully on (V_DS collapses as expected). Mounting and
+labelling are done. **B0 closes 2026-09-17**, with the S0 mark carried forward as the first
+operator step of B2 rather than a B0 blocker.
 
 ### Gate-control (retraction noise) investigation — parked
 
@@ -96,7 +133,11 @@ exit criteria; recorded here only so the stage log shows where the session's tim
 
 ## Next
 
-**B2 (per-station bench)** is next, gated on physical mounting (operator). Once mounted: M1–M5
-per station (strike geometry, standoff, pulse bracket, drift, station angle), then M6–M8
-(two-station checks: wrong-actuator hazard, idle rattle, end-to-end attribution). PRESENT flips
-to 1 per station only after it passes.
+**B2 (per-station bench)** is next, gated only on the S0 mark (operator; mounting is already
+done). Order per Amendment 1 (C3–C4): **M3 first** — per-class pulse brackets, since a station's
+bracket is the intersection of its two classes' brackets and an empty intersection triggers
+**G-class** (a user decision on whether one pulse per station can serve both spoke classes).
+Then M1, M2 and M4–M8 per station (strike geometry, standoff, drift, station angle — all
+per class where relevant), then the two-station checks (wrong-actuator hazard, idle rattle,
+end-to-end attribution — M8 also verifies the declared class map above). PRESENT flips to 1
+per station only after it passes.

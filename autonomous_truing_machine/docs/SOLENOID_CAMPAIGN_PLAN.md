@@ -6,6 +6,146 @@ state. `docs/SOLENOID_CAMPAIGN.md` is the running record of what was actually do
 plan; this file is the plan itself and does not change as stages close. If the plan changes, that
 change is a new commit to this file, with the reason in the commit message.
 
+## Amendment 1 (2026-09-17) — mounted stations, rotor side, four spoke classes
+
+Approved 2026-09-17. C3–C10 below are also applied inline in the stage sections, the provenance
+table and the schedule, so the rest of this file already reads in amended form. Where a
+number changed, the original is noted inline as "(was …)".
+
+### What the operator reported
+
+**Mounting**
+- Both solenoids have been mounted since before B0.
+- Each solenoid sits on its own cut 4040 extrusion, which slides along its own tower. The tower height sets the strike point along the spoke's free span.
+- A 3D-printed fitting sets the plunger-to-spoke standoff.
+- Both strike points were eyeballed to roughly mid free span.
+
+**Labels**
+- Stations and solenoids are already labelled LEFT/RIGHT.
+
+**Donor wheel**
+- It is a front disc wheel, with the rotor on the RIGHT side.
+
+**Spoke classes**
+- There are four spoke classes: side × leading/trailing.
+- Strike geometry repeats within a class.
+- Leading spokes present roughly vertical to the plunger; trailing spokes present diagonally.
+- Standoff depends on class:
+  - **LEFT:** trailing spokes are closer, leading spokes farther.
+  - **RIGHT:** leading spokes are closer, trailing spokes farther.
+- Each fitting is set to reach the farther class on its side.
+
+### Facts already in the repo that this lines up with
+- **Sides.** SPEC §6.4.1 defines Side A as the rotor side. On this rig, therefore, **RIGHT = Side A and LEFT = Side B**.
+  - This is recorded as an *observed correspondence for this wheel in this orientation*.
+  - A3's decoupling stays, because the correspondence flips if the wheel is mounted the other way round.
+- **Asymmetry.** The spec already names the donor wheel as a front disc wheel, *expected asymmetric, unverified*.
+  - The two sides may therefore sit at different tensions, and so at different reported-peak ranges.
+  - No campaign rule assumes the two sides are equal: consistency bands are per spoke, and the shared DSP config covering both sides is already G-analysis's job.
+- **Solver classes.** The solver's spoke classes (`model_prep/truing_model_prep/conventions.py:21-26`) already use a period-4 pattern: (B, lead), (A, lead), (B, trail), (A, trail).
+- **Spoke 0.** SPEC §6.5 lets spoke 0 be any class.
+  - Its class is declared, and the generator applies an offset.
+  - It must be physically marked relative to the valve stem.
+  - It must sit at the reference station; A2 already sets that to `ACOUSTIC_LEFT`.
+
+### Unchanged
+- A1–A10, and all of the B1a/B1b firmware scope.
+  - Spoke class is rig and campaign data.
+  - The firmware needs it only if G-class (C4) trips.
+- The even→LEFT convention.
+- The outcome vocabulary.
+- The claim ceiling.
+
+### Changes
+
+**C1 — S0 and the counting direction.**
+- **The direction comes from SPEC §6.4, not from preference.**
+  - Rim angle increases counter-clockwise as viewed from Side A, which is the rotor face (the RIGHT side).
+  - Spoke i sits at 2π·i/n (`wheel_geometry.h:32`).
+  - Seen from the rotor side with the valve at the top, the index therefore increases **leftward**.
+- **The operator's clockwise turning agrees with this.**
+  - The operator turns the wheel clockwise from that view. This is a habit, and is recorded as one.
+  - Clockwise turning brings spokes to a fixed plunger in the order i → i+1: the next spoke to arrive is the one that was sitting counter-clockwise of the current one.
+- **S0 is the LEFT-leading spoke immediately counter-clockwise of the valve** — the first spoke to the valve's left, seen from the rotor side.
+  - This keeps S0 on LEFT, which the compiled convention (`acoustic_stub.c`), `reference_station = ACOUSTIC_LEFT` and the PRESENT precondition in `board_nano_esp32.h` all assume.
+  - Choosing the RIGHT-trailing spoke to the valve's right instead would move S0 to RIGHT (a firmware change) and would count against the spec's direction.
+- **What S0 decides:** the physical spoke that every campaign index counts from, and therefore the class map in C2.
+  - It changes no campaign result's pass/fail.
+  - It is marked per wheel, so nothing carries over to future wheels.
+
+**C2 — class map: declared now, verified at B2-M8.**
+
+The declared map, as seen from the rotor side:
+
+| i mod 4 | class |
+|---|---|
+| 0 | LEFT-leading |
+| 1 | RIGHT-leading |
+| 2 | LEFT-trailing |
+| 3 | RIGHT-trailing |
+
+- **It matches the solver.** With RIGHT = Side A, this is exactly the solver's generator order at **offset 0**.
+  - A future physical truing session would declare `indexing_origin = (Side B, LEADING)`.
+  - Known limitation 1 then comes down to that declaration plus the M8 check.
+  - The limitation stays recorded as open until M8 confirms the map and a physical session actually uses it.
+- **Verification at M8:** the operator confirms that S0..S3 are L-lead, R-lead, L-trail, R-trail.
+  - If they aren't, **halt**: the map is wrong, and so is the offset-0 match.
+- **Stratification:** every trial manifest carries the spoke's class, and every stage report is stratified by class.
+
+**C3 — B2 becomes class-aware.** Applied inline under B2.
+- M3 runs first.
+- M1, M2, M3, M5 and M6 are per class.
+- The station bracket is the intersection of the two class brackets.
+- The station rig_id gains the fitting id, the tower height and both per-class standoffs.
+
+**C4 — new gate, G-class (a user decision).**
+- **One pulse per station is a hypothesis, not a known fact.**
+  - *For it:* each fitting is set so that one plunger reaches both classes.
+  - *Against it:* in the gate-control bench investigation (`tools/bench/README.md`), the tuning stopped working once the travel distance changed — and the two classes differ in exactly that distance.
+- **How it is tested:** first B2-M3, cheaply, with the bench tool and no firmware; then B3.2, on acoustic outcomes.
+- **Why per-class excitation isn't built in advance:** it needs the C2 class map in firmware, plus a change to the profile schema and digest. EXPERIMENT_METHOD rule 1 says not to build that before the evidence asks for it.
+- **Trigger** — either of:
+  - the two classes' M3 brackets don't overlap;
+  - in B3.2, every level that satisfies the constraints leaves one class's worst spoke more than 10 pp below the other class's.
+- **On trigger: halt, and put these options to the user:**
+  - re-seat the fitting and re-run M2–M3;
+  - restrict demo and acceptance scope to the working class at that station, and say so;
+  - authorize per-class excitation, whose class map C2 already provides.
+
+**C5 — B3.1: class-balanced spoke sets.** Chosen by the operator.
+- Per station: 4 exploration spokes (2 per class), 4 held-out (2 per class) and 2 reserve (1 per class).
+
+**C6 — B3.2.**
+- 6 strikes per level per spoke, over 4 exploration spokes per station.
+- Exploration gate: worst spoke ≥5/6.
+- The pulse rule also checks each class's worst spoke, and feeds G-class.
+
+**C7 — B3.4.**
+- **Loaded arm:** 4 held-out spokes per station × 6 strikes = 48 trials.
+- **Unchanged thresholds:** ≥40/48, and no station below 18/24.
+- **Per-spoke floor:** 5/6.
+- **New class floor:** no class below 10/12. The demo covers every class, so one weak class would break Rung 3.
+- **Quiet arm:** 8 spokes × 3 strikes = 24.
+
+**C8 — the rotor.**
+- It is a RIGHT-only structural resonator.
+- Air shots can't excite it, so it can only appear in strike captures.
+- Blind review therefore gains the category "metallic / rotor ring audible", stratified by station.
+
+**C9 — the ±2 Hz band stays.**
+- Its basis came from Phase A, which used a different setup.
+- If a class's repeat spread is wider than the band, that shows up as inconsistent clears in exploration, which halts at the constraints.
+- The band is never widened after the fact.
+
+**C10 — provenance.** Applied inline in the provenance table.
+- The fitting id and tower height are explicit rig_id fields.
+- The S0 marking and class map invalidate class-stratified results, and a change to them means re-running M8.
+
+**C11 — record and schedule.** Applied inline in the schedule.
+- B0 closes on 2026-09-17, pending the S0 mark (the first operator step of B2).
+- B2 is unblocked and runs in parallel with B1a, on the bench tools.
+- Later stages move one day later, absorbing the 09-20 reserve day. The demo date is unchanged.
+
 ## Context
 
 **Where things stand.** Phase A and the interim items (I1–I3) are closed; they are recorded in the repo and in `docs/IMPLEMENTATION_NOTES.md`, with a summary at the end. Hand plucking cannot support fitting the DSP constants. The chain is ~26–32 dB noisier than the gear the constants came from. The only acceptance rule that means anything is discrimination against no-pluck controls. The Darlington approach is dropped.
@@ -37,6 +177,7 @@ change is a new commit to this file, with the reason in the commit message.
    - That is safe for this demo, because the fast demo's runout and solve are synthetic.
    - **Before any real physical full truing session** — real runout, real adjustments on a real wheel — the two identities must be reconciled. That work belongs to the later mechanical-design campaign.
    - Until then, every stage report and the demo narrative must say so.
+   - **Amendment 1 update:** on the current donor wheel, the operator's reported spoke-class layout matches the solver's generator order at offset 0 (`indexing_origin = (Side B, LEADING)`) — see Amendment 1, C1–C2. This is an *observed match for this wheel*, not a general reconciliation rule, and stays open until B2-M8 confirms the class map and a physical session actually declares it.
 2. **Sessions need both actuators.** If one actuator is broken, no session can run (by design; see A10). Campaign trials at the working station still can, because they run outside a session.
 
 **What "trustworthy" means, defined operationally:**
@@ -139,7 +280,7 @@ What is single-actuator today:
 - **Retention:** nothing is deleted; exclusions only under pre-declared codes.
 - **Sequencing:** each station may move through the B2–B3.4 **campaign trials** on its own if its hardware lags, with identical protocol and rules. These trials run outside a session. **Session-path work** — Rung 2, Rung 3, the demo — needs both actuators, per A10.
 
-### B0 — both driver channels + physical labelling *(halt-and-ask: physical)*
+### B0 — both driver channels + physical mounting + labelling *(halt-and-ask: physical)*
 
 **Channels.** LEFT and RIGHT, built identically on IRLB4132; the third MOSFET is a spare. Source: [Infineon IRLB4132 datasheet](https://www.infineon.com/dgdl/Infineon-IRLB4132-DataSheet-v01_00-EN.pdf?fileId=5546d4626cb27db2016cd545a6182ff3).
 
@@ -156,11 +297,20 @@ Shared:
 - **Board power:** power bank during blocks.
 - **Unattended blocks:** a ≤1 A polyfuse is required first; otherwise the operator stays present.
 
-**Labelling (operator):**
-1. Label the stations and solenoids LEFT/RIGHT.
-2. Mark as S0 a spoke the LEFT actuator can strike.
+**Mounting (operator; done, Amendment 1).** Each solenoid on its own cut 4040 extrusion, sliding
+along its own tower (sets strike point along the spoke's free span), with a 3D-printed fitting
+between extrusion and solenoid (sets plunger-to-spoke standoff). Both eyeballed to roughly mid
+free span. Per Amendment 1's C3, each fitting reaches the farther of its side's two spoke
+classes (LEFT: leading is farther; RIGHT: trailing is farther) — the closer class then sits
+within reach as well; M3 tests whether one pulse serves both.
+
+**Labelling (operator; done except S0, Amendment 1):**
+1. Label the stations and solenoids LEFT/RIGHT. **Done.**
+2. Mark as S0 the LEFT-leading spoke immediately counter-clockwise of the valve stem, viewed
+   from the rotor side (RIGHT) — SPEC §6.4's rim-angle direction, C1.
 3. Confirm S1 is reachable only from RIGHT.
-4. Record all of it in the campaign record.
+4. Record all of it in the campaign record, including the donor wheel's disc-rotor side (RIGHT)
+   and the observed RIGHT = Side A correspondence (C1, specific to this wheel's orientation).
 
 ### B1 — two-station firmware + attributable captures *(agent)*
 
@@ -182,25 +332,33 @@ Shared:
 
 **Question:** does each actuator's electrically successful pulse produce one clean strike on the spoke positioned at its station, and on nothing else?
 
+**Order (Amendment 1, C4):** M3 runs first — it is the cheap, no-firmware test of whether one
+pulse per station serves both spoke classes, and G-class depends on it.
+
 Per station:
 - **E1** Shared parts: coil ≈40 Ω, rail at 12 V, diode orientation, grounds. (The Darlington's no-fire was never explained, so these are checked first.)
 - **E2** 500 ms hold: V_DS < 50 mV.
 - **E3** 200 fires quiet and 200 under load, measured widths logged, no heating.
 - **E4** Quiet boot.
-- **M1** Strike geometry: mid free span, single contact, retracts, no rattle.
-- **M2** Standoff: contact late in the 10 mm stroke; record mm and mount height.
-- **M3** Pulse bracket: `p_reach` = strikes 10/10; `p_dwell` = longest pulse before dwell or double hit.
-- **M4** 200 strikes: drift ≤0.5 mm, bracket unchanged.
-- **M5** **Station angle and reach:** measure the angle; every spoke assigned to that station can be positioned under its plunger.
+- **M3 (run first)** Pulse bracket, **per class** (Amendment 1, C3–C4): `p_reach` = strikes 10/10; `p_dwell` = longest pulse before dwell or double hit. The station's bracket is the **intersection** of its two classes' brackets — `p_reach` is the max over classes (farther class governs), `p_dwell` is the min over classes (closer class governs). An empty intersection triggers **G-class** (see below).
+- **M1** Strike geometry, **per class**: mid free span, single contact, retracts, no rattle. Trailing (diagonal-presenting) spokes are checked for glancing or sliding contact; on RIGHT, plunger clearance to the rotor is checked for both classes.
+- **M2** Standoff, **per class**: record mm, fitting id and tower height. "Contact late in the stroke" is required for the farther class only; the closer class's contact point is recorded as observed.
+- **M4** 200 strikes: drift ≤0.5 mm, bracket unchanged. The 3D-printed fitting and the extrusion clamp are the named creep suspects.
+- **M5** **Station angle and reach, per class:** leading and trailing spokes need different rotations to land under the plunger; both are recorded. Manual positioning in Stage 1 is unaffected by this — it is recorded for future navigation.
 
 Two-station checks:
-- **M6 Wrong-actuator hazard:** with a spoke positioned at its own station, record what sits under the *other* station's plunger. If another spoke is there, a wrong-actuator fire would excite a different spoke without warning. That makes the per-trial attribution checks mandatory; it is not a reason to redesign.
+- **M6 Wrong-actuator hazard, all four classes:** with a spoke positioned at its own station, record what sits under the *other* station's plunger. If another spoke is there, a wrong-actuator fire would excite a different spoke without warning. That makes the per-trial attribution checks mandatory; it is not a reason to redesign.
 - **M7 Idle rattle:** when one actuator fires, does the other's plunger rattle? The operator listens. If it does, fix the retention or carry it as an observed variable.
-- **M8 Attribution end to end:** runner positions S0..S3 at their stations. The observed plunger must match the logged `actuator` on every step: LEFT, RIGHT, LEFT, RIGHT.
+- **M8 Attribution end to end:** runner positions S0..S3 at their stations. The observed plunger must match the logged `actuator` on every step: LEFT, RIGHT, LEFT, RIGHT. **Also verifies the Amendment 1 C2 class map:** S0..S3 must be L-lead, R-lead, L-trail, R-trail — if not, halt, the map is wrong.
+
+**G-class (Amendment 1, C4) — a user decision, triggered by an empty M3 intersection at either station, or by the equivalent B3.2 condition:**
+- A per-class pulse would require the acoustic subsystem to know spoke class — an architecture change (excitation keyed by class), not a campaign parameter, so it is not built ahead of the evidence.
+- Options put to the user on trigger: re-seat the fitting and re-run M2–M3; restrict demo/acceptance scope to the working class at that station; or authorize per-class excitation (the C2 class map already supports it).
 
 **Exit:**
 - Each station that passes → flip its PRESENT to 1 (board-profile change, T5).
 - Update the measured station angles in the machine profile (a new profile, T5).
+- **Station rig_id** (Amendment 1, C10) now includes the fitting id, the tower height and both per-class standoffs; changing any of them invalidates that station's confirmation.
 
 **Supports:** mechanical/electrical delivery and attribution per station. **Not:** acoustics.
 
@@ -217,7 +375,7 @@ Two-station checks:
 
 ### B3.1 — spoke sets *(agent, before any strike data)*
 
-- **Rule, declared up front:** draw per station 3 exploration spokes, 3 held-out, 1 reserve, spread around the wheel. Record the seed.
+- **Rule, declared up front (Amendment 1, C5 — class-balanced, operator's choice):** draw per station 4 exploration spokes (2 per class), 4 held-out (2 per class), 2 reserve (1 per class), spread around the wheel within each class. Record the seed.
 - **No reference measurements.** Consistency is judged against each spoke's own repeated clears, so no outside frequency reference is needed.
 
 ### Pre-registration *(agent; committed before any B3.2 data)*
@@ -230,8 +388,8 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 
 **Physical:**
 - Per station, 3 pulse levels at 25/50/75 % of that bracket, plus 20 ms if it falls inside.
-- 8 strikes × level × 3 exploration spokes per station, randomized; a no-fire control every 4th trial.
-- ≈180 captures.
+- **(Amendment 1, C6)** 6 strikes × level × 4 exploration spokes per station (2 per class), randomized; a no-fire control every 4th trial.
+- ≈144–192 captures (3–4 levels), plus controls.
 
 **Offline:**
 - `native_sweep` over these captures, the B3.0 controls, historical pass-C and `nano_ambient_ambiguous`.
@@ -244,12 +402,14 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 3. **Pulse:** shared if one level lies inside both stations' constraint-satisfying plateaus, with each station's worst spoke within 10 pp of that station's best. Otherwise per actuator, each chosen by its own station's worst spoke.
 4. **Tie-breaks:** plateau interior, then fewest fields changed from baseline, then shorter pulse.
 5. **Refinement:** at most one extra pulse level per station, only at a bracket edge or a >25 pp cliff.
+6. **(Amendment 1, C4/C6) Class check:** the pulse rule also evaluates each class's worst spoke separately. If every constraint-satisfying level leaves one class's worst spoke more than 10 pp below the other class's at a station, that feeds **G-class** (defined under B2), not this rule's ordinary tie-break.
 
-**Blind human review:** ~24 stratified trials across both stations, recording strike audible / ring in analysed window / second impact or rattle / clean excitation. No pitch judgments. The review **does not select** anything. A systematic "clear without ring" stops the stage.
+**Blind human review:** ~24 stratified trials across both stations, recording strike audible / ring in analysed window / second impact or rattle / clean excitation **/ metallic or rotor ring audible (Amendment 1, C8 — RIGHT station only; the rotor is a RIGHT-only structural resonator that air shots can't excite, so it can only appear in strike captures)**. No pitch judgments. The review **does not select** anything. A systematic "clear without ring" stops the stage.
 
 **Gates:**
-- **Exploration gate:** each station needs a candidate with worst spoke ≥6/8. If not, one bounded mechanical lever (mic distance or strike point) and a reduced rerun. Still failing → stop, report the ceiling, and give that station's status to the user.
+- **Exploration gate (Amendment 1, C6: was ≥6/8):** each station needs a candidate with worst spoke **≥5/6**. If not, one bounded mechanical lever (mic distance or strike point) and a reduced rerun. Still failing → stop, report the ceiling, and give that station's status to the user.
 - **G-analysis:** if no shared DSP candidate meets the constraints at both stations, halt. A per-station analysis profile is an architecture decision.
+- **G-class (Amendment 1, C4):** defined under B2; also triggered here if the class check above (rule 6) fails at every level for a station.
 
 **Supports:** "config X is the best candidate on exploration data". **Not:** reliability.
 
@@ -264,16 +424,18 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 **Question:** does the frozen config meet acceptance on unseen spokes at both stations, under realistic firmware load?
 
 **Loaded arm (acceptance):**
-- 3 held-out spokes per station × 8 `MEASURE_ONCE` strikes: runner-declared physical spoke, derived station and actuator, split across ≥2 separate blocks. 48 trials.
+- **(Amendment 1, C7: was 3 spokes × 8 strikes)** 4 held-out spokes per station (2 per class) × 6 `MEASURE_ONCE` strikes: runner-declared physical spoke, derived station and actuator, split across ≥2 separate blocks. 48 trials.
 - Browser UI streaming and `socket_pressure.py` running throughout.
 - ≥30 no-fire controls under the same load.
 
-**Quiet arm (mechanism comparison only):** 4 strikes per held-out spoke, 24 trials. UI closed, no traffic, and the runner waits for each harvest before firing. Interleaved with the loaded arm per spoke.
+**Quiet arm (mechanism comparison only):** 3 strikes per held-out spoke, 24 trials. UI closed, no traffic, and the runner waits for each harvest before firing. Interleaved with the loaded arm per spoke.
 
 **Acceptance (pre-registered):**
 - 0 false clears; 0 inconsistent clears (band from each spoke's loaded-arm clears).
 - Attribution: `actuator` = the derived station of the declared spoke on 100 % of trials.
-- Consistent clears ≥ **40/48** (Wilson 95 % lower bound 0.70). No station below 18/24; no spoke below 6/8.
+- Consistent clears ≥ **40/48** (Wilson 95 % lower bound 0.70). No station below 18/24.
+- **Per-spoke floor (Amendment 1, C7: was 6/8): no spoke below 5/6.**
+- **Class floor (Amendment 1, C7, new): no class below 10/12.** The demo covers every class, so one weak class would break Rung 3.
 - Board == host replay parity on 100 % of trials; overruns only ever surface as `CAPTURE_OVERRUN`.
 - Blind review of 20 stratified trials: 0 machine-clears the operator hears as no strike or no ring.
 - **Reported, not gated:** each held-out spoke's median shift between blocks.
@@ -354,22 +516,26 @@ This assumes identical, independent spokes, which is false: the worst spoke and 
 | excitation pulse for one actuator | `excitation_digest` + `station` | that **station's** confirmation only |
 | pulse mechanism, DSP algorithm code, selection-rule version | build rev / version; parity replay | exploration comparability if changed mid-B3.2; confirmation if changed after B3.4 |
 | one station's solenoid, mount, MOSFET channel, standoff, strike point | **declared station rig_id only — no digest sees these** | that station's confirmation |
+| **(Amendment 1, C10) fitting id or tower height, per station** | **declared station rig_id** | that station's confirmation, both classes |
 | station angles | `machine_profile_id` (session header) | positioning/attribution evidence at that station |
 | supply V, mic position, board power | declared shared rig registry | both stations' confirmation |
 | physical S0 marking, LEFT/RIGHT labels, board station↔pin assignment | rig registry, build | all spoke-indexed attribution; rerun B2 M8 |
+| **(Amendment 1, C10) the C2 class map (S0's class, or the declared i mod 4 pattern)** | rig registry (campaign record) | all class-stratified results; rerun B2 M8 |
 | I2S/drain config, task priorities, network stack | build rev | the B3.4 load verdict |
 | room / weather | interleaved controls | nothing, unless controls start clearing |
 
 ## Schedule, descope, stop
 
+**(Amendment 1, C11)** B0's mounting turned out to already be done; only the S0 mark and campaign-record update were outstanding, closed 2026-09-17. B1a and its T6 (the hardware-timed pulse) closed 09-16 as planned. B2 was blocked on mounting until 09-17 — one day later than the original schedule — so everything from B3.0 onward absorbs the 09-20 reserve day to keep the same demo date.
+
 | date | work | gate |
 |---|---|---|
-| 09-14→15 | B0 (both channels + labelling) ‖ B1a | — |
-| 09-16 | B1a T6; B2 LEFT and RIGHT | PRESENT per station; station angles |
-| 09-17 | B3.0, B3.1, pre-registration ‖ B1b | controls pass |
-| 09-18 | B3.2 + offline sweep + selection ‖ B1b | exploration gate, G-analysis, B3.3 approval |
-| 09-19 | B3.4 Rung 1 ‖ B1b T6 + spec review | acceptance |
-| 09-20 | reserve | |
+| 09-14→15 | B0 (channels + mounting, discovered done) ‖ B1a | — |
+| 09-16 | B1a T6 (done) | pulse-timing evidence |
+| 09-17 | B0 close (S0 mark); B2 LEFT and RIGHT, **M3 first** | PRESENT per station; station angles; G-class check |
+| 09-18 | B3.0, B3.1, pre-registration ‖ B1b | controls pass |
+| 09-19 | B3.2 + offline sweep + selection ‖ B1b | exploration gate, G-analysis, G-class, B3.3 approval |
+| 09-20 | B3.4 Rung 1 ‖ B1b T6 + spec review (absorbs the former reserve day) | acceptance |
 | 09-21 | Rung 2 | |
 | 09-22 | Rung 3 | G-demo |
 | 09-23 | B4, docs, smoke — **last campaign data day** | |

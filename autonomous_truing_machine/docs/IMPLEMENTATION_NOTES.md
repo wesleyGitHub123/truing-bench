@@ -715,6 +715,16 @@ supply them; the firmware reports this honestly as "not provisioned".
   with no reason code (SPEC 17.3 #11 class). Setting any `BOARD_PLUCK_ACTUATOR_*_PRESENT` to 1
   therefore requires the bench attribution check (plan B2 M8) to have passed on the mounted
   wheel.
+- **Update (2026-09-17, campaign plan Amendment 1).** The current donor wheel turns out to have
+  four physical spoke classes (side x leading/trailing), and the operator's description of the
+  rig lines up with the solver's generator order at offset 0: `indexing_origin = (Side B,
+  LEADING)`, with RIGHT = Side A observed for this wheel's orientation (rotor on RIGHT, SPEC
+  §6.4.1). The reconciliation this limitation describes is therefore now down to **declaring
+  that one indexing origin and confirming the S0..S3 class pattern at B2-M8** — not an open
+  research question — but it remains a limitation until M8 confirms it and a physical truing
+  session actually makes the declaration. It stays scoped to this donor wheel's observed
+  orientation, not stated as a general rule. See `SOLENOID_CAMPAIGN_PLAN.md` Amendment 1 (C1–C2)
+  and `SOLENOID_CAMPAIGN.md`'s Convention section.
 
 Carried forward from the 2026-09-04 DSP and build-hygiene pass:
 
