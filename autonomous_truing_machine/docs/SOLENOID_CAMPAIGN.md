@@ -270,9 +270,34 @@ current, so 0 mV is the expected reading, not evidence the meter isn't working).
 
 **E2 marked done, both channels.**
 
+### B2-M1 — strike geometry, all four classes (2026-09-17)
+
+**Tool used:** `solenoid_smoke`'s normal fire (`l`/`r`, not baseline) at a mid-bracket width for
+each station — 60 ms for LEFT ([40, 85]), 80 ms for RIGHT ([60, 95]). 3 shots per class, all
+observed live.
+
+**Results:**
+
+| class | shots | result |
+|---|---|---|
+| LEFT-leading | 3/3 | clean — mid free span, single contact, clean retract, no rattle |
+| LEFT-trailing | 3/3 | clean — no glancing/sliding contact observed |
+| RIGHT-leading | 3/3 | clean, rotor clearance confirmed |
+| RIGHT-trailing | 3/3 | clean, rotor clearance confirmed — no glancing/sliding contact |
+
+**Note:** the glancing/sliding risk flagged for trailing classes during M3 (Amendment 1, C3) did
+not reproduce here. M1's deliberate, one-at-a-time positioning gave the operator time to align
+properly before each shot, unlike M3's rapid back-and-forth width bisection under time pressure.
+This is consistent with the mechanical (not pulse-width) explanation already settled on — a
+positioning-stability issue that shows up more under a faster cadence, not a property of any
+particular width. Out of scope for this campaign to fix (a clamp, or a firmer manual hold during
+demo positioning, per the operator).
+
+**M1 marked done, all four classes.**
+
 ## Next
 
-**M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
-class where relevant, per Amendment 1 C3), then the two-station checks: M6 (wrong-actuator
-hazard), M7 (idle rattle), M8 (end-to-end attribution, which also verifies the declared class
-map in the Convention section above). PRESENT flips to 1 per station only after it passes.
+**M2, M4, M5** per station (standoff, drift, station angle — all per class where relevant, per
+Amendment 1 C3), then the two-station checks: M6 (wrong-actuator hazard), M7 (idle rattle), M8
+(end-to-end attribution, which also verifies the declared class map in the Convention section
+above). PRESENT flips to 1 per station only after it passes.
