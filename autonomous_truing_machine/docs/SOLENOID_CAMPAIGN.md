@@ -237,6 +237,26 @@ watching both plungers live through each one.
 design ("Fires nothing on boot; every activation is a keystroke") and confirms it holds in
 practice, not just by source inspection.
 
+### B2-E1 — shared parts, both channels (2026-09-17)
+
+**Method:** operator multimeter, power applied but not firing.
+
+**Results:**
+- **Coil resistance:** ~20 Ω on **both** channels, fluctuating rather than settling to a stable
+  value. Expected ≈40 Ω (JF-0530B, 12 V / 300 mA nameplate → R ≈ V/I ≈ 40 Ω). Not yet isolated
+  to a specific connection (would need a direct-on-the-solenoid-leads probe to rule out a
+  connector/terminal-block contact issue, the same class of fault as B0's loose RIGHT gate
+  lead) — **operator decision: not pursued further now**, judged stable enough to proceed.
+  **Flagged, not resolved:** if either channel later shows an intermittent no-fire, mis-strike,
+  or measured-pulse anomaly during M1/M2/M4/M5/M6–M8, this reading is the first thing to
+  revisit.
+- **Rail voltage:** 12.2 V (shared supply, one reading covers both channels).
+- **Diode orientation:** confirmed correct, both channels.
+- **Grounds:** confirmed continuous to the star-ground point, both channels.
+
+**E1 marked done** on the strength of the above, with the coil-resistance note carried forward
+as an open, explicitly-deferred item rather than a resolved one.
+
 ## Next
 
 **M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
