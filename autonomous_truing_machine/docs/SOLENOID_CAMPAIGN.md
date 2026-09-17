@@ -224,6 +224,19 @@ evidence already exists** (`ab02201`, B1a's original T6 run) — its quiet count
 captured, since B1a only needed to prove the fix holds under adversarial load, not establish a
 quiet baseline. Cheap to add later if wanted for symmetry.
 
+### B2-E4 — quiet boot, both channels (2026-09-17)
+
+**Tool used:** `tools/bench/solenoid_smoke` (the bench sketch itself, not the T6 harness —
+`pluck_timing_check` fires automatically by design and is the wrong tool for this check).
+
+**Method:** three independent reset events (one from the flash's own `--after hard_reset`, two
+deliberate `esptool --before default_reset --after hard_reset chip_id` no-op resets), operator
+watching both plungers live through each one.
+
+**Result:** zero movement on either channel across all three resets. Matches the sketch's own
+design ("Fires nothing on boot; every activation is a keystroke") and confirms it holds in
+practice, not just by source inspection.
+
 ## Next
 
 **M1, M2, M4, M5** per station (strike geometry, standoff, drift, station angle — all per
