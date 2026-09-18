@@ -390,9 +390,13 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 **Question:** which per-actuator pulse and shared DSP config gives discriminated, consistent clears robustly across spokes at both stations?
 
 **Physical:**
-- Per station, 3 pulse levels at 25/50/75 % of that bracket, plus 20 ms if it falls inside.
+- **(Amendment 2, 2026-09-18 — replaces the flat 25/50/75 % rule)** Levels are drawn from the measured M3 brackets, not a percentage split, so the grid actually samples the short edge (where the dwell/muting hypothesis in `SOLENOID_CAMPAIGN.md` predicts the optimum) and gives the two stations at least one truly common pulse width for rule 3's shared-pulse comparison:
+  - measured brackets: LEFT [40, 85] ms · RIGHT [60, 95] ms; intersection [60, 85] ms.
+  - **common levels, both stations:** 60, 72, 85 ms.
+  - **LEFT-only short-edge level:** 40 ms (its own `p_reach`, outside RIGHT's bracket).
+  - LEFT tests {40, 60, 72, 85}; RIGHT tests {60, 72, 85}.
 - **(Amendment 1, C6)** 6 strikes × level × 4 exploration spokes per station (2 per class), randomized; a no-fire control every 4th trial.
-- ≈144–192 captures (3–4 levels), plus controls.
+- ≈168 captures (4 levels LEFT, 3 levels RIGHT), plus controls — inside the original ≈144–192 envelope.
 
 **Offline:**
 - `native_sweep` over these captures, the B3.0 controls, historical pass-C and `nano_ambient_ambiguous`.
@@ -402,10 +406,11 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 **Selection rules (pre-registered):**
 1. **Constraints:** 0 false clears on every control set; 0 inconsistent clears; 100 % attribution; no selection shift.
 2. **DSP (shared):** maximize the worst spoke's consistent clear rate **across both stations**.
-3. **Pulse:** shared if one level lies inside both stations' constraint-satisfying plateaus, with each station's worst spoke within 10 pp of that station's best. Otherwise per actuator, each chosen by its own station's worst spoke.
-4. **Tie-breaks:** plateau interior, then fewest fields changed from baseline, then shorter pulse.
+3. **Pulse:** shared if one level lies inside both stations' constraint-satisfying plateaus, with each station's worst spoke within 10 pp of that station's best. Otherwise per actuator, each chosen by its own station's worst spoke. **Consistent clear rate remains the primary metric — SNR is never substituted for it.**
+4. **Tie-breaks:** plateau interior, then fewest fields changed from baseline, then **median SNR (Amendment 2 — reported per level per rule 2a below; higher wins a tie)**, then shorter pulse.
 5. **Refinement:** at most one extra pulse level per station, only at a bracket edge or a >25 pp cliff.
 6. **(Amendment 1, C4/C6) Class check:** the pulse rule also evaluates each class's worst spoke separately. If every constraint-satisfying level leaves one class's worst spoke more than 10 pp below the other class's at a station, that feeds **G-class** (defined under B2), not this rule's ordinary tie-break.
+2a. **(Amendment 2) SNR, reported not gating:** median SNR per pulse level (per station, and per class where the count supports it) is reported alongside clear rate in the B3.2 stage report, using the per-trial SNR field already collected (`SOLENOID_CAMPAIGN_PLAN.md:275`). This is diagnostic evidence for the dwell/muting question raised 2026-09-18 — a level with a markedly lower clear rate *and* lower SNR than a shorter neighbor corroborates dwell; it does not by itself change the selection. Only rule 4's tie-break use is binding.
 
 **Blind human review:** ~24 stratified trials across both stations, recording strike audible / ring in analysed window / second impact or rattle / clean excitation **/ metallic or rotor ring audible (Amendment 1, C8 — RIGHT station only; the rotor is a RIGHT-only structural resonator that air shots can't excite, so it can only appear in strike captures)**. No pitch judgments. The review **does not select** anything. A systematic "clear without ring" stops the stage.
 
@@ -520,6 +525,7 @@ This assumes identical, independent spokes, which is false: the worst spoke and 
 | pulse mechanism, DSP algorithm code, selection-rule version | build rev / version; parity replay | exploration comparability if changed mid-B3.2; confirmation if changed after B3.4 |
 | one station's solenoid, mount, MOSFET channel, standoff, strike point | **declared station rig_id only — no digest sees these** | that station's confirmation |
 | **(Amendment 1, C10) fitting id or tower height, per station** | **declared station rig_id** | that station's confirmation, both classes |
+| **(Amendment 2, 2026-09-18) any rig_id-tracked field changes** | **rig_id bumps** (`<STATION>/rig-<n>` in `SOLENOID_CAMPAIGN.md`'s rig registry, append-only); trial manifests stamp the token | that station's confirmation only — a later rig version at the same station is a clean A/B against the prior version's evidence, not a loss of it |
 | station angles | `machine_profile_id` (session header) | positioning/attribution evidence at that station |
 | supply V, mic position, board power | declared shared rig registry | both stations' confirmation |
 | physical S0 marking, LEFT/RIGHT labels, board station↔pin assignment | rig registry, build | all spoke-indexed attribution; rerun B2 M8 |

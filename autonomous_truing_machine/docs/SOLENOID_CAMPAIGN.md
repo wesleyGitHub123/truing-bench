@@ -42,8 +42,25 @@ physical truing session.
 
 ## Rig registry
 
+**Rig IDs (Amendment 2, 2026-09-18).** Each station carries a versioned token, `<STATION>/rig-<n>`,
+covering exactly the fields the plan's provenance table already says only the rig registry
+tracks: solenoid, mount, standoff fitting, strike point. Current: **LEFT/rig-1**, **RIGHT/rig-1**.
+
+- **This registry is append-only from this point on.** A change to any of those fields at a
+  station gets a new dated block below the table, under a bumped token (`LEFT/rig-2`, ...); the
+  old block is left as-is, not edited in place. The one exception is fixing a plain transcription
+  error (e.g. the 2026-09-17 standoff-order correction below), which stays a same-token edit and
+  says so inline, same as that one does.
+- **Trial manifests should stamp this token per trial** (a field alongside `station`), so B3.2 and
+  later evidence can be grouped by physical rig version without re-deriving it from dates. This is
+  a note for whichever tool writes the manifest (`tools/campaign_runner.py`, in progress
+  elsewhere) rather than something this doc enforces on its own.
+- **Why now, not later:** cheap to add before B3.2 data exists; expensive to retrofit once trials
+  reference a rig state only by "whatever the table said that day."
+
 | | LEFT | RIGHT |
 |---|---|---|
+| **rig_id (current)** | **LEFT/rig-1** | **RIGHT/rig-1** |
 | board GPIO | 9 (D6) | 10 (D7) |
 | board macro | `BOARD_PLUCK_ACTUATOR_LEFT_GPIO` | `BOARD_PLUCK_ACTUATOR_RIGHT_GPIO` |
 | PRESENT (current) | 0 | 0 |
