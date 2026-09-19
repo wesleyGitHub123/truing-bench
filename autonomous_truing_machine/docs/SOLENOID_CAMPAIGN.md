@@ -512,3 +512,37 @@ measured-pulse anomaly) but was never gating — E2–E4 independently confirm t
 
 **Per the standing halt-and-ask rule, flipping PRESENT to 1 is a physical/provenance action this
 doc will not do on its own — it needs explicit operator go-ahead, station by station.**
+
+## B3.0 prerequisite — MEASURE_ONCE overrides (2026-09-19)
+
+B3.0's no-fire controls could not run: `MEASURE_ONCE` took only a spoke id. Built and committed
+(`f494070`): `arg` packs spoke (bits 0-7), **no_fire** (bit 8) and a one-shot **pulse override** in
+ms (bits 16-31); `tools/campaign_runner.py` exposes them as `--no-fire` and `--pulse-ms` and stamps
+`campaign_selection` (`derived` / `pulse_override` / `no_fire`) into each manifest. Air shots need no
+firmware: rotate the wheel to a gap and fire normally. T2 220/220; campaign and DevKit images build.
+**Not yet run on target** — that is the flash-and-mic step below.
+
+**Rules for reading these captures (carry into the pre-registration):**
+
+- **`fired` is the only discriminator between a strike and a no-fire control.** A no-fire capture
+  still carries its spoke's `station` and `debug_triggered=true`; `station` alone is not evidence of
+  excitation. Any tool or report that groups by station must gate on `fired`.
+- **A pulse level is identified by `pulse_ms` together with `station`, never by `excitation_digest`.**
+  The override leaves the profile, and so the digest, untouched: captures at 40 and 85 ms share one
+  digest.
+- `campaign_runner.py` cross-checks the board's record against the request and logs `!!` for a
+  control that says `fired=true`, a strike that says `fired=false`, or a level recorded at another
+  width. Such a trial is not counted.
+
+**Open, not settled here:**
+
+- `tools/review_packet.py` (untracked, another agent's) still lists no-fire and strike captures
+  identically — it does not show `fired` or `pulse_ms`. Needs fixing before any blind review packet
+  is built from B3.0 data.
+- The override's ceiling is the driver's existing 1000 ms stuck-actuator bound, not a thermal or
+  dwell limit; the B2 brackets are enforced only by the runner. Whether the debug channel should
+  carry a tighter cap is an operator decision.
+
+**To run B3.0 (physical):** connect the mic; I flash `nano_esp32_fastdemo_mic_campaign` and confirm
+it boots; position the wheel at a gap once per station for the air shots; keep the room quiet
+through the ~5 minutes of automated capture.
