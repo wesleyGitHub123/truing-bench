@@ -20,7 +20,8 @@
  *
  * One axis at a time: every setting varies a single field and holds the rest at the INMP441
  * fixture profile's value, so a row's effect is attributable. The baseline row (the profile
- * as-is) is printed once at the top for reference.
+ * as-is) is printed once at the top for reference. After the one-axis rows come the 24 two-field rows the
+ * B3.2 registration names (axis "a+b", value "x+y"); the setting the validator refuses prints OUT_OF_RANGE.
  *
  * TRUING_SWEEP_MODE=lines switches to a different question: not "would this setting clear" but
  * "what strong peaks does the firmware's own detector find in this capture, before any clear or
@@ -154,14 +155,14 @@ static void csv_f(char *out, size_t cap, float v)
 }
 
 /* One analysis pass on one buffer under one chain profile. */
-static void run_one(const char *name, const char *axis, double value, const truing_chain_profile_t *chain,
+static void run_one_s(const char *name, const char *axis, const char *value, const truing_chain_profile_t *chain,
                     const int32_t *words, uint32_t n_words)
 {
     /* A setting the config validator rejects is a finding, not an error: it says the field
      * cannot go there without moving another (gate_start_ms + window_ms must fit capture_ms). */
     const char *field = NULL;
     if (truing_chain_profile_check(chain, &field) != TRUING_CFG_OK) {
-        printf("%s,%s,%g,OUT_OF_RANGE,%s,,,,,,\n", name, axis, value, field != NULL ? field : "?");
+        printf("%s,%s,%s,OUT_OF_RANGE,%s,,,,,,\n", name, axis, value, field != NULL ? field : "?");
         return;
     }
     truing_audio_source_if_t src;
@@ -174,7 +175,7 @@ static void run_one(const char *name, const char *axis, double value, const trui
     TEST_ASSERT_NOT_NULL(scratch);
     const char *detail = NULL;
     if (!truing_acoustic_real_init(&a, &ctx, g_clock, chain, &g_excitation, &g_profile, &src, NULL, scratch, bytes, &detail)) {
-        printf("%s,%s,%g,INIT_REFUSED,%s,,,,,,\n", name, axis, value, detail);
+        printf("%s,%s,%s,INIT_REFUSED,%s,,,,,,\n", name, axis, value, detail);
         free(scratch);
         return;
     }
@@ -186,11 +187,20 @@ static void run_one(const char *name, const char *axis, double value, const trui
     csv_f(f1, sizeof(f1), d->f1_hz);
     csv_f(f2, sizeof(f2), d->f2_hz);
     csv_f(snr, sizeof(snr), d->snr_db);
-    printf("%s,%s,%g,%s,%s,%u,%u,%s,%s,%s,%d\n",
+    printf("%s,%s,%s,%s,%s,%u,%u,%s,%s,%s,%d\n",
            name, axis, value,
            truing_status_str(e.meta.status), truing_reason_str(e.meta.reason_code),
            (unsigned)d->n_strong_peaks, (unsigned)d->n_peaks_in_band, f1, f2, snr, clears);
     free(scratch);
+}
+
+/* The one-axis rows print their value with %g, exactly as before. */
+static void run_one(const char *name, const char *axis, double value, const truing_chain_profile_t *chain,
+                    const int32_t *words, uint32_t n_words)
+{
+    char label[24];
+    (void)snprintf(label, sizeof(label), "%g", value);
+    run_one_s(name, axis, label, chain, words, n_words);
 }
 
 /* One bundle's samples, or NULL with *err naming why (the caller prints its own CSV row). */
@@ -266,6 +276,32 @@ static void sweep_bundle(const char *dir, const char *name)
     for (size_t i = 0; i < sizeof(prom) / sizeof(prom[0]); ++i) {
         c = g_base; c.prominence_db = prom[i];
         run_one(name, "prominence_db", prom[i], &c, words, n_words);
+    }
+    /* The 24 two-field candidates of the B3.2 registration (docs/SOLENOID_CAMPAIGN.md, "Candidate set"), in
+     * its tie-break order: gate x window, then gate x prominence, then window x prominence. Together with
+     * the baseline and the 9 rows above they are the 34 candidates, contiguous and in registered order.
+     * The axis names both fields and the value is "<first>+<second>", so a row's label stays two columns. */
+    char pair[24];
+    for (size_t i = 0; i < sizeof(gate) / sizeof(gate[0]); ++i) {
+        for (size_t j = 0; j < sizeof(win) / sizeof(win[0]); ++j) {
+            c = g_base; c.gate_start_ms = gate[i]; c.window_ms = win[j];
+            (void)snprintf(pair, sizeof(pair), "%g+%g", (double)gate[i], (double)win[j]);
+            run_one_s(name, "gate_start_ms+window_ms", pair, &c, words, n_words);
+        }
+    }
+    for (size_t i = 0; i < sizeof(gate) / sizeof(gate[0]); ++i) {
+        for (size_t j = 0; j < sizeof(prom) / sizeof(prom[0]); ++j) {
+            c = g_base; c.gate_start_ms = gate[i]; c.prominence_db = prom[j];
+            (void)snprintf(pair, sizeof(pair), "%g+%g", (double)gate[i], (double)prom[j]);
+            run_one_s(name, "gate_start_ms+prominence_db", pair, &c, words, n_words);
+        }
+    }
+    for (size_t i = 0; i < sizeof(win) / sizeof(win[0]); ++i) {
+        for (size_t j = 0; j < sizeof(prom) / sizeof(prom[0]); ++j) {
+            c = g_base; c.window_ms = win[i]; c.prominence_db = prom[j];
+            (void)snprintf(pair, sizeof(pair), "%g+%g", (double)win[i], (double)prom[j]);
+            run_one_s(name, "window_ms+prominence_db", pair, &c, words, n_words);
+        }
     }
     for (size_t i = 0; i < sizeof(depth) / sizeof(depth[0]); ++i) {
         c = g_base; c.max_peak_depth_db = depth[i];
