@@ -11,6 +11,7 @@
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/acoustic_if.h"
 #include "truing_hal/clock_if.h"
+#include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
@@ -65,6 +66,8 @@ typedef struct {
     truing_navigation_if_t nav;
     truing_navigation_manual_ctx_t nctx;
     truing_navigation_synthetic_ctx_t nsyn;
+    truing_navigation_if_t nav_phys, nav_sim;   /* the composite's two children */
+    truing_navigation_composite_ctx_t ncomp;
     truing_calc_if_t calc;
     truing_calc_synthetic_ctx_t cctx;
     truing_telemetry_if_t sink;
@@ -199,6 +202,19 @@ static void rig_build_acoustic_demo(rig_t *r, const float *lateral, uint8_t limi
     r->cctx.n_mt_identified = false;
     rig_reinit(r, limit);
 }
+/* The acoustic demonstration image on a REAL front end (plan A6 / B1b): the stations that need a real
+ * spoke under a real plunger are answered by the operator, the simulated runout and adjustment by the
+ * stand-in, behind one navigation authority. */
+static void rig_build_acoustic_composite(rig_t *r, const float *lateral, uint8_t limit)
+{
+    rig_build_fastdemo(r, lateral);
+    r->cctx.n_mt_identified = false;
+    static const truing_station_id_t physical[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT };
+    truing_navigation_manual_init(&r->nav_phys, &r->nctx, r->clock, 32u, 32u, &r->machine);
+    truing_navigation_synthetic_init(&r->nav_sim, &r->nsyn, r->clock, 32u, 32u, &r->machine, NULL, 0.0f, 0u);
+    TEST_ASSERT_TRUE(truing_navigation_composite_init(&r->nav, &r->ncomp, &r->nav_phys, &r->nav_sim, physical, 2u));
+    rig_reinit(r, limit);
+}
 
 /* The acquisition waits stop being issued, and only those. The machine still walks the same
  * states: it is not skipping the work, it is doing it itself. */
@@ -318,6 +334,74 @@ static void test_acoustic_demo_bounds_the_pluck_pass(void)
     truing_orch_provenance(&g.orch, &pv);
     TEST_ASSERT_EQUAL_INT(TRUING_LAYOUT_TENSION_ABSENT, pv.active_layout);
     TEST_ASSERT_TRUE(pv.plan.valid);
+}
+
+/* The bug the composite exists to remove, at the level it matters: with purely synthetic navigation
+ * the orchestrator is never told to move anything, so the derived station's actuator strikes whichever
+ * spoke happens to be there. On the composite each spoke is prompted at the station the acoustic
+ * subsystem derives for it -- LEFT, RIGHT, LEFT, RIGHT from spoke 0 -- and the runout, whose data is
+ * simulated, never asks anyone to turn the wheel. */
+static void test_composite_prompts_each_spoke_at_its_own_station_and_never_asks_for_the_rim(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_composite(&g, lat, 4u);
+    bring_to_ready(&g);   /* the reference is the operator's confirmation of spoke 0 at LEFT (the auto-operator stands in) */
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION]);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(4u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, g.sctx.spoke_prompt_station[0]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, g.sctx.spoke_prompt_station[1]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, g.sctx.spoke_prompt_station[2]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, g.sctx.spoke_prompt_station[3]);
+    /* every prompted station is the one the acoustic subsystem will fire, by construction of the rule */
+    for (uint8_t i = 0; i < 4u; ++i) {
+        TEST_ASSERT_EQUAL_INT(truing_acoustic_station_for_spoke(i), g.sctx.spoke_prompt_station[i]);
+    }
+    /* runout is simulated: nobody is asked to place a rim index, and the run still gets through it */
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_RIM_INDEX]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_READ_RUNOUT]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.state_entries[TRUING_STATE_COMPUTE_ADJUSTMENTS]);
+    /* provenance is not upgraded by the real half: still SYNTHETIC, and the name says what the mix is */
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, g.nav.source_impl);
+    TEST_ASSERT_EQUAL_STRING("navigation_composite(physical=navigation_manual,simulated=navigation_synthetic)", g.nav.impl_name);
+}
+
+/* The N = 1 descope must still work through the composite: one reference confirmation, one spoke
+ * placement at LEFT, and nothing asked at RIGHT or anywhere else. */
+static void test_composite_at_one_struck_spoke_asks_for_the_reference_and_that_spoke_only(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_composite(&g, lat, 1u);
+    bring_to_ready(&g);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION]);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, g.sctx.spoke_prompt_station[0]);
+    for (uint8_t i = 1u; i < 32u; ++i) {
+        TEST_ASSERT_EQUAL_INT(TRUING_STATION_UNSET, g.sctx.spoke_prompt_station[i]);   /* no other spoke was ever asked for */
+    }
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_RIM_INDEX]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.state_entries[TRUING_STATE_COMPUTE_ADJUSTMENTS]);   /* and the run still solved */
+}
+
+/* The contrast that gives the test above its meaning: on the synthetic path the same run issues NO
+ * spoke-positioning prompt at all. That shows the orchestrator was never told to move anything; it
+ * does not by itself show a wrong strike, which needs a physical wheel to observe. */
+static void test_synthetic_navigation_asks_for_no_spoke_positioning_at_all(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_acoustic_demo(&g, lat, 4u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);   /* it still measured spokes */
 }
 
 /* THE guard. Same bound, same image, but the artifact identifies its common mode, so the
@@ -1087,6 +1171,9 @@ int main(int argc, char **argv)
     RUN_TEST(test_interactive_acquisition_is_operator_driven_and_declares_real);
     RUN_TEST(test_fastdemo_abort_still_ends_the_session);
     RUN_TEST(test_acoustic_demo_bounds_the_pluck_pass);
+    RUN_TEST(test_composite_prompts_each_spoke_at_its_own_station_and_never_asks_for_the_rim);
+    RUN_TEST(test_composite_at_one_struck_spoke_asks_for_the_reference_and_that_spoke_only);
+    RUN_TEST(test_synthetic_navigation_asks_for_no_spoke_positioning_at_all);
     RUN_TEST(test_acoustic_demo_bound_is_refused_when_tension_is_in_the_layout);
     RUN_TEST(test_acoustic_demo_provenance_reports_the_bound);
     RUN_TEST(test_without_a_bound_every_spoke_is_measured_under_tension_absent);

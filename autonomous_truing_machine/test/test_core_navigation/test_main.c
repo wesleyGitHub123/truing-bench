@@ -7,6 +7,7 @@
 #include "truing/wheel_geometry.h"
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/clock_if.h"
+#include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/wheel_drive_if.h"
@@ -370,6 +371,206 @@ static void test_wheel_drive_stub_and_fake(void)
     TEST_ASSERT_EQUAL_STRING("rim_angle", truing_nav_target_kind_str(TRUING_NAV_TARGET_RIM_ANGLE));
 }
 
+/* ---- composite navigation (plan A6 / B1b): the operator where it is physical, a stand-in elsewhere ----
+ *
+ * The acoustic demonstration image fires real solenoids over synthetic runout. Purely synthetic
+ * navigation would tell the orchestrator a spoke was positioned when nothing moved, so the derived
+ * station's actuator would strike whatever spoke was under it. These tests pin the routing (by
+ * station), the single position authority (physical only), and the provenance label. */
+typedef struct {
+    truing_navigation_if_t phys, sim, comp;
+    truing_navigation_manual_ctx_t mctx;
+    truing_navigation_synthetic_ctx_t sctx;
+    truing_navigation_composite_ctx_t cctx;
+} composite_rig_t;
+
+static composite_rig_t g_rig;
+static const truing_station_id_t k_acoustic_stations[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT };
+
+static composite_rig_t *build_composite(void)
+{
+    composite_rig_t *r = &g_rig;
+    memset(r, 0, sizeof(*r));
+    truing_navigation_manual_init(&r->phys, &r->mctx, g_clock, 32u, 32u, &g_machine);
+    truing_navigation_synthetic_init(&r->sim, &r->sctx, g_clock, 32u, 32u, &g_machine, NULL, 0.0f, 0u);
+    TEST_ASSERT_TRUE(truing_navigation_composite_init(&r->comp, &r->cctx, &r->phys, &r->sim, k_acoustic_stations, 2u));
+    return r;
+}
+
+static truing_nav_target_t rim_at(uint8_t k, truing_station_id_t s)
+{
+    truing_nav_target_t t;
+    memset(&t, 0, sizeof(t));
+    t.kind = TRUING_NAV_TARGET_RIM_INDEX;
+    t.index = k;
+    t.station = s;
+    return t;
+}
+
+static void test_composite_sends_acoustic_stations_to_the_operator_and_the_rest_to_the_stand_in(void)
+{
+    composite_rig_t *r = build_composite();
+    truing_nav_result_t res;
+    truing_wheel_position_t pos;
+
+    /* The reference is the operator's: spoke 0 confirmed at the reference station. Until they confirm,
+     * the authority says there is no reference, whatever the stand-in "homed" to. */
+    truing_navigation_establish_reference(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION, res.wait_kind);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_LEFT, res.target.station);
+    truing_navigation_query(&r->comp, &pos);
+    TEST_ASSERT_FALSE(pos.reference_established);
+    truing_navigation_confirm(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_navigation_query(&r->comp, &pos);
+    TEST_ASSERT_TRUE(pos.reference_established);
+    TEST_ASSERT_TRUE(pos.operator_confirmed);
+    TEST_ASSERT_FALSE(pos.sensor_confirmed);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, truing_rotation_for_feature_at(0.0f, 0.0f), pos.rotation_rad);
+
+    /* Spoke 1 at the RIGHT acoustic station: a person places it. */
+    truing_nav_target_t t = spoke_at(1u, TRUING_STATION_ACOUSTIC_RIGHT);
+    truing_navigation_request(&r->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_WAIT_POSITION_TO_SPOKE, res.wait_kind);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, res.target.station);
+    truing_navigation_poll(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    truing_navigation_confirm(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_navigation_query(&r->comp, &pos);
+    const float rotation_after_spoke =
+        truing_rotation_for_feature_at(truing_spoke_angle(32u, 1u), g_machine.stations[TRUING_STATION_ACOUSTIC_RIGHT].angle_rad);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, rotation_after_spoke, pos.rotation_rad);
+    TEST_ASSERT_TRUE(pos.operator_confirmed);
+
+    /* Runout and adjustment stay simulated: DONE at once, nobody is asked, and the physical authority
+     * does not move -- a simulated positioning must never rewrite where the real wheel is believed to be. */
+    truing_nav_target_t rim = rim_at(5u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->comp, &rim, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_navigation_query(&r->comp, &pos);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, rotation_after_spoke, pos.rotation_rad);
+    TEST_ASSERT_TRUE(pos.operator_confirmed);
+    t = spoke_at(3u, TRUING_STATION_ADJUSTMENT);
+    truing_navigation_request(&r->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_navigation_query(&r->comp, &pos);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, rotation_after_spoke, pos.rotation_rad);
+
+    /* Who did what. The stand-in never saw the acoustic requests, the operator never the rest. */
+    TEST_ASSERT_EQUAL_UINT32(2u, r->cctx.physical_requests);    /* reference + spoke 1 */
+    TEST_ASSERT_EQUAL_UINT32(2u, r->cctx.simulated_requests);   /* rim 5 + spoke 3 at adjustment */
+    TEST_ASSERT_EQUAL_UINT32(2u, r->mctx.confirmations);
+    TEST_ASSERT_EQUAL_UINT32(2u, r->sctx.requests);
+
+    /* The stand-in has no operator step, so a confirmation now answers no request. */
+    truing_navigation_confirm(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_STALE_INTENT, res.reason);
+    TEST_ASSERT_EQUAL_UINT32(2u, r->mctx.confirmations);
+}
+
+static void test_composite_stand_in_is_refused_until_the_physical_reference_exists(void)
+{
+    composite_rig_t *r = build_composite();
+    truing_nav_result_t res;
+    truing_nav_target_t rim = rim_at(0u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->comp, &rim, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+    truing_nav_target_t adj = spoke_at(2u, TRUING_STATION_ADJUSTMENT);
+    truing_navigation_request(&r->comp, &adj, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+    TEST_ASSERT_EQUAL_UINT32(0u, r->sctx.requests);   /* refused before it reached the stand-in */
+
+    /* A homing the stand-in did on its own does not count: only the operator's confirmation does. */
+    truing_navigation_establish_reference(&r->comp, &res);
+    truing_navigation_request(&r->comp, &rim, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+
+    /* The operator's own stations do not need a prior reference: their confirmation creates it. */
+    composite_rig_t *fresh = build_composite();
+    truing_nav_target_t t = spoke_at(0u, TRUING_STATION_ACOUSTIC_LEFT);
+    truing_navigation_request(&fresh->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+}
+
+static void test_composite_is_as_real_as_its_least_real_part_and_says_what_it_is(void)
+{
+    composite_rig_t *r = build_composite();
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_REAL, r->phys.source_impl);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, r->sim.source_impl);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, r->comp.source_impl);   /* never upgraded to REAL by its physical half */
+    TEST_ASSERT_EQUAL_STRING("navigation_composite(physical=navigation_manual,simulated=navigation_synthetic)", r->comp.impl_name);
+
+    /* two real halves make a real whole: the rule is a minimum, not a constant */
+    truing_navigation_if_t other, both;
+    truing_navigation_manual_ctx_t octx;
+    truing_navigation_composite_ctx_t bctx;
+    truing_navigation_manual_init(&other, &octx, g_clock, 32u, 32u, &g_machine);
+    TEST_ASSERT_TRUE(truing_navigation_composite_init(&both, &bctx, &r->phys, &other, k_acoustic_stations, 2u));
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_REAL, both.source_impl);
+}
+
+static void test_composite_drops_a_pending_operator_request_when_the_stand_in_takes_over(void)
+{
+    composite_rig_t *r = build_composite();
+    truing_nav_result_t res;
+    truing_navigation_establish_reference(&r->comp, &res);
+    truing_navigation_confirm(&r->comp, &res);
+    truing_nav_target_t t = spoke_at(2u, TRUING_STATION_ACOUSTIC_LEFT);
+    truing_navigation_request(&r->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    const uint32_t confirmations = r->mctx.confirmations;
+
+    truing_nav_target_t rim = rim_at(1u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->comp, &rim, &res);   /* a newer request replaces the pending one */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_navigation_confirm(&r->comp, &res);          /* a late CONFIRM_POSITIONED must not reach the old request */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_STALE_INTENT, res.reason);
+    TEST_ASSERT_EQUAL_UINT32(confirmations, r->mctx.confirmations);
+
+    /* stop() clears whatever is pending on either side */
+    truing_navigation_request(&r->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    truing_navigation_stop(&r->comp);
+    truing_navigation_confirm(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_STALE_INTENT, res.reason);
+    truing_navigation_poll(&r->comp, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IDLE, res.outcome);
+}
+
+static void test_composite_refuses_a_bad_configuration_and_a_bad_station(void)
+{
+    composite_rig_t *r = build_composite();
+    truing_navigation_if_t bad;
+    truing_navigation_composite_ctx_t bctx;
+    truing_nav_result_t res;
+    truing_nav_target_t t = spoke_at(0u, TRUING_STATION_ACOUSTIC_LEFT);
+    const truing_station_id_t unset[] = { TRUING_STATION_UNSET };
+    const truing_station_id_t wild[] = { (truing_station_id_t)99 };
+
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, NULL, &r->sim, k_acoustic_stations, 2u));
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, &r->phys, NULL, k_acoustic_stations, 2u));
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, &r->phys, &r->phys, k_acoustic_stations, 2u));
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, &r->phys, &r->sim, NULL, 0u));
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, &r->phys, &r->sim, unset, 1u));
+    TEST_ASSERT_FALSE(truing_navigation_composite_init(&bad, &bctx, &r->phys, &r->sim, wild, 1u));
+    truing_navigation_request(&bad, &t, &res);   /* a failed init leaves an interface that refuses, not one that guesses */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NOT_IMPLEMENTED, res.reason);
+
+    truing_navigation_establish_reference(&r->comp, &res);
+    truing_navigation_confirm(&r->comp, &res);
+    t.station = (truing_station_id_t)99;
+    truing_navigation_request(&r->comp, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, res.reason);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -384,5 +585,10 @@ int main(int argc, char **argv)
     RUN_TEST(test_synthetic_in_motion_polling_stop_and_fault);
     RUN_TEST(test_synthetic_refuses_unknown_calibration);
     RUN_TEST(test_wheel_drive_stub_and_fake);
+    RUN_TEST(test_composite_sends_acoustic_stations_to_the_operator_and_the_rest_to_the_stand_in);
+    RUN_TEST(test_composite_stand_in_is_refused_until_the_physical_reference_exists);
+    RUN_TEST(test_composite_is_as_real_as_its_least_real_part_and_says_what_it_is);
+    RUN_TEST(test_composite_drops_a_pending_operator_request_when_the_stand_in_takes_over);
+    RUN_TEST(test_composite_refuses_a_bad_configuration_and_a_bad_station);
     return UNITY_END();
 }
