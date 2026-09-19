@@ -1084,3 +1084,50 @@ spoke clear. A hardware change (rubber on the plunger stops) was deferred: it wo
 standoff and pulse bracket re-measured, and it is not needed to continue on `rig-1`. If a station misses the
 exploration gate, a stop-damping change is a candidate for the plan's one bounded mechanical lever, by a small
 amendment at that point.
+
+### Readings fixed for the selection tool (2026-09-19, before any strike; `tools/b32_select.py`, `f83983d`)
+
+The tool applies rules 1-8, the gates, the draw and the reported items as registered. Where the text admits more
+than one mechanical reading it uses the one below. None changes a threshold, a level, a candidate or a spoke, and
+each is fixed before a strike exists. An independent audit of the first draft found these readings unrecorded and
+one of them (the draw) structurally unable to review one spoke per station; both are corrected here.
+
+1. **A clear, and exact arithmetic.** A clear under a candidate is a sweep row with status `suspect` and an f1. The
+   "+-2 Hz" band and "more than 2 Hz" (selection shift) are compared in exact millihertz, since the sweep prints
+   three decimals: a difference of exactly 2.000 Hz is inside the band and is not a shift (as floats, 510.003 and
+   512.003 differ by 2.000000000000057).
+2. **Complete data only.** "All 224 trials" was written before Amendment 1 added the air shots; it is read as all
+   266 planned trials, the control sets at 40 (B3.0), 18 (pass-C) and 1 (ambient), and every needed sweep row.
+   Otherwise the tool reports INCOMPLETE and selects nothing. Trial number, requested level and spoke come from the
+   plan by `campaign_trial`; attribution also requires the board's own `station` field to match the station derived
+   from the spoke.
+3. **Cannot run, and never clears.** The 7 candidates the validator refuses are not evaluable and never eligible. A
+   candidate that runs and never clears has 0 false clears and 0 inconsistent clears, so its cells satisfy the
+   constraints vacuously: it is eligible, with score 0. G-analysis therefore fires only when every evaluable
+   candidate is inadmissible or has an empty S at a station. Nothing clearing at all is shown by a top score of 0,
+   which the report prints as NO SELECTION (the score-0 tie-break winner is not a choice), and by the exploration gate.
+4. **Rule 5 at candidate level.** Candidates tied on score are ordered by: plateau interior (how many stations, 0 to
+   2, have a chosen level with both neighbours in S), fewest fields changed, higher median SNR, shorter pulse (sum
+   over stations), then registered position. A candidate's chosen levels are the ones rule 4 gives it, using the same
+   tie-breaks. For a shared level the SNR is the lower of the two stations' medians.
+5. **SNR population.** The board records `expect_snr_db` only when its baseline analysis found an f1, so "the strike
+   captures that produced a spectrum" is the captures that carry an SNR. The report says so.
+6. **Exploration gate.** Per station: some eligible candidate has a cell in S at worst spoke 5/6 or better. It need
+   not be the same candidate at both stations, nor the chosen one.
+7. **Class check.** At the chosen candidate, over the levels in S; a gap is either class more than 10 pp below the other.
+8. **Refinement** is reported and never applied. The edge trigger uses the station's chosen level, the gap trigger
+   uses W over all tested levels; every trigger is listed with its whole-ms midpoint (two, when the sum is odd). Which
+   single extra level per station to run is decided when the lead registers it.
+9. **The blind-review draw.** One `random.Random(20260919)` consumed across the strata in the order LEFT 40, 60, 72,
+   85, then RIGHT 60, 72, 85, calling `sample` over each stratum's sorted trial numbers (the tool prints the Python
+   version). A fresh generator per stratum was rejected: all strata have 24 kept strikes, so each would draw the same
+   positions, and a pool in trial order is in block order, so the same blocks would be drawn every time and one
+   spoke per station could never be reviewed. It is made only when all planned trials are kept, and reads no verdict.
+10. **Reported, not gating:** unjudged clears (baseline and chosen, per level); overruns among kept and excluded
+    bundles; the window-truncation histogram; exclusions by code from the ledger; air-group lines, with captures that
+    have no readable spectrum counted as such and not as "no line"; SNR per level, and per class where a class has 6
+    or more captures; the noise-band counts (strike and no-fire clears with f1 in 355-395 Hz).
+
+**Checked how.** The selftest asserts these on the registered plan with synthetic clears; 37 single-rule mutations
+of the tool each fail it. On the real bundles the control sets count 40/18/1 and all 42 B3.2 air shots join their
+plan trials. Not checked: any strike data, because none exists. The tool has not been run on a complete campaign.
