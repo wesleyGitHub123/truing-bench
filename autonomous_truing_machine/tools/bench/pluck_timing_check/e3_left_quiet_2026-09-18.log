@@ -1,0 +1,6 @@
+I (99) esp_image: segment 2: paddr=0001d7c4 vaddr=40374000 size=I (10068) pluck_timing_check: fire 140/200: measured 20007 us, delta 7 us, hardware_timed=1
+I (11468) pluck_timing_check: fire 160/200: measured 20007 us, delta 7 us, hardware_timed=1
+I (12868) pluck_timing_check: fire 180/200: measured 20007 us, delta 7 us, hardware_timed=1
+I (14268) pluck_timing_check: fire 200/200: measured 20007 us, delta 7 us, hardware_timed=1
+I (14318) pluck_timing_check: === summary: 200 fires, 0 failed, 200 measured, worst |delta| 17 us, 0 over the 500 us tolerance, mean measured 20007 us ===
+I (14318) pluck_timing_check: PASS

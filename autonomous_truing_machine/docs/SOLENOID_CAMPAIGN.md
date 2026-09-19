@@ -236,12 +236,29 @@ mode — see that tool's own commit for why). Fires the real `src/pluck_gpio.c` 
 | loaded | 200/200 | 21 µs | 20007 µs | PASS |
 
 Both comfortably inside the 0.5 ms bound; the loaded run's slightly higher worst-case is
-consistent with the load tasks doing something, not a sign of trouble. **LEFT's loaded
-evidence already exists** (`ab02201`, B1a's original T6 run) — its quiet counterpart is not yet
-captured, since B1a only needed to prove the fix holds under adversarial load, not establish a
-quiet baseline. Cheap to add later if wanted for symmetry.
+consistent with the load tasks doing something, not a sign of trouble. **LEFT's own campaign-
+stage E3 was closed out 2026-09-18** — see below; this note's earlier "not yet captured" is
+stale as of that entry.
 
-### B2-E4 — quiet boot, both channels (2026-09-17)
+### B2-E3 — LEFT channel, quiet and loaded (2026-09-18)
+
+**Tool used:** `tools/bench/pluck_timing_check`'s `nano_pluck_timing_left` / `_left_quiet` envs,
+same harness as RIGHT. Fires the real `src/pluck_gpio.c` on LEFT's GPIO (9), 200 times at 20 ms
+commanded, with and without the two scheduler-pressure load tasks. Builds already existed from
+09-17 (`nano_pluck_timing_left*`); this run only needed flashing (3-region esptool write, never
+`-t upload`, per house rules) and a fresh serial capture per condition.
+
+**Results (logs committed alongside the tool, `e3_left_quiet_2026-09-18.log` /
+`e3_left_loaded_2026-09-18.log`):**
+
+| condition | fires | worst \|delta\| | mean measured | result |
+|---|---|---|---|---|
+| quiet | 200/200 | 17 µs | 20007 µs | PASS |
+| loaded | 200/200 | 21 µs | 20007 µs | PASS |
+
+Both comfortably inside the 0.5 ms bound, both channels now symmetric on E3. **B2-E3 marked done,
+both channels.** This closes the one remaining gap in B2's electrical/pulse-timing checks — B2
+has no open items left blocking either station's PRESENT flip except operator sign-off.
 
 **Tool used:** `tools/bench/solenoid_smoke` (the bench sketch itself, not the T6 harness —
 `pluck_timing_check` fires automatically by design and is the wrong tool for this check).
@@ -312,9 +329,186 @@ demo positioning, per the operator).
 
 **M1 marked done, all four classes.**
 
-## Next
+### B2-M2 — standoff, per class (in progress, 2026-09-18)
 
-**M2, M4, M5** per station (standoff, drift, station angle — all per class where relevant, per
-Amendment 1 C3), then the two-station checks: M6 (wrong-actuator hazard), M7 (idle rattle), M8
-(end-to-end attribution, which also verifies the declared class map in the Convention section
-above). PRESENT flips to 1 per station only after it passes.
+**Method:** caliper measurement, plunger face to spoke at rest, per class. Fitting id and tower
+height recorded alongside (rig_id `LEFT/rig-1` / `RIGHT/rig-1`, per the registry above — unchanged
+by this measurement, since M2 records the existing geometry rather than adjusting it).
+
+| class | standoff (mm) | note |
+|---|---|---|
+| LEFT-leading | **6.34** (revised from an initial 7.7) | caliper orientation still clunky in the available space, but a better eyeball than the first pass |
+| LEFT-trailing | **8.54** | same caliper-access constraint as leading; a better eyeball, not a firm read |
+| RIGHT-leading | **8.38** | eyeball, same caliper-access constraint |
+| RIGHT-trailing | **8.66** | eyeball, same caliper-access constraint |
+
+**Contact timing (per M2's per-class rule):**
+- LEFT-leading (closer class): not yet checked — no "late in stroke" requirement here, only the
+  observed contact point is needed, still pending.
+- LEFT-trailing (farther class — the one the fitting was set to reach): **confirmed late.**
+  Method: push the plunger by hand to its maximum reach (full extension) and rotate the wheel
+  until the spoke touches it, rather than firing and watching a live strike — static and
+  repeatable, no timing judgment needed. Result: contact occurs only once the plunger is at, or
+  very close to, full extension. The spoke sits well clear of the plunger everywhere short of
+  that. **This is consistent with the fitting's farther-class reach working as intended for
+  LEFT-trailing.**
+
+RIGHT-trailing (farther class): **confirmed late**, same push-and-rotate method as LEFT-trailing —
+contact only at, or very close to, full plunger extension.
+
+**Open:** all four standoff values are eyeball reads, not firm caliper measurements. Both
+farther-class (trailing) late-contact checks are closed; both leading (closer-class) checks remain
+open with no requirement to close them.
+
+**Dwell asymmetry (M3) — deprioritized, not pursued further.** M3 found RIGHT's closer class
+(leading) tolerating a longer pulse before dwell (135 ms) than its farther class (trailing, 95 ms)
+— the reverse of LEFT's pattern and of the stated rationale. Operator's own read on this
+(2026-09-18): "kinda dwelled" was a borderline call made mid-bisection, the same cadence that
+produced sliding/glancing false positives on trailing classes at M3 that M1's slower positioning
+then failed to reproduce — so this is judged **low-confidence, not a settled finding.**
+**Decision: not chased further now.** It doesn't gate anything — the station bracket rule (min
+dwell / max reach across classes) is mechanism-agnostic and both stations already have working,
+non-empty brackets; G-class never triggered. If the asymmetry is real, B3.2's per-level SNR and
+clear-rate data (Amendment 2) is a much cleaner place to see it than an eyeball call under time
+pressure. Logged here per EXPERIMENT_METHOD rule 16 (anomaly triage: log and defer when it
+threatens neither validity nor an active gate).
+
+**M2 marked done, both required checks closed for all four classes** — standoff recorded (eyeball
+precision, noted throughout) and both farther-class late-contact checks confirmed late (LEFT-
+trailing, RIGHT-trailing). The dwell asymmetry raised during M2 is logged as deprioritized, not a
+blocker (see above).
+
+### B2-M4 — 200-strike drift check, LEFT (2026-09-18)
+
+**Tool used:** `solenoid_smoke`'s baseline fire (`b`), width set to 60 ms (mid-bracket, same width
+used for M1) via the `+` jog. 200 fires, LEFT only. Board-reported: `LEFT fired 200`, 0 failures
+flagged, width unchanged at 60 ms throughout — confirms the fix from B1a (hardware-timed pulse
+end) held under 200 consecutive fires with no drift in the commanded width itself.
+
+**Standoff drift (operator, caliper):**
+
+| class | M2 (pre-M4) | post-M4 | Δ |
+|---|---|---|---|
+| LEFT-leading | 6.34 mm | 6.6 mm | +0.26 mm |
+| LEFT-trailing | 8.54 mm | 8.5 mm | −0.04 mm |
+
+Opposite-signed, both small — operator attributes this to eyeball measurement noise rather than
+directional creep. **Pass** against the ≤0.5 mm criterion either way.
+
+**Bracket-unchanged check:** not re-verified by a fresh reach/dwell sweep. Operator judged the
+bracket unchanged from direct observation during the 200 fires, declining a formal 10/10 recheck
+at 40 ms. **Recorded as an operator call, not re-measured evidence** — noted explicitly so this
+isn't read later as equivalent in strength to the original M3 sweep.
+
+**M4 marked done for LEFT.**
+
+### B2-M4 — 200-strike drift check, RIGHT (2026-09-18)
+
+**Tool used:** `solenoid_smoke`'s baseline fire (`v`), width set to 80 ms (mid-bracket, same width
+used for M1) via the `+` jog from LEFT's leftover 60 ms. 200 fires, RIGHT only. Board-reported:
+`RIGHT fired 200`, 0 failures flagged, width unchanged at 80 ms throughout — LEFT's counter
+(200) unaffected, confirming per-channel fire counts stay independent.
+
+**Standoff drift (operator, caliper):**
+
+| class | M2 (pre-M4) | post-M4 | Δ |
+|---|---|---|---|
+| RIGHT-leading | 8.38 mm | 9.3 mm | **+0.92 mm** |
+| RIGHT-trailing | 8.66 mm | 8.4 mm | −0.26 mm |
+
+RIGHT-leading's raw delta exceeds the ≤0.5 mm pass criterion. **Resolved by a push-and-rotate
+qualitative check** (same method as the late-contact check): plunger pushed to full reach,
+compared by eye against where it landed at M2. Operator's read: **no visible movement** — the raw
+mm delta is put down to human measurement error (cramped caliper access), not real creep.
+
+**Recorded as pass.** The mm figure above is kept as-read rather than corrected, so the record
+shows what was measured; the push-and-rotate check is what it's actually being called on.
+
+**M4 marked done for RIGHT. M4 complete, both stations.**
+
+### B2-M5 — station angle, per class: skipped (2026-09-18)
+
+**Decision: skipped, not deferred as an oversight.** M5 records the wheel-rotation angle per
+class per station, purely to seed a future automated-navigation machine profile. Positioning in
+Stage 1 stays manual regardless (per the plan's own text), and nothing in B2's PRESENT-flip
+criteria or any later stage depends on this data — the machine profile's station-angle field
+already has an explicitly anticipated placeholder state (A2) for exactly this case. Operator
+call, given the near-zero payoff against this project's actual demo path.
+
+**Left open, not settled:** if a future session builds real navigation, this angle data will need
+collecting then, from scratch or from whatever's observed at that time — nothing here is assumed
+to still hold.
+
+**M5 marked skipped.**
+
+### B2-M6 — wrong-actuator hazard, all four classes (2026-09-18)
+
+**Method:** with a spoke of each class positioned at its own station (as done throughout M1/M3/M4),
+operator visually checked the *other* station's plunger for a nearby spoke, per class.
+
+| class positioned | home station | other station's plunger |
+|---|---|---|
+| LEFT-leading | LEFT | clear |
+| LEFT-trailing | LEFT | clear |
+| RIGHT-leading | RIGHT | clear |
+| RIGHT-trailing | RIGHT | clear |
+
+**No wrong-actuator hazard found on any class.** A fire at one station's plunger has nothing
+nearby to strike at the other. **M6 marked done, all four classes.**
+
+### B2-M7 — idle rattle, both directions (2026-09-18)
+
+**Method:** `solenoid_smoke` baseline fire, 5 shots per direction, operator watching the idle
+station's plunger throughout.
+
+- **LEFT fires (60 ms, 5 shots)** — RIGHT's idle plunger: clean, no movement.
+- **RIGHT fires (80 ms, 5 shots)** — LEFT's idle plunger: clean, no movement.
+
+**Note:** the first LEFT attempt misfired at 5 ms (board width state didn't carry over as
+assumed) and produced no real strike — discarded and redone at the correct 60 ms once actual
+board state was confirmed via `s` before firing. The 5 recorded LEFT shots above are the retry,
+not the void attempt (board's `fired` counter reflects both: 10 total, 5 void + 5 real).
+
+**No idle rattle in either direction. M7 marked done.**
+
+### B2-M8 — end-to-end attribution, S0..S3 (2026-09-18)
+
+**Method:** physical S0 mark confirmed placed (LEFT-leading, immediately counter-clockwise of the
+valve as seen from the rotor/RIGHT side, per C1). Wheel walked S0 → S1 → S2 → S3 in order,
+operator observing which station's plunger each spoke actually lands under.
+
+| spoke | predicted (Convention section, C2) | observed |
+|---|---|---|
+| S0 | LEFT (leading) | LEFT — matches |
+| S1 | RIGHT (leading) | RIGHT — matches |
+| S2 | LEFT (trailing) | LEFT — matches |
+| S3 | RIGHT (trailing) | RIGHT — matches |
+
+**All four match. The C2 class map is now verified, not merely declared** — the Convention
+section's "Declared, not yet verified" note is superseded by this entry.
+`indexing_origin = (Side B, LEADING)` (Known Limitation 1's reconciliation) is confirmed correct
+for this wheel, this mounting, as of this M8 run. **M8 marked done.**
+
+## B2 status — all stages closed or deliberately skipped
+
+| stage | LEFT | RIGHT |
+|---|---|---|
+| E1 | anomaly noted, not chased (deferred, open) | anomaly noted, not chased (deferred, open) |
+| E2 | done | done |
+| E3 | done 2026-09-18 | done 2026-09-17 |
+| E4 | done | done |
+| M1 | done | done |
+| M2 | done | done |
+| M3 | done | done |
+| M4 | done | done |
+| M5 | **skipped, deliberately** (see above) | **skipped, deliberately** |
+| M6 | done | done |
+| M7 | done | done |
+| M8 | done — verifies both stations' class map at once | done |
+
+**No open blockers to PRESENT flip except operator sign-off.** E1's deferred coil-resistance
+anomaly stays open per its original deferral (reopens on intermittent no-fire, mis-strike, or a
+measured-pulse anomaly) but was never gating — E2–E4 independently confirm the electrical path.
+
+**Per the standing halt-and-ask rule, flipping PRESENT to 1 is a physical/provenance action this
+doc will not do on its own — it needs explicit operator go-ahead, station by station.**
