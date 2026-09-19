@@ -1024,6 +1024,14 @@ per spoke, so a tone that repeats at the same frequency on every RIGHT spoke wou
 lowest strong peak in the band, so these tones can only become a spoke's f1 where its own peak is absent or
 lies above about 508 Hz. Air shots cannot say whether strikes show it; the strike data will.
 
+**Operator's listening check (2026-09-19).** The operator listened to the six groups (RIGHT 60/72/85 ms, RIGHT
+20 ms, LEFT 60 ms, quiet no-fire) and reports it is clean actuator noise: only the plunger hitting its stop,
+"the push event itself", and nothing rotor-like. This is a human judgement on the recordings, not a measurement,
+and it discounts the rotor as the candidate; the tones are read as the ring of the plunger-stop impact. The
+tower, extrusion and fitting stay possible carriers. The operator is considering rubber on the plunger stops to
+damp it; that would be a physical change at the station (see the rig registry: a new rig_id, with B2's standoff
+and pulse bracket re-measured). Not decided, and not needed to continue on `LEFT/rig-1` and `RIGHT/rig-1`.
+
 **Waiting on a decision before any strike is taken** (the registered rules were written before this control
 result existed; changing them afterwards is the operator's call, and it has to be made before strike data, not
 after). **Decision pending; the answer is recorded below when given.**
