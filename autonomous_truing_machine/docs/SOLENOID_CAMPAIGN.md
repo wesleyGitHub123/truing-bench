@@ -560,3 +560,33 @@ firmware: rotate the wheel to a gap and fire normally. T2 220/220; campaign and 
 **To run B3.0 (physical):** connect the mic; I flash `nano_esp32_fastdemo_mic_campaign` and confirm
 it boots; position the wheel at a gap once per station for the air shots; keep the room quiet
 through the ~5 minutes of automated capture.
+
+### B3.1 — spoke sets (2026-09-19, drawn before any strike data)
+
+Drawn by `tools/draw_spoke_sets.py` with the registered seed **20260919** (the date; chosen before
+running, not tuned). Class of spoke i is `i mod 4` (the map B2-M8 verified). Per station and per
+class: 2 exploration, 2 held-out, 1 reserve. "Spread around the wheel" is operationalised as: the
+two spokes of a role sit at least 3 of the class's 8 ring positions apart (4 = opposite), so a role
+never lands on neighbouring spokes. The script asserts the class balance and no double assignment,
+and a run over 2000 seeds found no violation of either rule.
+
+| | exploration (4) | held-out (4) | reserve (2) |
+|---|---|---|---|
+| **LEFT** (LEFT-leading 0 mod 4, LEFT-trailing 2 mod 4) | 0, 10, 12, 22 | 6, 16, 18, 28 | 20, 26 |
+| **RIGHT** (RIGHT-leading 1 mod 4, RIGHT-trailing 3 mod 4) | 3, 5, 15, 17 | 9, 11, 21, 23 | 7, 13 |
+
+Unused: 1, 2, 4, 8, 14, 19, 24, 25, 27, 29, 30, 31.
+
+**Rules that go with the draw:**
+
+- The sets above are fixed by the commit that adds them. Held-out spokes are not touched by any
+  tuning, selection or exploration step.
+- Changing the seed after strike data exists is not allowed. The one exception is a spoke found
+  physically unreachable at its station: it is replaced by drawing again with `--seed` set to a
+  documented new value, the replacement and the reason are logged here, and only the affected
+  role and class are redrawn by hand from the unused spokes of that class.
+- The sets are keyed by spoke index, so they depend on the class map and the S0 mark. If either
+  changes, the sets are stale and B2-M8 is rerun first (provenance table).
+- Two consequences worth knowing, neither a defect: S0 (spoke 0) is an exploration spoke, and the
+  draw restricts spacing within a role only, so a held-out spoke can sit next to an exploration
+  spoke of the same class (LEFT-leading 28 is adjacent to 0).
