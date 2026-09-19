@@ -114,6 +114,26 @@ def main():
     nums = sorted(json.load(open(os.path.join(out2, fn), encoding="utf-8"))["campaign_trial"]
                   for fn in os.listdir(out2) if fn.endswith(".json"))
     assert nums == list(range(1, total + 1)), nums
+    # 7. a board that has never captured anything answers 404 "nothing captured yet"; the sequence read
+    # before the first shot must treat that as "no previous capture", not as a failed trial
+    import urllib.error
+    real_fetch = cr.fetch_bundle
+    def never_captured(host, timeout):
+        raise urllib.error.HTTPError("http://x/debug/capture.json", 404, "Not Found", None, None)
+    cr.fetch_bundle = never_captured
+    try:
+        assert cr.current_seq("x", 1) == 0
+        def refused(host, timeout):
+            raise urllib.error.HTTPError("http://x/debug/capture.json", 500, "Server Error", None, None)
+        cr.fetch_bundle = refused
+        try:
+            cr.current_seq("x", 1)
+        except urllib.error.HTTPError:
+            pass
+        else:
+            raise AssertionError("a 500 must not be read as 'nothing captured'")
+    finally:
+        cr.fetch_bundle = real_fetch
     print("selftest ok: %d trials kept, 4 exclusions ledgered and replaced in place, plan order preserved, "
           "hash stamped on every bundle, persistent failure stops the run" % kept)
 

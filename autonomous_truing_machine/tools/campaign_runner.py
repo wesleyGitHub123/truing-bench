@@ -107,6 +107,10 @@ def current_seq(host, timeout):
     try:
         meta, _ = fetch_bundle(host, timeout)
         return int(meta.get("seq", 0))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:   # a board that has not yet captured anything says so with a 404
+            return 0
+        raise
     except SystemExit as e:
         if "nothing captured" in str(e) or "404" in str(e):
             return 0
