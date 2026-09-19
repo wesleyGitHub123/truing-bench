@@ -35,7 +35,7 @@ declared class map is:
 | 3 (S3) | RIGHT-trailing |
 
 This matches the solver's generator order at **offset 0**: `indexing_origin = (Side B, LEADING)`.
-**Declared, not yet verified** — B2-M8 confirms S0..S3 against this table before it is relied on.
+**Verified by B2-M8 (2026-09-18):** S0..S3 landed at LEFT, RIGHT, LEFT, RIGHT as declared, for this wheel in this orientation.
 See `SOLENOID_CAMPAIGN_PLAN.md`'s Amendment 1 (C1–C2) for the full reasoning, and
 `IMPLEMENTATION_NOTES.md`'s Known Limitations for what this does and does not settle for a real
 physical truing session.
@@ -63,7 +63,7 @@ tracks: solenoid, mount, standoff fitting, strike point. Current: **LEFT/rig-1**
 | **rig_id (current)** | **LEFT/rig-1** | **RIGHT/rig-1** |
 | board GPIO | 9 (D6) | 10 (D7) |
 | board macro | `BOARD_PLUCK_ACTUATOR_LEFT_GPIO` | `BOARD_PLUCK_ACTUATOR_RIGHT_GPIO` |
-| PRESENT (current) | 0 | 0 |
+| PRESENT (current) | **1** (set 2026-09-18, after B2; `16c38e2`) | **1** (same) |
 | MOSFET | IRLB4132 (logic-level, TO-220) | IRLB4132 |
 | solenoid | JF-0530B, 12 V / 300 mA / 5 N / 10 mm stroke | JF-0530B |
 | gate resistor | 100–150 Ω series | 100–150 Ω series |
@@ -76,7 +76,7 @@ tracks: solenoid, mount, standoff fitting, strike point. Current: **LEFT/rig-1**
 | station angle | not yet measured (B2-M5, per class) | not yet measured (B2-M5, per class) |
 | pulse bracket (B2-M3, 2026-09-17) | leading [40, 85] ms · trailing [40, 110] ms · **station [40, 85] ms** | leading [50, 135] ms · trailing [60, 95] ms · **station [60, 95] ms** |
 | Side (observed, this wheel) | B | A (rotor side) |
-| S0/S1 physical marking | S0 rule declared (C1); mark not yet placed | S1 = whatever the rule leaves at RIGHT; confirmed by exclusion once S0 is marked |
+| S0/S1 physical marking | S0 marked per C1; **confirmed at LEFT by B2-M8 (2026-09-18)** | S1 confirmed at RIGHT by B2-M8 |
 
 **Donor wheel:** front disc wheel, rotor on the RIGHT side. Expected asymmetric per SPEC §972,
 unverified.
@@ -87,8 +87,9 @@ returns and the ESP32 return meet only at supply −), Nano powered from a power
 bench blocks.
 
 **PRESENT is flipped to 1 only after that station passes B2** (per the plan's execution-order
-rule). Both remain 0 until then, so every `*_mic` and `*_fastdemo_mic` image correctly refuses
-sessions in the meantime (A10).
+rule). Both stations passed and both are now 1 on the Nano (`16c38e2`); the DevKit has no
+actuators installed and stays 0. Until that flip, every `*_mic` and `*_fastdemo_mic` image
+correctly refused sessions (A10). Nothing has yet been run on target with PRESENT=1.
 
 ## Stage log
 
