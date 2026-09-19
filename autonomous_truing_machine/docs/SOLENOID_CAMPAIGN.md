@@ -1060,6 +1060,16 @@ it. The operator listened and reports it is actuator noise (the plunger hitting 
 **Limits.** A flag is a prompt to look, not a verdict: spokes on a real wheel differ in tension, so a common f1
 is suspicious, but several spokes can genuinely share a pitch. The check cannot tell the two apart by itself.
 
+**Operationalisation (2026-09-19, before any strike; tool `tools/b32_crossspoke.py`, `4311fa3`).** Two phrases
+above were given an exact meaning, reusing B3.0's own definitions, and nothing else in the amendment changed.
+"Within +-2 Hz of one another" is B3.0's "same line" rule: each clear's f1 is tried as a centre, the members are
+the clears within +-2 Hz of it (inclusive), the cell is flagged when the members come from at least 3 distinct
+spokes, and the common frequency is the median of the members. "A line found in that station's air shots at the
+same width" is a B3.0 coherent line (a strong in-band peak at or above the chain's minimum SNR, recurring within
++-2 Hz in at least half of those air shots), read from the lines run, which uses the baseline chain profile only.
+The air shots are chosen by station and width, not by stage; B3.0's were fired at 20 ms and no B3.2 level is
+below 40 ms, so the two sets do not meet at any registered width.
+
 **Not done, and why.** Gating on the air-shot lines (a strike clear near one is not a consistent clear) was
 rejected: six shots at one width and one microphone position are a thin basis, and it could discard a real
 spoke clear. A hardware change (rubber on the plunger stops) was deferred: it would be a new rig_id with B2's
