@@ -551,9 +551,10 @@ firmware: rotate the wheel to a gap and fire normally. T2 220/220; campaign and 
 
 **Open, not settled here:**
 
-- `tools/review_packet.py` (untracked; no longer another agent's work, released to us 2026-09-19) still lists no-fire and strike captures
-  identically — it does not show `fired` or `pulse_ms`. Needs fixing before any blind review packet
-  is built from B3.0 data.
+- `tools/review_packet.py` **fixed 2026-09-19**: its manifest now shows station, `fired`,
+  `pulse_ms` and `campaign_selection`, so a no-fire control and a strike no longer list
+  identically (checked on one synthetic strike and one control). The file is still untracked --
+  committing it is a separate step not yet asked for.
 - The override's ceiling is the driver's existing 1000 ms stuck-actuator bound, not a thermal or
   dwell limit; the B2 brackets are enforced only by the runner. Whether the debug channel should
   carry a tighter cap is an operator decision.
