@@ -839,8 +839,12 @@ truing_intent_verdict_t truing_orch_submit_intent(truing_orchestrator_t *o, cons
              * read back only through the existing /debug/capture.json /.pcm evidence seam. */
             const truing_debug_code_t code = (truing_debug_code_t)intent->payload.debug.code;
             if (code == TRUING_DEBUG_CODE_MEASURE_ONCE) {
-                const int32_t arg = intent->payload.debug.arg;
-                if (o->deps.wheel == NULL || arg < 0 || arg >= (int32_t)o->deps.wheel->n_spokes) {
+                /* arg is the spoke id, optionally packed with the campaign's no_fire / pulse
+                 * overrides (truing/debug_code.h). A bare spoke id unpacks to itself with both
+                 * overrides off, so the original shape is unchanged. */
+                truing_measure_once_args_t args;
+                if (o->deps.wheel == NULL || !truing_measure_once_unpack(intent->payload.debug.arg, &args) ||
+                    args.spoke_id >= o->deps.wheel->n_spokes) {
                     /* TRUING_INTENT_DEBUG is a known, admissible intent (debug_channel_enabled
                      * already passed); it's this specific code+arg pairing that fails a
                      * precondition, so REJECT_SESSION_ADMISSION's "admissible in this state, but
@@ -854,7 +858,8 @@ truing_intent_verdict_t truing_orch_submit_intent(truing_orchestrator_t *o, cons
                 }
                 truing_tension_estimate_t scratch;
                 truing_acoustic_real_mark_debug_measurement(o->deps.acoustic);
-                truing_acoustic_measure(o->deps.acoustic, (uint8_t)arg, o->deps.wheel, 0u, &scratch);
+                truing_acoustic_real_set_debug_override(o->deps.acoustic, args.no_fire, (float)args.pulse_ms);
+                truing_acoustic_measure(o->deps.acoustic, args.spoke_id, o->deps.wheel, 0u, &scratch);
             } else {
                 /* Same reasoning as above: the intent is a recognized DEBUG intent, only the
                  * code value inside it isn't implemented yet. */

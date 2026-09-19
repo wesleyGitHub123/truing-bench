@@ -28,7 +28,9 @@ static void emit_phase(truing_acoustic_real_ctx_t *c, uint8_t cycle_index, truin
     ev.u.acoustic.phase = (uint8_t)phase;
     ev.u.acoustic.spoke_index = spoke_index;
     /* What actually happened this attempt, not what is wired: an actuator whose fire() failed
-     * never reaches a phase frame at all (the attempt is rejected before the window opens). */
+     * never reaches a phase frame at all (the attempt is rejected before the window opens).
+     * `fired` is the truth about excitation; `station` is the spoke's own station and is
+     * reported for a no_fire control too, so gate on `fired` before reading it as a strike. */
     ev.u.acoustic.station = c->attempt_station;
     ev.u.acoustic.fired = c->attempt_fired;
     ev.u.acoustic.window_ms = window_ms;
@@ -236,6 +238,23 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
 {
     (void)wheel_geometry;   /* a damping ritual targeting a neighbour would resolve it here (SPEC 9.1); none is implemented */
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    /* The debug channel's one-shots are taken and cleared FIRST, ahead of every early return
+     * below. They ride on exactly the one call that follows their being armed: a rejected
+     * attempt (no actuator, failed fire, calibration missing, cancel) must not leave a no_fire
+     * or a pulse override armed for whatever measurement comes next -- that could be a real
+     * session's, and a leaked no_fire would silently skip its strike. (debug_triggered used to
+     * be cleared only after a successful fire, so a rejected MEASURE_ONCE left it set.) */
+    bool dbg_triggered = false;
+    bool ov_no_fire = false;
+    float ov_pulse_ms = 0.0f;
+    if (c != NULL) {
+        dbg_triggered = c->debug_triggered_pending;
+        ov_no_fire = c->override_no_fire_pending;
+        ov_pulse_ms = c->override_pulse_ms_pending;
+        c->debug_triggered_pending = false;
+        c->override_no_fire_pending = false;
+        c->override_pulse_ms_pending = 0.0f;
+    }
     if (out == NULL) {
         return;
     }
@@ -280,13 +299,22 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
      * measurement's name. The orchestrator's retry re-excites (SPEC §7.4). */
     const int slot = truing_acoustic_station_slot((truing_station_id_t)c->attempt_station);
     truing_pluck_if_t *const act = slot >= 0 ? c->actuator[slot] : NULL;
-    const float pulse_ms = slot >= 0 ? c->excitation->pulse_ms[slot] : NAN;
-    if (act == NULL || act->available == NULL || act->fire == NULL || !act->available(act) || !act->fire(act, pulse_ms)) {
+    /* A campaign pulse override replaces the profile's width for this strike only; the width that
+     * was applied is what diag records. A no_fire control never commands an actuator at all --
+     * so it needs none present, and records fired=false with pulse 0 (not NaN: the capture
+     * dump serialises it). */
+    float pulse_ms = slot >= 0 ? c->excitation->pulse_ms[slot] : NAN;
+    if (ov_pulse_ms > 0.0f) {
+        pulse_ms = ov_pulse_ms;
+    }
+    if (ov_no_fire) {
+        pulse_ms = 0.0f;
+    } else if (act == NULL || act->available == NULL || act->fire == NULL || !act->available(act) || !act->fire(act, pulse_ms)) {
         c->rejections++;
         fill_rejected(out, TRUING_REASON_EXCITATION_UNAVAILABLE, cycle_index, now, self->source_impl, c->profile);
         return;
     }
-    c->attempt_fired = true;
+    c->attempt_fired = !ov_no_fire;
     /* Last thing before the window opens, and after the actuator was commanded, so the frame
      * is the truth for this attempt. */
     emit_phase(c, cycle_index, TRUING_ACOUSTIC_PHASE_LISTENING, spoke_id, listen_window_ms(c->chain));
@@ -302,13 +330,12 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
     c->diag.snr_db = NAN;
     c->diag.l_eff_m = NAN;
     c->diag.station = c->attempt_station;
-    c->diag.fired = true;
+    c->diag.fired = !ov_no_fire;
     c->diag.pulse_ms = pulse_ms;
-    /* Consumed exactly once, and only after the reset above: a flag applied before it would
-     * have been wiped by the memset it was meant to survive (SPEC §12.5). */
-    c->diag.debug_triggered = c->debug_triggered_pending;
-    c->debug_triggered_pending = false;
-    if (act->fire_report != NULL) {
+    /* Applied only after the reset above: a flag written before it would have been wiped by the
+     * memset it was meant to survive (SPEC §12.5). The value was taken at the top of the call. */
+    c->diag.debug_triggered = dbg_triggered;
+    if (!ov_no_fire && act->fire_report != NULL) {
         truing_pluck_fire_report_t rpt;
         if (act->fire_report(act, &rpt)) {
             c->diag.pulse_measured = true;
@@ -452,6 +479,16 @@ void truing_acoustic_real_mark_debug_measurement(truing_acoustic_if_t *self)
     ((truing_acoustic_real_ctx_t *)self->ctx)->debug_triggered_pending = true;
 }
 
+void truing_acoustic_real_set_debug_override(truing_acoustic_if_t *self, bool no_fire, float pulse_ms)
+{
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return;
+    }
+    truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
+    c->override_no_fire_pending = no_fire;
+    c->override_pulse_ms_pending = pulse_ms > 0.0f ? pulse_ms : 0.0f;
+}
+
 static void real_cancel(truing_acoustic_if_t *self)
 {
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
@@ -470,6 +507,10 @@ static void real_reset_session(truing_acoustic_if_t *self)
      * consume it; left alone it makes the next session's first spoke return CANCELLED before
      * the LISTENING cue is even emitted (SPEC §7.4 / §12.3). */
     c->cancel_requested = false;
+    /* A debug override armed and never consumed must not survive into the next session's first
+     * strike (a leaked no_fire would skip it). debug_triggered_pending is left as it was. */
+    c->override_no_fire_pending = false;
+    c->override_pulse_ms_pending = 0.0f;
     /* Attempt numbering keys on spoke+cycle and both repeat across sessions, so a stale
      * attempt_valid would show the new session's first pluck as "attempt 2". */
     c->attempt_valid = false;
@@ -509,6 +550,8 @@ void truing_acoustic_real_analyze_words(truing_acoustic_if_t *self, const int32_
      * never originates a MEASURE_ONCE call itself, so this is ordinarily a no-op. */
     c->diag.debug_triggered = c->debug_triggered_pending;
     c->debug_triggered_pending = false;
+    c->override_no_fire_pending = false;   /* a replay excites nothing, and must not carry an override to the next strike */
+    c->override_pulse_ms_pending = 0.0f;
     c->capture_seq++;   /* replay overwrites the same buffer a dump would be reading */
     memcpy(c->words, words, (size_t)n * sizeof(int32_t));
     c->diag.n_captured = n;

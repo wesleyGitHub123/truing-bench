@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "truing/debug_code.h"
 #include "truing/operator_intent.h"
 
 static truing_wait_correlator_t g_c;
@@ -162,11 +163,61 @@ static void test_per_intent_admissibility(void)
     TEST_ASSERT_EQUAL_STRING("POSITION_TO_RIM_ANGLE", truing_wait_kind_str(TRUING_WAIT_POSITION_TO_RIM_ANGLE));
 }
 
+/* ---- MEASURE_ONCE arg layout (truing/debug_code.h) -----------------------------------------
+ * A bare spoke id must stay exactly what it always was; the two campaign overrides ride in bits
+ * that used to be out of range, so no old caller changes meaning. */
+static void test_measure_once_bare_spoke_id_is_unchanged(void)
+{
+    for (int32_t spoke = 0; spoke < 36; spoke++) {
+        truing_measure_once_args_t a;
+        TEST_ASSERT_TRUE(truing_measure_once_unpack(spoke, &a));
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)spoke, a.spoke_id);
+        TEST_ASSERT_FALSE(a.no_fire);
+        TEST_ASSERT_EQUAL_UINT16(0u, a.pulse_ms);
+    }
+}
+
+static void test_measure_once_pack_and_unpack_round_trip(void)
+{
+    const truing_measure_once_args_t cases[] = {
+        {5u, false, 0u}, {31u, true, 0u}, {2u, false, 40u}, {3u, false, 85u}, {0u, false, 1000u},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        truing_measure_once_args_t back;
+        TEST_ASSERT_TRUE(truing_measure_once_unpack(truing_measure_once_pack(&cases[i]), &back));
+        TEST_ASSERT_EQUAL_UINT8(cases[i].spoke_id, back.spoke_id);
+        TEST_ASSERT_EQUAL(cases[i].no_fire, back.no_fire);
+        TEST_ASSERT_EQUAL_UINT16(cases[i].pulse_ms, back.pulse_ms);
+    }
+    /* the layout itself, since a Python tool packs the same bits: spoke 3, 60 ms */
+    const truing_measure_once_args_t sixty = {3u, false, 60u};
+    TEST_ASSERT_EQUAL_INT32((60 << 16) | 3, truing_measure_once_pack(&sixty));
+    const truing_measure_once_args_t ctl = {2u, true, 0u};
+    TEST_ASSERT_EQUAL_INT32(0x102, truing_measure_once_pack(&ctl));
+}
+
+static void test_measure_once_unpack_refuses_what_cannot_be_meant(void)
+{
+    truing_measure_once_args_t a = {77u, true, 77u};   /* must be left alone on refusal */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack(-1, &a));                 /* negative */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack(0x200 | 3, &a));          /* reserved bit 9 */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack(0x8000 | 3, &a));         /* reserved bit 15 */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack(0x100 | (40 << 16), &a)); /* no_fire + a pulse width */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack((1001 << 16) | 3, &a));   /* past the stuck-actuator bound */
+    TEST_ASSERT_FALSE(truing_measure_once_unpack(3, NULL));
+    TEST_ASSERT_EQUAL_UINT8(77u, a.spoke_id);
+    TEST_ASSERT_TRUE(a.no_fire);
+    TEST_ASSERT_EQUAL_UINT16(77u, a.pulse_ms);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     UNITY_BEGIN();
+    RUN_TEST(test_measure_once_bare_spoke_id_is_unchanged);
+    RUN_TEST(test_measure_once_pack_and_unpack_round_trip);
+    RUN_TEST(test_measure_once_unpack_refuses_what_cannot_be_meant);
     RUN_TEST(test_wait_ids_are_monotonic_and_prompts_are_typed);
     RUN_TEST(test_positioning_prompt_must_name_a_station);
     RUN_TEST(test_wait_match_rules);

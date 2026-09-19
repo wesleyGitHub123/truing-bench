@@ -1016,6 +1016,43 @@ static void test_measure_once_with_bad_spoke_or_code_fails_safely(void)
     TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
 }
 
+/* The campaign overrides ride in MEASURE_ONCE's arg (truing/debug_code.h). Well-formed ones are
+ * admitted and reach the acoustic call exactly once; anything the layout cannot mean is refused
+ * BEFORE the acoustic call, with the same reason an out-of-range spoke always got. */
+static void test_measure_once_admits_campaign_overrides_and_refuses_malformed_ones(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    g.orch.deps.debug_channel_enabled = true;
+    const truing_wheel_state_t before = g.orch.wheel_state;
+    const uint32_t calls_before = g.actx.calls;
+    truing_reason_t reason = TRUING_REASON_NONE;
+
+    const truing_measure_once_args_t control = {2u, true, 0u};     /* B3.0: a no-fire control */
+    const truing_measure_once_args_t sweep = {3u, false, 60u};     /* B3.2: one strike at 60 ms */
+    truing_intent_t ok1 = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, truing_measure_once_pack(&control));
+    truing_intent_t ok2 = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, truing_measure_once_pack(&sweep));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &ok1, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &ok2, &reason));
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 2u, g.actx.calls);
+
+    const int32_t malformed[] = {
+        0x100 | (40 << 16) | 3,                 /* no_fire together with a pulse width */
+        0x200 | 3,                              /* a reserved bit */
+        (1001 << 16) | 3,                       /* past the stuck-actuator bound */
+        truing_measure_once_pack(&(const truing_measure_once_args_t){40u, true, 0u}),   /* spoke 40 on a 32-spoke wheel */
+        truing_measure_once_pack(&(const truing_measure_once_args_t){32u, false, 60u}), /* first out-of-range index, with an override */
+    };
+    for (size_t i = 0; i < sizeof(malformed) / sizeof(malformed[0]); i++) {
+        reason = TRUING_REASON_NONE;
+        truing_intent_t bad = debug_intent(TRUING_DEBUG_CODE_MEASURE_ONCE, malformed[i]);
+        TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, truing_orch_submit_intent(&g.orch, &bad, &reason));
+        TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, reason);
+    }
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 2u, g.actx.calls);   /* none of them reached the acoustic call */
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
+}
+
 /* The regression this admission change exists for: MEASURE_ONCE must never be reachable once
  * a real session is running (SOLENOID_CAMPAIGN_PLAN.md -- "DEBUG admitted only in READY with
  * no session"), so a bench-triggered capture can never land mid-session and be mistaken for
@@ -1071,6 +1108,7 @@ int main(int argc, char **argv)
     RUN_TEST(test_state_within_tolerance_skips_apply_and_does_not_remeasure);
     RUN_TEST(test_measure_once_fires_one_acoustic_call_and_leaves_wheel_state_untouched);
     RUN_TEST(test_measure_once_with_bad_spoke_or_code_fails_safely);
+    RUN_TEST(test_measure_once_admits_campaign_overrides_and_refuses_malformed_ones);
     RUN_TEST(test_measure_once_is_refused_once_a_session_is_running);
     return UNITY_END();
 }

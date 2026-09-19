@@ -1112,6 +1112,188 @@ static void test_debug_triggered_marks_only_the_measurement_it_was_set_for(void)
     src.close(&src);
 }
 
+/* ---- MEASURE_ONCE campaign overrides (truing/debug_code.h): no_fire and a one-shot pulse ------
+ *
+ * B3.0's controls: the capture and the whole analysis run, but no actuator is ever commanded.
+ * B3.2's level sweep: one strike at a width the excitation profile does not hold. Both are armed
+ * for exactly one measurement. */
+static void test_debug_no_fire_captures_without_exciting_and_says_so(void)
+{
+    memset(&g_obs, 0, sizeof(g_obs));
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_acoustic_real_set_observer(&a, obs_fn, &g_obs);
+
+    truing_tension_estimate_t e;
+    truing_acoustic_capture_view_t v;
+    truing_acoustic_real_mark_debug_measurement(&a);
+    truing_acoustic_real_set_debug_override(&a, true, 0.0f);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[0].fires);   /* the actuator was never commanded */
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_UINT32(1u, truing_acoustic_real_capture_seq(&a));   /* ...but a capture happened */
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.fired);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, v.diag.pulse_ms);
+    TEST_ASSERT_FALSE(v.diag.pulse_measured);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_STATION_ACOUSTIC_LEFT, v.diag.station);   /* the spoke's station is still recorded */
+    TEST_ASSERT_TRUE(v.diag.debug_triggered);
+    TEST_ASSERT_EQUAL_UINT8(TRUING_ACOUSTIC_PHASE_LISTENING, g_obs.ev[0].u.acoustic.phase);
+    TEST_ASSERT_FALSE(g_obs.ev[0].u.acoustic.fired);
+
+    /* One-shot: the very next measurement excites normally. */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[0].fires);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.fired);
+    TEST_ASSERT_FALSE(v.diag.debug_triggered);
+    src.close(&src);
+}
+
+static void test_debug_no_fire_needs_no_actuator_at_the_station(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    truing_acoustic_actuators_t none = g_act;
+    none.at[0] = NULL;
+    none.at[1] = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &none, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+
+    /* An ordinary attempt is rejected, as A10 requires... */
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_acoustic_real_capture_seq(&a));
+    /* ...a control is not: it commands nothing, so there is nothing missing. */
+    truing_acoustic_real_set_debug_override(&a, true, 0.0f);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_EQUAL_UINT32(1u, truing_acoustic_real_capture_seq(&a));
+    src.close(&src);
+}
+
+static void test_debug_pulse_override_applies_to_one_strike_and_is_recorded(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    const float profile_right = g_excitation.pulse_ms[1];
+    TEST_ASSERT_TRUE(profile_right != 55.0f);
+
+    truing_tension_estimate_t e;
+    truing_acoustic_capture_view_t v;
+    truing_acoustic_real_set_debug_override(&a, false, 55.0f);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_FLOAT(55.0f, g_pctx[1].last_pulse_ms);   /* the driver was told 55 */
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_FLOAT(55.0f, v.diag.pulse_ms);           /* and the record says what was applied */
+    TEST_ASSERT_TRUE(v.diag.fired);
+    TEST_ASSERT_EQUAL_FLOAT(profile_right, g_excitation.pulse_ms[1]);   /* the profile itself is untouched */
+
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);   /* one-shot: back to the profile */
+    TEST_ASSERT_EQUAL_UINT32(2u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_FLOAT(profile_right, g_pctx[1].last_pulse_ms);
+    src.close(&src);
+}
+
+/* The regression the consume-at-the-top change exists for. A rejected or cancelled attempt used
+ * to leave debug_triggered armed (it was cleared only after a successful fire), so the next
+ * measurement -- possibly from a real session -- read as a debug capture. A leaked no_fire would
+ * be worse: it would silently skip a real strike. Nothing armed may outlive the call it was
+ * armed for. */
+static void test_debug_overrides_never_outlive_a_rejected_or_cancelled_attempt(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    truing_tension_estimate_t e;
+    truing_acoustic_capture_view_t v;
+
+    /* rejected: RIGHT has no actuator, armed with a mark and a pulse override */
+    truing_acoustic_actuators_t left_only = g_act;
+    left_only.at[1] = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &left_only, g_scratch, g_scratch_bytes, &detail));
+    truing_acoustic_real_mark_debug_measurement(&a);
+    truing_acoustic_real_set_debug_override(&a, false, 55.0f);
+    truing_acoustic_measure(&a, 1u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_EXCITATION_UNAVAILABLE, e.meta.reason_code);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);   /* an ordinary LEFT measurement */
+    TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[0], g_pctx[0].last_pulse_ms);   /* not 55 */
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_FALSE(v.diag.debug_triggered);
+    TEST_ASSERT_TRUE(v.diag.fired);
+
+    /* cancelled, armed as a control: the next measurement must still strike */
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    const uint32_t fires_before = g_pctx[0].fires;
+    truing_acoustic_real_mark_debug_measurement(&a);
+    truing_acoustic_real_set_debug_override(&a, true, 0.0f);
+    truing_acoustic_request_cancel(&a);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_CANCELLED, e.meta.reason_code);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(fires_before + 1u, g_pctx[0].fires);   /* it struck: no_fire did not leak */
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.fired);
+    TEST_ASSERT_FALSE(v.diag.debug_triggered);
+
+    /* a no-op for anything that is not this implementation -- must not crash */
+    truing_acoustic_if_t sim;
+    truing_acoustic_synthetic_ctx_t simctx;
+    truing_acoustic_synthetic_init(&sim, &simctx, g_clock, 32u, TRUING_TENSION_MODEL_IDEAL_STRING, 1u);
+    truing_acoustic_real_set_debug_override(&sim, true, 40.0f);
+    src.close(&src);
+}
+
+/* The other two ways an armed override could go unconsumed: a replay (analyze_words) and a session
+ * boundary (reset_session). Neither may leave a no_fire or a pulse width armed for the next strike. */
+static void test_debug_overrides_are_cleared_by_a_replay_and_by_a_session_reset(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_capture_view_t v;
+
+    static int32_t words[4800];
+    memset(words, 0, sizeof(words));
+    truing_acoustic_real_set_debug_override(&a, true, 0.0f);
+    truing_acoustic_real_analyze_words(&a, words, 4800u, 1u, &e);   /* a replay excites nothing, and consumes the armed no_fire... */
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);              /* ...so this strike is an ordinary one and fires */
+    TEST_ASSERT_EQUAL_UINT32(1u, g_pctx[0].fires);
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_TRUE(v.diag.fired);
+
+    truing_acoustic_real_set_debug_override(&a, false, 55.0f);
+    truing_acoustic_reset_session(&a);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_UINT32(2u, g_pctx[0].fires);
+    TEST_ASSERT_EQUAL_FLOAT(g_excitation.pulse_ms[0], g_pctx[0].last_pulse_ms);   /* the profile's width, not 55 */
+    src.close(&src);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -1136,6 +1318,11 @@ int main(void)
     RUN_TEST(test_capture_pending_is_false_for_a_non_real_implementation);
     RUN_TEST(test_reset_session_discards_state_no_measurement_consumed);
     RUN_TEST(test_debug_triggered_marks_only_the_measurement_it_was_set_for);
+    RUN_TEST(test_debug_no_fire_captures_without_exciting_and_says_so);
+    RUN_TEST(test_debug_no_fire_needs_no_actuator_at_the_station);
+    RUN_TEST(test_debug_pulse_override_applies_to_one_strike_and_is_recorded);
+    RUN_TEST(test_debug_overrides_never_outlive_a_rejected_or_cancelled_attempt);
+    RUN_TEST(test_debug_overrides_are_cleared_by_a_replay_and_by_a_session_reset);
     RUN_TEST(test_workflow_with_real_acoustic_layers_reaches_converged_geometric_only);
     return UNITY_END();
 }

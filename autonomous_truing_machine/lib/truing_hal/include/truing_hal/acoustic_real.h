@@ -22,6 +22,8 @@
  *   model refuses                         -> rejected    / MODEL_REJECTED or NO_F2_PARTNER
  *   no actuator at the spoke's station,
  *   or it failed to fire                  -> rejected    / EXCITATION_UNAVAILABLE (no capture)
+ *                                            (except a debug no_fire control, which commands no actuator
+ *                                            and so needs none -- truing_acoustic_real_set_debug_override)
  *
  * Excitation: each acoustic station has its own actuator (truing_acoustic_station_for_spoke()
  * picks the station, and with it the actuator). There is no hand-pluck fallback.
@@ -60,9 +62,12 @@ typedef struct {
     float    f1_hz, f2_hz, snr_db;
     float    l_eff_m;
     uint32_t capture_us, analysis_us;   /* measured by the clock if it has that resolution */
-    uint8_t  station;                   /* truing_station_id_t whose actuator excited these words; UNSET on replay */
-    bool     fired;                     /* that actuator was commanded for this capture */
-    float    pulse_ms;                  /* the pulse it was commanded with; NaN when not fired */
+    uint8_t  station;                   /* truing_station_id_t of the spoke's own station -- the actuator that WOULD strike it,
+                                         * recorded whether or not it fired. Read it as an excitation only together with
+                                         * `fired`: a no_fire control still carries its spoke's station. UNSET on replay */
+    bool     fired;                     /* that actuator was commanded for this capture; false for a no_fire control */
+    float    pulse_ms;                  /* the pulse it was commanded with (a debug override's width if one was applied);
+                                         * 0 for a no_fire control, NaN on replay */
     bool     pulse_measured;            /* the actuator reported a measured width for this fire */
     uint32_t pulse_us_measured;         /* that measured width, in us; 0 unless pulse_measured */
     /* The front end's own per-capture diagnostics (audio_source_if.h capture_report), when it
@@ -144,6 +149,14 @@ typedef struct {
      * to land in the diag it was meant to mark rather than being wiped by it. A call that never
      * arrives leaves this false, which is the ordinary (non-debug) case. */
     bool                                debug_triggered_pending;
+    /* One-shot campaign overrides set by truing_acoustic_real_set_debug_override(), snapshotted
+     * and cleared at the TOP of the next measure_run() -- before any early return, so a rejected
+     * attempt cannot leave them armed for whatever measurement comes next (a leaked no_fire
+     * would silently skip a real session's strike). analyze_words() and reset_session() clear
+     * them too, so no path that ends without a measure_run leaves them armed either.
+     * override_pulse_ms_pending == 0 means none. */
+    bool                                override_no_fire_pending;
+    float                               override_pulse_ms_pending;
     /* capture_seq bumps the instant the buffer starts changing (SPEC §12.5); last_status/
      * last_reason are not written until note_outcome() runs, which can be well after that --
      * analyze() alone is seconds of arithmetic. outcome_seq catches up to capture_seq exactly
@@ -180,6 +193,19 @@ void truing_acoustic_real_set_observer(truing_acoustic_if_t *self, truing_acoust
  * contract with the acoustic subsystem stays one call in, one estimate out (SPEC §9.1) -- this
  * is provenance, wired the same way the observer is, and changes no measurement outcome. */
 void truing_acoustic_real_mark_debug_measurement(truing_acoustic_if_t *self);
+
+/* Arm campaign overrides for the NEXT measurement only (SPEC §12.5 "inject values"; the MEASURE_ONCE
+ * arg layout is in truing/debug_code.h). `no_fire`: run the capture and analysis but never command
+ * an actuator -- a control, recorded as fired=false, and it needs no actuator to be present.
+ * `pulse_ms` > 0: use this width instead of the excitation profile's for that one strike (recorded
+ * as the applied pulse; the profile and its digest are untouched -- so a capture's excitation_digest
+ * does NOT identify an overridden width: identify the level by pulse_ms together with station).
+ * Consumed at the start of the next measure_run whether or not it goes on to fire, and cleared by
+ * analyze_words() and reset_session() if one of those comes first. Called by the orchestrator's
+ * debug dispatch beside mark_debug_measurement(); never by the measurement path. Same wiring rules
+ * as that function, including that it is a silent no-op for any other implementation -- a synthetic
+ * or recorded backend ignores the override and measures normally (it has no actuator to withhold). */
+void truing_acoustic_real_set_debug_override(truing_acoustic_if_t *self, bool no_fire, float pulse_ms);
 
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */

@@ -148,10 +148,15 @@ def main():
     print("  spoke %s cycle %s attempt %s -> %s / %s" % (
         doc.get("spoke_id"), doc.get("cycle_index"), doc.get("attempt"),
         doc.get("status"), doc.get("reason")))
+    if "fired" in doc:   # /2 bundles; /1 predates the field
+        print("  station %s  fired %s  pulse %s ms" % (doc.get("station"), doc.get("fired"), doc.get("pulse_ms")))
     print("  f1 %s Hz  snr %s dB  onset %s  window %s+%s" % (
         doc.get("expect_f1_hz"), doc.get("expect_snr_db"), doc.get("expect_onset_sample"),
         doc.get("expect_window_start_sample"), doc.get("expect_window_n_samples")))
     print("  sha256 %s" % doc["pcm_sha256"])
+    if doc.get("fired") is False:
+        print("  NOTE: fired=false - a no-fire control. Nothing excited this spoke; `station` is only the "
+              "station it would have been struck from.")
     if doc.get("source") != "real":
         print("  NOTE: source is %r - these words did not come from the microphone." % doc.get("source"))
     if indexed:
