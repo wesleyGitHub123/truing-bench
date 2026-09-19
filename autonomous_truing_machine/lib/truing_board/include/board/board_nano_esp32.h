@@ -52,9 +52,9 @@
  * spoke and file it under the wrong index with no reason code. It is also NOT reconciled with
  * the solver's indexing_origin (IMPLEMENTATION_NOTES, known limitation). */
 #define BOARD_PLUCK_ACTUATOR_LEFT_GPIO     9
-#define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT  0
+#define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT  1  /* B2 passed both stations, verified end to end by M8, 2026-09-18 */
 #define BOARD_PLUCK_ACTUATOR_RIGHT_GPIO    10
-#define BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT 0
+#define BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT 1  /* B2 passed both stations, verified end to end by M8, 2026-09-18 */
 
 /* Yellow built-in LED on D13 (GPIO48), active-high. */
 #define BOARD_HAS_PLAIN_STATUS_LED     1
