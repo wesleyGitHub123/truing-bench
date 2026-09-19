@@ -52,6 +52,7 @@ static const char *TAG = "net";
  * spare slot the server evicted a live websocket every time anything made an HTTP request,
  * which is a page that goes dead for no visible reason. */
 #define MAX_OPEN_SOCKETS    (MAX_WS_CLIENTS + 3)
+#define HTTPD_STACK_BYTES   8192   /* the httpd task's stack; the ESP-IDF default (4096) overflowed, see start */
 #define SENDER_STACK      4096
 #define AP_CHANNEL           1
 
@@ -491,7 +492,10 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
         httpd_resp_set_status(req, "500 Internal Server Error");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"capture metadata did not fit\"}");
     }
-    return httpd_resp_send(req, body, len);
+    const esp_err_t sent = httpd_resp_send(req, body, len);
+    ESP_LOGI(TAG, "capture.json served: httpd stack high-water %u of %u bytes free",
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)), (unsigned)HTTPD_STACK_BYTES);
+    return sent;
 }
 
 static esp_err_t capture_pcm_handler(httpd_req_t *req)
@@ -678,6 +682,12 @@ bool truing_net_start(void)
 
     httpd_config_t hc = HTTPD_DEFAULT_CONFIG();
     hc.max_open_sockets = MAX_OPEN_SOCKETS;   /* ws_clients() sizes its array by the same number */
+    /* The ESP-IDF default is 4096, which capture_meta_handler does not fit in: a 1.5 KB body, the
+     * capture view, two digests and newlib's float formatting all live on this task's stack, and a
+     * fetch of a finished capture overflowed it and rebooted the board (2026-09-19, first B3.0
+     * attempt). The high-water mark is logged where that handler finishes so the margin is measured
+     * on target rather than assumed. */
+    hc.stack_size = HTTPD_STACK_BYTES;
     hc.lru_purge_enable = true;
     /* Core 1 is the audio core (SPEC §4.5); the web server belongs with the control
      * work on core 0 so it cannot preempt a capture. */
