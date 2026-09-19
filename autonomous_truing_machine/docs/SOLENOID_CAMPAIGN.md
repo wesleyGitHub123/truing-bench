@@ -592,3 +592,58 @@ Unused: 1, 2, 4, 8, 14, 19, 24, 25, 27, 29, 30, 31.
 - Two consequences worth knowing, neither a defect: S0 (spoke 0) is an exploration spoke, and the
   draw restricts spacing within a role only, so a held-out spoke can sit next to an exploration
   spoke of the same class (LEFT-leading 28 is adjacent to 0).
+
+## B3.0 pre-registration (2026-09-19, before any B3.0 data)
+
+Registered before a single B3.0 capture exists. The commit that adds this section is the
+registration; **every B3.0 stage report cites its hash.** Nothing below may be changed after data
+exists except by a new dated amendment that says what changed and why, and then only if the change
+would not have altered what the existing data already showed.
+
+**The rule** is `SOLENOID_CAMPAIGN_PLAN.md` B3.0 as amended by **Amendment 3** — the authoritative
+text, deliberately not restated here so two copies cannot drift. In one paragraph: 40 controls in
+three groups judged **separately** (`no_fire` 20, `air_LEFT` 10, `air_RIGHT` 10); **A** zero false
+clears in every group; **B** no coherent line in any group, where a *line* is a strong peak the
+firmware detector reports in the f1 band with SNR at or above the chain profile's own
+`measurement_min_snr_db`, and it is *coherent* if a peak within ±2 Hz appears in at least half of the
+group's captures; FAIL beats INCONCLUSIVE beats PASS, and a short or unreadable group is never a PASS.
+
+**What is fixed here (the inputs and the instruments):**
+
+| what | value |
+|---|---|
+| trial sequence | `docs/campaign_plans/b30.json`, seed **20260919**, sha256 `65aec227b45562db99eddf9d32d34722f1855d0dce3c39e47ec910afe6c8adbb`; RIGHT block first, then LEFT; 10 air shots + 10 no-fire per block, at most two of one kind in a row |
+| instruments | `80838af` — `tools/campaign_sequence.py`, `tools/b30_verdict.py`, and `TRUING_SWEEP_MODE=lines` in `test/test_acoustic_sweep` |
+| analysis constants | the fixture chain profile, digest `6328445a925e50b8636c08b43900a1ee2410b2370fca0391051f2d3dac883654` (the same digest the repo's recorded captures carry): f1 band 350–600 Hz, prominence 6 dB, peak depth 30 dB, SNR gate 12 dB, window 500 ms, gate start 40 ms, onset absolute floor −55 dBFS rms (disabled in the analysis only) |
+| firmware | `f494070` and later on `nano_esp32_fastdemo_mic_campaign`; the build rev is in every capture |
+| rig | `LEFT/rig-1`, `RIGHT/rig-1` |
+| exclusion codes | `ACK_REJECTED`, `NO_NEW_CAPTURE`, `FETCH_FAILED`, `CAPTURE_NOT_OK`, `RECORD_CONTRADICTS_REQUEST` — mechanical only; an excluded trial is replaced in place and ledgered |
+
+**What would invalidate this registration:** a change to the chain profile digest, to the detector
+or SNR code, to the ±2 Hz tolerance or the 50 % recurrence, to the group sizes, or to the plan file.
+The verdict tool refuses a set whose captures carry a different chain digest than the analysis uses,
+or more than one plan.
+
+**Limits stated before the data, so they cannot be discovered afterwards:**
+
+- **A PASS is not "nothing is there."** A line below the SNR gate, or one recurring in fewer than
+  half of a group, is not detected. 20/10/10 captures bound a false-clear rate only below about 14 %
+  and 26 % per group (7 % pooled) at 95 % confidence.
+- **The chance rate of a line at the gate is measured on one recorded ambient capture only** (27
+  strong peaks in the f1 band, none at or above 12 dB, maximum 11.2 dB). That is a single capture,
+  not a rate. **The stage report must state, from the real controls, how many captures had any
+  in-band strong peak at or above the gate and how many lines that made**, so a chance-level rate is
+  visible rather than assumed away.
+- **The window is anchored on the loudest event**, not on a strike, for a quiet control. For an air
+  shot that is the plunger impact; for a no-fire capture it is the loudest noise frame and so is
+  arbitrary. Stationary lines do not depend on it; a transient one might.
+- **The analysis constants are the fixture profile's.** They equal what the recorded captures were
+  taken under, and the tool checks each B3.0 capture's own digest against them — but that check
+  cannot tell whether the constants are *right*, only that they are the ones in use.
+- **A 360 Hz line** is reported per group whatever its strength, alongside the general rule.
+- **Not registered here:** B3.2's selection rules and B3.4's acceptance are in the plan (Amendments
+  1–2) and are registered by a separate commit before any B3.2 data, as the plan requires.
+
+**Stage-report contents (B3.0):** this section's commit hash; the plan sha256 and the exclusions
+ledger; `tools/b30_verdict.py` output verbatim; the per-group table; the 360 Hz report; the count of
+in-band strong peaks at or above the gate per group; and the statement above that a PASS is bounded.
