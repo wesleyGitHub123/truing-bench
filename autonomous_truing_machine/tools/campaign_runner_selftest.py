@@ -55,7 +55,7 @@ def main():
     cr.fire_once = board.fire_once
     cr.time.sleep = lambda s: None
     out = tempfile.mkdtemp(prefix="runner_selftest_")
-    args = argparse.Namespace(host="x", timeout=1, out=out, interval=0, start_block=0, no_prompt=True)
+    args = argparse.Namespace(host="x", timeout=1, out=out, interval=0, start_block=0, end_block=None, no_prompt=True)
     ctx = {"seq_counter": [0], "rig_id_by_station": {"LEFT": "LEFT/rig-1", "RIGHT": "RIGHT/rig-1"},
            "label": "B3.0", "session": "test", "note": "selftest"}
     kept, excluded = cr.run_plan(None, args, ctx, plan, sha)
@@ -101,6 +101,19 @@ def main():
         assert "failed 3 times" in str(e), e
     else:
         raise AssertionError("a trial failing three times must stop the run")
+    # 6. one block at a time (the operator turns the wheel in between) numbers trials exactly as a single run does
+    n0 = len(plan["blocks"][0]["trials"])
+    cr.fire_once = FakeBoard({}).fire_once
+    out2 = tempfile.mkdtemp(prefix="runner_selftest_blocks_")
+    a1 = argparse.Namespace(host="x", timeout=1, out=out2, interval=0, start_block=0, end_block=1, no_prompt=True)
+    a2 = argparse.Namespace(host="x", timeout=1, out=out2, interval=0, start_block=1, end_block=None, no_prompt=True)
+    k1, x1 = cr.run_plan(None, a1, dict(ctx, label="B3.0blocks"), plan, sha)
+    assert (k1, x1) == (n0, 0), (k1, x1)
+    k2, x2 = cr.run_plan(None, a2, dict(ctx, label="B3.0blocks"), plan, sha)
+    assert (k2, x2) == (total - n0, 0), (k2, x2)
+    nums = sorted(json.load(open(os.path.join(out2, fn), encoding="utf-8"))["campaign_trial"]
+                  for fn in os.listdir(out2) if fn.endswith(".json"))
+    assert nums == list(range(1, total + 1)), nums
     print("selftest ok: %d trials kept, 4 exclusions ledgered and replaced in place, plan order preserved, "
           "hash stamped on every bundle, persistent failure stops the run" % kept)
 

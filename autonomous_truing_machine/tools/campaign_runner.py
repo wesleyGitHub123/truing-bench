@@ -244,7 +244,8 @@ def run_plan(ws, args, ctx, plan, plan_sha):
     total = sum(len(b["trials"]) for b in blocks)
     global_index = sum(len(b["trials"]) for b in blocks[:args.start_block])
     kept = excluded = 0
-    for bi in range(args.start_block, len(blocks)):
+    end_block = len(blocks) if args.end_block is None else args.end_block
+    for bi in range(args.start_block, end_block):
         block = blocks[bi]
         log("=== block %d/%d  %s  (%d trials) ===" % (bi + 1, len(blocks), block["name"], len(block["trials"])))
         log(block["prompt"])
@@ -299,6 +300,9 @@ def main():
                                   "are not used with it")
     p.add_argument("--start-block", type=int, default=0,
                     help="with --plan: resume at this block index (0-based) after an interruption")
+    p.add_argument("--end-block", type=int, default=None,
+                    help="with --plan: stop before this block index (0-based, exclusive), so one block runs "
+                         "and the wheel can be turned before the next; the plan and its sha256 are unchanged")
     p.add_argument("--no-prompt", action="store_true",
                     help="with --plan: do not wait for Enter between blocks (only when nobody has to turn the wheel)")
     p.add_argument("--rig-id-left", default=DEFAULT_RIG_ID_LEFT,
@@ -321,6 +325,8 @@ def main():
         plan_sha = campaign_sequence.plan_sha256(plan)
         if not 0 <= args.start_block < len(plan["blocks"]):
             raise SystemExit("--start-block must be 0..%d" % (len(plan["blocks"]) - 1))
+        if args.end_block is not None and not args.start_block < args.end_block <= len(plan["blocks"]):
+            raise SystemExit("--end-block must be in %d..%d" % (args.start_block + 1, len(plan["blocks"])))
         spokes = sorted({t["spoke"] for b in plan["blocks"] for t in b["trials"]})
     else:
         try:
