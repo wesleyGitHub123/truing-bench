@@ -1,0 +1,1422 @@
+{
+ "blocks": [
+  {
+   "name": "B3.2-RIGHT-sp17",
+   "prompt": "Position spoke 17 (RIGHT-leading) at the RIGHT plunger and hold it there. 18 strikes at 60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 17
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 17
+    }
+   ]
+  },
+  {
+   "name": "B3.2-RIGHT-sp5",
+   "prompt": "Position spoke 5 (RIGHT-leading) at the RIGHT plunger and hold it there. 18 strikes at 60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 5
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 5
+    }
+   ]
+  },
+  {
+   "name": "B3.2-RIGHT-sp3",
+   "prompt": "Position spoke 3 (RIGHT-trailing) at the RIGHT plunger and hold it there. 18 strikes at 60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 3
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 3
+    }
+   ]
+  },
+  {
+   "name": "B3.2-RIGHT-sp15",
+   "prompt": "Position spoke 15 (RIGHT-trailing) at the RIGHT plunger and hold it there. 18 strikes at 60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 15
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 15
+    }
+   ]
+  },
+  {
+   "name": "B3.2-LEFT-sp10",
+   "prompt": "Position spoke 10 (LEFT-trailing) at the LEFT plunger and hold it there. 24 strikes at 40/60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 10
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 10
+    }
+   ]
+  },
+  {
+   "name": "B3.2-LEFT-sp22",
+   "prompt": "Position spoke 22 (LEFT-trailing) at the LEFT plunger and hold it there. 24 strikes at 40/60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 22
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 22
+    }
+   ]
+  },
+  {
+   "name": "B3.2-LEFT-sp12",
+   "prompt": "Position spoke 12 (LEFT-leading) at the LEFT plunger and hold it there. 24 strikes at 40/60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 12
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 12
+    }
+   ]
+  },
+  {
+   "name": "B3.2-LEFT-sp0",
+   "prompt": "Position spoke 0 (LEFT-leading) at the LEFT plunger and hold it there. 24 strikes at 40/60/72/85 ms in random order, a no-fire control after every 3 strikes.",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "strike",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    }
+   ]
+  }
+ ],
+ "control_every": 4,
+ "levels": {
+  "LEFT": [
+   40,
+   60,
+   72,
+   85
+  ],
+  "RIGHT": [
+   60,
+   72,
+   85
+  ]
+ },
+ "reps": 6,
+ "seed": 20260919,
+ "spoke_draw_seed": 20260919,
+ "stage": "B3.2"
+}

@@ -751,3 +751,159 @@ mechanical triggers) and in the bring-up serial log (spoke 0 LEFT 20026 us, spok
 
 **Next:** B3.2 is unblocked. Its pre-registration (`docs/campaign_plans/b32.json` and the rules)
 must be committed before any B3.2 data.
+
+## B3.2 pre-registration (2026-09-19, before any B3.2 data)
+
+Registered before a single B3.2 strike exists. The commit that adds this section and
+`docs/campaign_plans/b32.json` is the registration; **every B3.2 stage report cites its hash.**
+Nothing below may change after data exists. A change is an amendment commit that says why, and any
+data taken before it is labelled as taken under the earlier text.
+
+**What is fixed elsewhere.** The pulse levels, counts, spoke sets, selection rules 1-6, the SNR
+report (rule 2a) and the gates are the plan's (Amendments 1-2), and B3.1's spoke sets are this
+record's. This section adds only what those leave open. **Each such choice is marked
+(operationalization)**: the plan's wording admits more than one mechanical reading, and it is fixed
+here, before data, so it cannot be settled by looking at results.
+
+### The plan
+
+`docs/campaign_plans/b32.json`, seed 20260919, **sha256
+`efd73512a17d6ce5c26a6129fb96328f0afb171b3ae253195348f1b08e8b060c`**, regenerated from the seed and
+found identical. 8 blocks, one spoke each, levels shuffled within a spoke, a no-fire control after
+every 3 strikes. **168 strikes and 56 no-fire controls.**
+
+| station | spokes (blocks, in plan order) | levels (ms) | strikes | no-fire controls |
+|---|---|---|---|---|
+| RIGHT | 17, 5, 3, 15 | 60, 72, 85 | 6 per level per spoke = 72 | 24 |
+| LEFT | 10, 22, 12, 0 | 40, 60, 72, 85 | 6 per level per spoke = 96 | 32 |
+
+Run block by block (the operator positions the named spoke at its plunger and holds it):
+`python tools/campaign_runner.py --plan docs/campaign_plans/b32.json --no-prompt --start-block N --end-block N+1`.
+Every capture is stamped with the plan hash, the rig_id (`LEFT/rig-1`, `RIGHT/rig-1`), the station,
+the requested level and the build. **All B3.2 data comes from one build rev**, the one the first
+block reports; a different rev, or a bumped rig_id, is reported and analysed apart.
+
+### Vocabulary, made operational
+
+- **Condition** (operationalization): (station, pulse level, DSP candidate). Clears are judged within
+  a condition, never pooled across levels.
+- **Clear:** status `suspect` (PROVISIONAL_MODE_ID) under the candidate being evaluated. **False
+  clear:** a clear on a no-fire control or an air shot.
+- **Consistency band** (plan: +-2 Hz around the median, at least 3 clears): the median is over that
+  spoke's clears in the condition, **including** the clear under test. **A spoke with fewer than 3
+  clears in a condition is unjudged** (operationalization): its clears count as neither consistent
+  nor inconsistent, they add nothing to its rate, and the count of unjudged clears is reported.
+- **Consistent clear rate** of a spoke in a condition = consistent clears / 6. Excluded trials are
+  replaced in place, so n stays 6.
+- **W(c, s, l)**, the worst spoke: the minimum of that rate over the station's 4 exploration spokes,
+  for candidate c, station s, level l. The class-wise worst is the minimum over that class's 2 spokes.
+- **Cell** (c, s, l) **satisfies the cell constraints** if it has 0 inconsistent clears and 100 %
+  attribution: every strike record has `fired=true`, the station derived from the declared spoke,
+  `capture_result` OK and `pulse_ms` equal to the requested level (0.01 ms). Attribution rests on the
+  board's own record plus B2-M8's physical verification; the runner's per-trial cross-check enforces
+  the record and the operator's positioning is not independently observed.
+
+### Candidate set (operationalization)
+
+The plan's offline sweep is over `gate_start_ms`, `window_ms` and `prominence_db`, at most two fields
+away from baseline (gate_start_ms 40, window_ms 500, prominence_db 6; the fixture profile, chain
+digest `6328445a925e`).
+
+- Values: **gate_start_ms** 100, 200, 300, 500, 800; **window_ms** 250, 750; **prominence_db** 9, 12.
+  These are the harness's existing one-axis rows. They are not chosen from B3.2 data.
+- Candidates, in this order for tie-breaking: baseline; the 9 single-field rows (gate ascending, then
+  window, then prominence); the 24 two-field rows (gate x window, then gate x prominence, then
+  window x prominence). **34 candidates.**
+- **Not candidates:** `max_peak_depth_db` (20 was rejected in Phase A: it cleared at components 40-70
+  Hz from the spoke's repeated cluster), `measurement_min_snr_db` and the search band (not in the
+  plan's swept list; B3.0 also found in-band lines at the 12 dB gate in quiet controls, so lowering it
+  is not a knob this campaign turns). The harness prints rows for them; they select nothing. A
+  next-onset margin candidate is added only if truncation is observed, by amendment.
+
+### Selection, made operational
+
+Applied in this order, to the data as it stands when all 224 trials are kept. The control sets are:
+B3.0's 40 controls, B3.2's 56 no-fire controls, the 18 Phase A pass-C no-pluck controls (`C_*` in the
+campaign index) and `nano_ambient_ambiguous`, each replayed through `native_sweep` with the onset
+floor as it is (what the firmware would do), not the lines-mode override.
+
+1. **Candidate constraints** (plan rule 1). Candidate c is **admissible** only if: (i) 0 false clears
+   across all the control sets above; (ii) **no selection shift**: no strike capture where both the
+   baseline and c clear and their f1 differ by more than 2 Hz.
+2. **Admissible cells.** S(c, s) is the set of levels l at station s whose cell satisfies the cell
+   constraints. **c is eligible** only if S(c, LEFT) and S(c, RIGHT) are both non-empty. If no
+   candidate is eligible: **G-analysis, halt.**
+3. **DSP** (plan rule 2, operationalization). score(c) = the smaller, over the two stations, of
+   [the largest W(c, s, l) over l in S(c, s)]. The chosen c maximises score.
+4. **Pulse** (plan rule 3), at the chosen c. best(s) is the largest W over S(c, s). **A shared level**
+   exists if some level in both S(c, LEFT) and S(c, RIGHT) (so 60, 72 or 85) has W within 10 pp of
+   best(s) at both stations. Rates move in steps of 1/6, so within 10 pp means equal to the best. If
+   none does, each station takes its own level with the largest W. A **plateau** is a maximal run of
+   adjacent tested levels in S; a level is **interior** when both its neighbours in the tested list
+   exist and are in S. The consistent clear rate stays the primary metric.
+5. **Tie-breaks** (plan rule 4), in order: plateau interior; fewest fields changed from baseline (0,
+   1 or 2); higher median SNR (rule 2a below); shorter pulse. For DSP candidates a remaining tie goes
+   to the earlier one in the registered order.
+6. **Refinement** (plan rule 5), at most one extra level per station, when the best level is at a
+   tested edge that is not the M3 bracket edge, or two adjacent tested levels differ in W by more than
+   25 pp. The extra level is the whole-ms midpoint of that gap or edge stretch, strictly inside the M3
+   bracket (LEFT [40, 85], RIGHT [60, 95]). It is run from a new plan file with its own sha256, in
+   a separate registration commit before its data. No other level is added.
+7. **Class check** (plan rule 6, C4). At each station, at the chosen c, any level in S where one
+   class's worst spoke sits more than 10 pp below the other class's is a class gap. If every level in
+   S at a station has one, that is **G-class, halt** (a user decision, as B2 defines it).
+8. **SNR, reported not gating** (plan rule 2a). Median `expect_snr_db` per level per station, over
+   the strike captures that produced a spectrum, with n; per class where a class has at least 6 such
+   captures at that level. Used only as the tie-break above. A level with a markedly lower clear rate
+   and lower SNR than a shorter neighbour is read as corroborating dwell, and does not by itself change
+   the selection.
+
+### Gates
+
+- **Exploration gate** (plan, Amendment 1): each station needs an eligible candidate with a cell at
+  **W of 5/6 or better**. If not: one bounded mechanical lever (mic distance or strike point) and a
+  reduced rerun; still failing, stop and report the ceiling for that station.
+- **G-analysis**, **G-class**: halt and report as above. **B3.3 (the freeze) is halt-and-ask.** This
+  section selects a candidate; it does not change a constant.
+
+### Blind review
+
+24 strikes, 12 per station, stratified by level (LEFT 3 per level, RIGHT 4 per level), one draw per
+stratum by `random.Random(20260919)` over the sorted trial numbers of kept strikes. Drawn after all
+data is in and before any machine verdict is looked at; the verdict is sealed until the responses are
+filed. Five categories per trial: strike audible / ring in the analysed window / second impact or
+rattle / clean excitation / metallic or rotor ring audible (RIGHT only). No pitch judgments. The review
+selects nothing. **A systematic "clear without ring"** (operationalization) is 3 or more of the 24
+where the baseline cleared and the reviewer heard no ring; it stops the stage.
+
+### Reported, not gating
+
+Per level and station: strikes kept, exclusions by code, overruns, truncated windows, unjudged
+clears; per candidate: false clears by control set. **The noise-band report**, prompted by B3.0: how
+many strike clears at baseline and at the chosen candidate have f1 between 355 and 395 Hz, the region
+where B3.0's quiet controls put lines at the 12 dB gate (11 lines, 361-389 Hz, 12.1-15.1 dB), beside
+the same count for the no-fire controls. It is a report, not a threshold, and does not select.
+
+### Exclusions and stopping
+
+Only the runner's five pre-declared codes (`ACK_REJECTED`, `NO_NEW_CAPTURE`, `FETCH_FAILED`,
+`CAPTURE_NOT_OK`, `RECORD_CONTRADICTS_REQUEST`), a trial replaced in place, and a stop after 3 tries
+of one trial. Overruns are excluded by `CAPTURE_NOT_OK` and therefore do not count against a level, so
+they are reported per level (above). Nothing is deleted. A block interrupted by anything other than a
+runner code is resumed with `--start-block`, and the interruption is logged here.
+
+### Limits registered now
+
+- **Air-shot controls exist only at the profile's 20 ms pulse** (B3.0). The plan's B3.2 controls are
+  no-fire, so nothing in B3.2 tests whether a 60-85 ms actuation (a longer plunger dwell, a longer
+  retraction) couples noise into the window that a 20 ms air shot did not. That is a gap in the
+  control design, not something this registration closes. Adding air shots at the tested widths would
+  be a plan amendment, and it is offered to the operator as one.
+- **B3.0's controls used the profile pulse and a 20 ms plunger impact** and were taken with the room
+  empty; B3.2's strikes will be taken under whatever the room is doing. Interleaved no-fire controls
+  are the only check on that.
+- **The exploration set is 4 spokes per station.** A rate on 6 strikes moves in steps of 16.7 pp, so
+  the 10 pp and 25 pp thresholds are coarse; that is why rule 3's tolerance reduces to "equal to the
+  best".
+- **Consistency is self-referential**: a spoke that rings at a wrong but stable frequency is
+  consistent. This campaign does not identify modes (plan, "What this campaign is not").
