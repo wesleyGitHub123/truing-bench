@@ -1032,10 +1032,37 @@ tower, extrusion and fitting stay possible carriers. The operator is considering
 damp it; that would be a physical change at the station (see the rig registry: a new rig_id, with B2's standoff
 and pulse bracket re-measured). Not decided, and not needed to continue on `LEFT/rig-1` and `RIGHT/rig-1`.
 
-**Waiting on a decision before any strike is taken** (the registered rules were written before this control
-result existed; changing them afterwards is the operator's call, and it has to be made before strike data, not
-after). **Decision pending; the answer is recorded below when given.**
+**Decision (2026-09-19, before any strike): report the cross-spoke check, do not gate on it; carry on on
+`LEFT/rig-1` and `RIGHT/rig-1`, no rubber.** Recorded as Amendment 2 to the B3.2 registration below.
 
 Bundles (`_campaign/`, gitignored, this machine only): 42 B3.2 air bundles; PCM manifest sha256 over them,
 sorted `name:pcm_sha256` lines:
 `f0e4e0ff9effdfb8d60280ff030b9aa24fba364eef82a49f7ab80069ae2c8bda`.
+
+### Amendment 2 to this registration (2026-09-19, after the air blocks, before any strike)
+
+**Why.** The air blocks showed tones after the plunger-stop impact at RIGHT (see the interim record), and the
+registered consistency test is per spoke, so a tone that repeats at the same frequency on every spoke would pass
+it. The operator listened and reports it is actuator noise (the plunger hitting its stop), not the rotor.
+
+**What is added, and only this.** A **cross-spoke coincidence report**, with a review trigger and **no gating**:
+
+- For each station, width and candidate (the baseline and the chosen one): list the f1 of every strike clear. A
+  cell is **flagged** when clears from at least 3 of the station's 4 exploration spokes have f1 within +-2 Hz of
+  one another (the common frequency is their median).
+- For each flagged cell, also report whether the common frequency lies within +-2 Hz of a line found in that
+  station's air shots at the same width (the tool lists those lines from the air captures).
+- **Trigger, not a filter.** If a flagged cell belongs to the chosen candidate at the chosen level, the selection
+  report says so, and approval at B3.3 (already halt-and-ask) is not requested until the operator has looked at
+  it. Whether those clears count as consistent is then the operator's call, recorded before the freeze. **No clear
+  is removed automatically, and no selection rule, threshold, candidate, spoke or level changes.**
+
+**Limits.** A flag is a prompt to look, not a verdict: spokes on a real wheel differ in tension, so a common f1
+is suspicious, but several spokes can genuinely share a pitch. The check cannot tell the two apart by itself.
+
+**Not done, and why.** Gating on the air-shot lines (a strike clear near one is not a consistent clear) was
+rejected: six shots at one width and one microphone position are a thin basis, and it could discard a real
+spoke clear. A hardware change (rubber on the plunger stops) was deferred: it would be a new rig_id with B2's
+standoff and pulse bracket re-measured, and it is not needed to continue on `rig-1`. If a station misses the
+exploration gate, a stop-damping change is a candidate for the plan's one bounded mechanical lever, by a small
+amendment at that point.
