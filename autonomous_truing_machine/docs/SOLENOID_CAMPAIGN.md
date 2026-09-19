@@ -987,15 +987,19 @@ onset floor disabled):
 | RIGHT 72 ms | 1 of 6 | 542.1 (14.7) |
 | RIGHT 85 ms | 1 of 6 | 495.5 (12.3) |
 
-### Finding: a recurring structure at RIGHT, present with a 60 ms actuation and not with a 20 ms one
+### Observation: recurring tones after the impact at RIGHT, present with a 60 ms actuation and not with a 20 ms one
 
 At the RIGHT station with a 60 ms pulse, three lines recur across the six air shots, at about **508.6, 529.5
 and 542.0 Hz** (within +-1.5 Hz, any SNR, counting captures that have one): 4 of 6, 4 of 6 and 3 of 6, with 3, 3
 and 2 of those at or above the gate, up to 15.9 dB. At RIGHT 72 and 85 ms they are weaker (at most 1 of 6 at the
 gate). **B3.0's 20 ms RIGHT air shots have none of them (0 of 10, at any SNR).** LEFT shows the same
-frequencies only at noise level (at most 3 of 6, at most 7.1 dB), and B3.0's no-fire controls show them at 4-8
-of 20 with at most 5.9 dB. So the lines are tied to the RIGHT station and to a long actuation, not to the
-room.
+frequencies more weakly (at most 3 of 6, at most 7.1 dB), and B3.0's no-fire controls show them at 4-8 of 20
+with at most 5.9 dB, so a low-level version of these tones is present in the quiet room and the 60 ms
+actuation drives them harder. **What is established is the within-RIGHT comparison, 60 ms against 20 ms, at
+one microphone position. It does not establish that the RIGHT station is the noisier one: the microphone is
+closer to the RIGHT solenoid than to the LEFT one, so a weaker LEFT signal is expected from geometry alone**
+(an earlier draft of this record said the lines were tied to the RIGHT station and not to the room; both
+statements went beyond the data and are withdrawn).
 
 What this is not: it is **not a false clear** (none of the 42 cleared), so the registered rule passes. What it
 is: a plunger that hits nothing still excites something at RIGHT that rings in the 350-600 Hz band, above the
@@ -1006,9 +1010,19 @@ The plan's C8 predicted a RIGHT-only structural resonator (the rotor) that air s
 is evidence the actuation excites *something* at RIGHT anyway, but which part is not known and the rotor is
 one candidate among the tower, extrusion and fitting.
 
-**Why it matters for the strike data.** The registered consistency test is per spoke. A structural line that
-appears every time at the same frequency would look like a *consistent* clear on every RIGHT spoke, and the
-test would pass it. The registration has no check across spokes.
+**Also observed: the actuation is about 18-20 dB louder from 40 ms up.** The loudest sample of every B3.2 air
+shot, at either station and every width, is between -2.5 and -0.0 dBFS (one loud event, about 180-205 ms into
+the capture, nothing else within 20 dB of it), against -17 to -23 dBFS for B3.0's 20 ms air shots. No capture
+is flat-topped (at most 2 samples within 2 % of the peak), so the microphone is near its limit and not
+clipping. This fits B2's finding that a pulse reaches the spoke only from about 40 ms (LEFT) and 60 ms
+(RIGHT): B3.0's 20 ms air shots were a weaker actuation than any B3.2 strike will be, so B3.0's
+no-coupling result speaks for 20 ms only, which is why the amendment mattered. It also means the DSP
+window sits right after a near-full-scale event.
+
+**Why the tones may matter for the strike data (a hypothesis, not shown).** The registered consistency test is
+per spoke, so a tone that repeats at the same frequency on every RIGHT spoke would pass it. But f1 is the
+lowest strong peak in the band, so these tones can only become a spoke's f1 where its own peak is absent or
+lies above about 508 Hz. Air shots cannot say whether strikes show it; the strike data will.
 
 **Waiting on a decision before any strike is taken** (the registered rules were written before this control
 result existed; changing them afterwards is the operator's call, and it has to be made before strike data, not
