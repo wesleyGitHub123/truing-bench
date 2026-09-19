@@ -768,14 +768,21 @@ here, before data, so it cannot be settled by looking at results.
 ### The plan
 
 `docs/campaign_plans/b32.json`, seed 20260919, **sha256
-`efd73512a17d6ce5c26a6129fb96328f0afb171b3ae253195348f1b08e8b060c`**, regenerated from the seed and
-found identical. 8 blocks, one spoke each, levels shuffled within a spoke, a no-fire control after
-every 3 strikes. **168 strikes and 56 no-fire controls.**
+`be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904`**, regenerated from the seed and
+found identical. **This supersedes the plan first registered in `fd75723` (sha256 `efd73512a17d...`, never run;
+see "Amendment 1 to this registration" below).** 8 strike blocks, one spoke each, levels shuffled
+within a spoke, a no-fire control after every 3 strikes, plus one **air block per station**.
+**168 strikes, 56 no-fire controls and 42 air shots at the tested widths: 266 trials.**
 
-| station | spokes (blocks, in plan order) | levels (ms) | strikes | no-fire controls |
-|---|---|---|---|---|
-| RIGHT | 17, 5, 3, 15 | 60, 72, 85 | 6 per level per spoke = 72 | 24 |
-| LEFT | 10, 22, 12, 0 | 40, 60, 72, 85 | 6 per level per spoke = 96 | 32 |
+| station | spokes (strike blocks, in plan order) | levels (ms) | strikes | no-fire controls | air shots |
+|---|---|---|---|---|---|
+| RIGHT | 17, 5, 3, 15 | 60, 72, 85 | 6 per level per spoke = 72 | 24 | 6 per level = 18 |
+| LEFT | 10, 22, 12, 0 | 40, 60, 72, 85 | 6 per level per spoke = 96 | 32 | 6 per level = 24 |
+
+Block order as generated: the four RIGHT strike blocks, then `B3.2-RIGHT-air`, then `B3.2-LEFT-air`,
+then the four LEFT strike blocks. The air blocks' positions come from their own seeded stream and were
+not chosen; they landed adjacent, mid-session. An air block needs the wheel turned so the plunger lands
+between two spokes and held there; it fires the tested widths in random order with nothing interleaved.
 
 Run block by block (the operator positions the named spoke at its plunger and holds it):
 `python tools/campaign_runner.py --plan docs/campaign_plans/b32.json --no-prompt --start-block N --end-block N+1`.
@@ -797,8 +804,9 @@ block reports; a different rev, or a bumped rig_id, is reported and analysed apa
   replaced in place, so n stays 6.
 - **W(c, s, l)**, the worst spoke: the minimum of that rate over the station's 4 exploration spokes,
   for candidate c, station s, level l. The class-wise worst is the minimum over that class's 2 spokes.
-- **Cell** (c, s, l) **satisfies the cell constraints** if it has 0 inconsistent clears and 100 %
-  attribution: every strike record has `fired=true`, the station derived from the declared spoke,
+- **Cell** (c, s, l) **satisfies the cell constraints** if it has 0 inconsistent clears, **0 false
+  clears among the 6 air shots fired at that station and width under c**, and 100 % attribution: every
+  strike record has `fired=true`, the station derived from the declared spoke,
   `capture_result` OK and `pulse_ms` equal to the requested level (0.01 ms). Attribution rests on the
   board's own record plus B2-M8's physical verification; the runner's per-trial cross-check enforces
   the record and the operator's positioning is not independently observed.
@@ -879,7 +887,9 @@ where the baseline cleared and the reviewer heard no ring; it stops the stage.
 ### Reported, not gating
 
 Per level and station: strikes kept, exclusions by code, overruns, truncated windows, unjudged
-clears; per candidate: false clears by control set. **The noise-band report**, prompted by B3.0: how
+clears; per candidate: false clears by control set; per air group (station and width): captures with
+an in-band line at or above the gate, and the lines (frequency, SNR), as B3.0 reported them, without a
+recurrence rule (6 captures make a 50 % rule too coarse to gate on). **The noise-band report**, prompted by B3.0: how
 many strike clears at baseline and at the chosen candidate have f1 between 355 and 395 Hz, the region
 where B3.0's quiet controls put lines at the 12 dB gate (11 lines, 361-389 Hz, 12.1-15.1 dB), beside
 the same count for the no-fire controls. It is a report, not a threshold, and does not select.
@@ -894,11 +904,11 @@ runner code is resumed with `--start-block`, and the interruption is logged here
 
 ### Limits registered now
 
-- **Air-shot controls exist only at the profile's 20 ms pulse** (B3.0). The plan's B3.2 controls are
-  no-fire, so nothing in B3.2 tests whether a 60-85 ms actuation (a longer plunger dwell, a longer
-  retraction) couples noise into the window that a 20 ms air shot did not. That is a gap in the
-  control design, not something this registration closes. Adding air shots at the tested widths would
-  be a plan amendment, and it is offered to the operator as one.
+- **Air-shot controls at the tested widths were added** (Amendment 1 below), 6 per station and width.
+  Six captures bound a false-clear rate only below about 39 % at 95 %, and 6 per cell is what the
+  design affords; a cell with 0 false clears in 6 is not shown to be free of coupling, only not shown
+  to have it. The air shots run at the wheel position the operator chose for a gap, and a plunger that
+  actually touched something there would not be detected.
 - **B3.0's controls used the profile pulse and a 20 ms plunger impact** and were taken with the room
   empty; B3.2's strikes will be taken under whatever the room is doing. Interleaved no-fire controls
   are the only check on that.
@@ -907,3 +917,29 @@ runner code is resumed with `--start-block`, and the interruption is logged here
   best".
 - **Consistency is self-referential**: a spoke that rings at a wrong but stable frequency is
   consistent. This campaign does not identify modes (plan, "What this campaign is not").
+
+### Amendment 1 to this registration (2026-09-19, before any B3.2 data)
+
+**Why.** The registration's own limits section named a gap: B3.2's only controls were no-fire, and
+B3.0's air shots used the profile's 20 ms pulse, so nothing tested whether a 40-85 ms actuation couples
+noise into the analysed window that a 20 ms one did not. The operator asked for it to be closed.
+
+**What changed, and only this.**
+
+- The plan gains an air block per station, 6 air shots at each tested width (42 in all), and the plan's
+  sha256 is now `be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904`. The
+  strike blocks and their order are byte-for-byte what `efd73512a17d...` had (checked by the generator's selftest,
+  which regenerates the pre-amendment plan with `air_per_level=0` and compares).
+- A cell (station, level) satisfies its constraints only with 0 false clears among its own 6 air shots
+  under the candidate. The pooled control sets and every other rule are unchanged.
+- The air groups' in-band lines are reported per station and width; nothing about them is gated.
+- Plan text: Amendment 4 in `SOLENOID_CAMPAIGN_PLAN.md`, on the B3.2 physical section and rule 1.
+
+**Tools changed with it.** `tools/campaign_sequence.py` (the air blocks, and its selftest);
+`tools/b30_verdict.py` now considers only bundles stamped `campaign_stage` B3.0 -- without that, B3.2's
+air shots sharing the bundle directory would have entered the B3.0 groups and turned a re-run of the B3.0
+verdict INCONCLUSIVE (the selftest injects a B3.2 air shot and fails without the filter; the recorded
+B3.0 verdict is unchanged); `tools/campaign_report.py` labels air-shot groups by width.
+
+**What did not change.** No threshold, no DSP constant, no candidate, no exploration spoke, no level.
+No B3.2 data existed: the plan committed in `fd75723` was never run.

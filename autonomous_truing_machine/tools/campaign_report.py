@@ -57,7 +57,10 @@ def group_of(doc):
     if kind == "no_fire":
         return (1, "control: no_fire")
     if kind == "air_shot":
-        return (2, "control: air_shot at %s" % doc.get("campaign_station", "?"))
+        # B3.2 fires air shots at each tested width, so the width is part of what the group is
+        width = doc.get("pulse_ms")
+        at = " @ %g ms" % width if isinstance(width, (int, float)) and width > 0 else ""
+        return (2, "control: air_shot at %s%s" % (doc.get("campaign_station", "?"), at))
     spoke = doc.get("spoke_id", "?")
     return (0, "spoke %s" % spoke) if not isinstance(spoke, int) else (0, "spoke %03d" % spoke)
 

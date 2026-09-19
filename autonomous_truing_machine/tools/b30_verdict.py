@@ -142,7 +142,8 @@ def evaluate(docs, excluded, settings, per):
     min_snr, f1_hi = settings["min_snr"], settings["f1_hi"]
     for name, doc in docs.items():
         g = group_of(doc)
-        if g is None or name in excluded or doc.get("capture_result") not in (None, "OK"):
+        # only B3.0's own bundles: a later stage's air shots (B3.2 fires them at 40-85 ms) share the directory
+        if g is None or doc.get("campaign_stage") != "B3.0" or name in excluded or doc.get("capture_result") not in (None, "OK"):
             continue
         r["plan_sha256"].add(doc.get("campaign_plan_sha256"))
         r["chain_digests"].add(doc.get("chain_digest"))
@@ -292,6 +293,18 @@ def selftest():
         return evaluate(docs, excluded, settings, per)
 
     assert verdict()["verdict"] == "PASS", "a clean set must pass"
+
+    # a later stage's air shots and controls sharing the directory must not touch the B3.0 verdict
+    d, text = build()
+    docs, excluded = load_bundles(d)
+    settings, per = parse_lines_csv(text)
+    stray = {"campaign_kind": "air_shot", "campaign_station": "LEFT", "status": "suspect", "reason": "PROVISIONAL_MODE_ID",
+             "capture_result": "OK", "campaign_plan_sha256": "other-plan", "fired": True, "campaign_stage": "B3.2",
+             "chain_digest": "d1" * 32}
+    docs["B3.2_stray_air"] = stray
+    r = evaluate(docs, excluded, settings, per)
+    assert r["verdict"] == "PASS" and r["plan_sha256"] == {"abc"}, r
+    assert len(r["groups"]["air_LEFT"]["bundles"]) == 10, "B3.2 air shot leaked into the B3.0 air_LEFT group"
 
     # the denominator: a line in 6 of the 10 LEFT air shots is 15% of all 40 controls but 60% of its group
     r = verdict(line=("air_LEFT", 360.4, 15.0, 6))

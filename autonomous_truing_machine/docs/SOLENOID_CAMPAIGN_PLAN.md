@@ -406,6 +406,7 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
   - LEFT tests {40, 60, 72, 85}; RIGHT tests {60, 72, 85}.
 - **(Amendment 1, C6)** 6 strikes × level × 4 exploration spokes per station (2 per class), randomized; a no-fire control every 4th trial.
 - ≈168 captures (4 levels LEFT, 3 levels RIGHT), plus controls — inside the original ≈144–192 envelope.
+- **(Amendment 4, 2026-09-19 — closes a control-design gap found after B3.0 and before any B3.2 data)** **Air shots at the tested widths.** Per station, **6 air shots at each tested level** (LEFT 4 levels = 24, RIGHT 3 levels = 18; **42** in all), one block per station, the wheel turned so the plunger lands between two spokes. B3.0's air shots used the profile's 20 ms pulse, and B3.2's only controls were no-fire, so nothing tested whether a 40–85 ms actuation (a longer plunger dwell, a longer retraction) couples noise into the analysed window that a 20 ms air shot did not. The air blocks are inserted at a seeded position among their station's strike blocks so they are spread in time. **≈266 trials in all: 168 strikes, 56 no-fire controls, 42 air shots.**
 
 **Offline:**
 - `native_sweep` over these captures, the B3.0 controls, historical pass-C and `nano_ambient_ambiguous`.
@@ -413,7 +414,7 @@ Commit to `docs/SOLENOID_CAMPAIGN.md`: the vocabulary, the selection rules, the 
 - Selection-shift candidates are excluded.
 
 **Selection rules (pre-registered):**
-1. **Constraints:** 0 false clears on every control set; 0 inconsistent clears; 100 % attribution; no selection shift.
+1. **Constraints:** 0 false clears on every control set; 0 inconsistent clears; 100 % attribution; no selection shift. **(Amendment 4)** A pulse level's cell must also have 0 false clears among the 6 air shots fired at that station and width, under the candidate; those air shots are that cell's own controls, and the pooled control sets above are unchanged.
 2. **DSP (shared):** maximize the worst spoke's consistent clear rate **across both stations**.
 3. **Pulse:** shared if one level lies inside both stations' constraint-satisfying plateaus, with each station's worst spoke within 10 pp of that station's best. Otherwise per actuator, each chosen by its own station's worst spoke. **Consistent clear rate remains the primary metric — SNR is never substituted for it.**
 4. **Tie-breaks:** plateau interior, then fewest fields changed from baseline, then **median SNR (Amendment 2 — reported per level per rule 2a below; higher wins a tie)**, then shorter pulse.

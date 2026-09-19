@@ -1,4 +1,5 @@
 {
+ "air_per_level": 6,
  "blocks": [
   {
    "name": "B3.2-RIGHT-sp17",
@@ -601,6 +602,272 @@
      "kind": "no_fire",
      "pulse_ms": 0,
      "spoke": 15
+    }
+   ]
+  },
+  {
+   "name": "B3.2-RIGHT-air",
+   "prompt": "RIGHT AIR block: turn the wheel so the RIGHT plunger lands BETWEEN two spokes (it must hit nothing), and hold it there. 18 air shots at 60/72/85 ms in random order; no controls are interleaved (the no-fire controls are in the strike blocks).",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 1
+    }
+   ]
+  },
+  {
+   "name": "B3.2-LEFT-air",
+   "prompt": "LEFT AIR block: turn the wheel so the LEFT plunger lands BETWEEN two spokes (it must hit nothing), and hold it there. 24 air shots at 40/60/72/85 ms in random order; no controls are interleaved (the no-fire controls are in the strike blocks).",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 60,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 40,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 85,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 72,
+     "spoke": 0
     }
    ]
   },

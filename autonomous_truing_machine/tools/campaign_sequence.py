@@ -119,19 +119,48 @@ def b32_blocks_for_station(rng, station, spokes, levels, reps, control_every):
     return blocks
 
 
-def b32_plan(seed=REGISTERED_SEED, levels=None, reps=6, control_every=4, draw_seed=draw_spoke_sets.REGISTERED_SEED):
+def b32_air_block(rng, station, levels, air_per_level):
+    """Amendment 4: air shots AT THE TESTED WIDTHS, one block per station. B3.0's air shots used the profile's
+    20 ms pulse, so nothing else tested whether a 40-85 ms actuation couples noise into the window. The wheel
+    is turned to a gap (nothing under the plunger) and held; the widths are shuffled within the block."""
+    widths = [lvl for lvl in levels for _ in range(air_per_level)]
+    rng.shuffle(widths)
+    return {
+        "name": "B3.2-%s-air" % station,
+        "station": station,
+        "prompt": "%s AIR block: turn the wheel so the %s plunger lands BETWEEN two spokes (it must hit nothing), "
+                  "and hold it there. %d air shots at %s ms in random order; no controls are interleaved (the "
+                  "no-fire controls are in the strike blocks)." % (
+                      station, station, len(widths), "/".join(str(l) for l in levels)),
+        "trials": [trial("air_shot", NOMINAL_SPOKE[station], w) for w in widths],
+    }
+
+
+def b32_plan(seed=REGISTERED_SEED, levels=None, reps=6, control_every=4, draw_seed=draw_spoke_sets.REGISTERED_SEED,
+             air_per_level=6):
     """B3.2 exploration: per station, the B3.1 exploration spokes x that station's levels x reps, with a
-    no-fire control every control_every-th trial. Station order and spoke order are seeded."""
+    no-fire control every control_every-th trial, plus (Amendment 4) air_per_level air shots at each of that
+    station's levels in one block. Station order and spoke order are seeded from `seed` exactly as before the
+    amendment; the air blocks draw from their own seeded stream and are inserted at a seeded position among
+    their station's strike blocks, so the strike blocks are unchanged and the air shots are spread in time
+    rather than all taken at the end. air_per_level=0 gives the pre-amendment plan."""
     levels = levels or B32_LEVELS
     sets = draw_spoke_sets.draw(draw_seed)
     rng = random.Random(seed)
+    air_rng = random.Random("b32-air-%d" % seed)
     stations = ["LEFT", "RIGHT"]
     rng.shuffle(stations)
     blocks = []
     for st in stations:
-        blocks += b32_blocks_for_station(rng, st, sets[st]["exploration"], levels[st], reps, control_every)
-    return {"stage": "B3.2", "seed": seed, "spoke_draw_seed": draw_seed, "levels": levels, "reps": reps,
+        st_blocks = b32_blocks_for_station(rng, st, sets[st]["exploration"], levels[st], reps, control_every)
+        if air_per_level:
+            st_blocks.insert(air_rng.randint(0, len(st_blocks)), b32_air_block(air_rng, st, levels[st], air_per_level))
+        blocks += st_blocks
+    plan = {"stage": "B3.2", "seed": seed, "spoke_draw_seed": draw_seed, "levels": levels, "reps": reps,
             "control_every": control_every, "blocks": blocks}
+    if air_per_level:
+        plan["air_per_level"] = air_per_level
+    return plan
 
 
 def summarise(plan):
@@ -164,7 +193,10 @@ def selftest():
     q = b32_plan(1)
     assert q == b32_plan(1) and q != b32_plan(2)
     sets = draw_spoke_sets.draw(draw_spoke_sets.REGISTERED_SEED)
-    for b in q["blocks"]:
+    strike_blocks = [b for b in q["blocks"] if not b["name"].endswith("-air")]
+    air_blocks = [b for b in q["blocks"] if b["name"].endswith("-air")]
+    assert len(strike_blocks) == 8 and len(air_blocks) == 2, (len(strike_blocks), len(air_blocks))
+    for b in strike_blocks:
         st = b["station"]
         sp = {t["spoke"] for t in b["trials"]}
         assert len(sp) == 1 and sp <= set(sets[st]["exploration"]), "only B3.1 exploration spokes"
@@ -180,8 +212,24 @@ def selftest():
             else:
                 assert t["kind"] == "strike"
         assert all(station_for_spoke(t["spoke"]) == st for t in b["trials"])
+    # Amendment 4: 6 air shots at each tested width, per station, nothing else in the block
+    for b in air_blocks:
+        st = b["station"]
+        assert all(t["kind"] == "air_shot" and station_for_spoke(t["spoke"]) == st for t in b["trials"])
+        assert {t["pulse_ms"] for t in b["trials"]} == set(B32_LEVELS[st])
+        for lvl in B32_LEVELS[st]:
+            assert sum(1 for t in b["trials"] if t["pulse_ms"] == lvl) == 6, "6 air shots per level"
+    assert sorted(b["station"] for b in air_blocks) == ["LEFT", "RIGHT"]
+    # the strike blocks are exactly what the plan was before the amendment (same seed, same order)
+    old = b32_plan(1, air_per_level=0)
+    assert [b for b in q["blocks"] if not b["name"].endswith("-air")] == old["blocks"], "strike blocks changed"
+    assert "air_per_level" not in old and q["air_per_level"] == 6
+    # each air block sits among its own station's blocks: the stations still change over exactly once
+    names = [b["station"] for b in q["blocks"]]
+    assert names.count("LEFT") == 5 and names.count("RIGHT") == 5
+    assert sum(1 for a, c in zip(names, names[1:]) if a != c) == 1, names
     per_station = {}
-    for b in q["blocks"]:
+    for b in strike_blocks:
         per_station.setdefault(b["station"], set()).add(b["trials"][0]["spoke"])
     assert per_station["LEFT"] == set(sets["LEFT"]["exploration"]) and per_station["RIGHT"] == set(sets["RIGHT"]["exploration"])
     # the capture-count envelope the plan states: ~168 strikes (Amendment 2), plus controls
@@ -190,8 +238,9 @@ def selftest():
     # --- hash ---
     assert plan_sha256(p) == plan_sha256(json.loads(json.dumps(p))), "hash must survive a JSON round trip"
     assert plan_sha256(p) != plan_sha256(q)
-    print("selftest ok: B3.0 40 controls, B3.2 %d strikes + %d controls" % (
-        n_strikes, sum(1 for b in q["blocks"] for t in b["trials"] if t["kind"] == "no_fire")))
+    print("selftest ok: B3.0 40 controls, B3.2 %d strikes + %d no-fire controls + %d air shots at the tested widths" % (
+        n_strikes, sum(1 for b in q["blocks"] for t in b["trials"] if t["kind"] == "no_fire"),
+        sum(1 for b in q["blocks"] for t in b["trials"] if t["kind"] == "air_shot")))
 
 
 def main():
