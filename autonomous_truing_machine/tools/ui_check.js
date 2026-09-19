@@ -99,7 +99,7 @@ const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
   ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1, mode: 'interactive',
   acquisition: 'manual', acquisition_selectable: false,
-  real_front_end: false, acoustic_demo_spokes: 0,
+  real_front_end: false, acoustic_demo_spokes: 0, composite_navigation: false,
 };
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; };
@@ -561,6 +561,40 @@ ok(txt('rundl').indexOf('32 of 32 spokes struck') >= 0,
   'a refused bound reports the full sweep it actually did');
 ok(txt('rundl').indexOf('Remaining tension measurements omitted') < 0,
   'a refused bound claims no omission');
+sandbox.handle(PROV);
+// ---- who moved the wheel: composite navigation vs the images that keep synthetic navigation --------
+// Three images all report acquisition 'auto', and two of them have a real microphone, so what the page
+// says about positioning must come from the composite_navigation FACT, never from real_front_end.
+// (1) the acoustic demonstration: the operator places each struck spoke, runout is simulated.
+IDENT.composite_navigation = true;
+sandbox.loadIdent();
+ok(txt('acqnote').indexOf('You place each struck spoke') >= 0,
+  'with composite navigation the selector says the operator places each struck spoke');
+ok(txt('acqnote').indexOf('done by the synthetic implementations') < 0,
+  'and no longer claims positioning is synthetic');
+ok(txt('i-mode').indexOf('spokes operator-placed, runout synthetic') >= 0,
+  'the identity line says who positions and what is still synthetic');
+sandbox.handle(PROV_ACOUSTIC);
+ok(txt('rundl').indexOf('Operator at the acoustic stations, simulated elsewhere') >= 0,
+  'the run details name the operator at the acoustic stations');
+ok(txt('rundl').indexOf('nothing senses placement') >= 0,
+  'and say the placement is the operator\'s assertion, not a sensed fact');
+ok(txt('rundl').indexOf('No wheel was moved') < 0,
+  'a composite session never claims that no wheel was moved');
+// (2) the campaign bench image: real microphone, automatic path, but synthetic navigation.
+IDENT.composite_navigation = false;
+sandbox.loadIdent();
+ok(txt('acqnote').indexOf('done by the synthetic implementations') >= 0,
+  'with synthetic navigation the selector still says positioning is synthetic, whatever the microphone');
+ok(txt('acqnote').indexOf('You place each struck spoke') < 0,
+  'and does not claim an operator places spokes');
+ok(txt('i-mode').indexOf('AUTOMATIC (synthetic)') >= 0,
+  'the identity line says AUTOMATIC (synthetic) for it');
+sandbox.handle(PROV_ACOUSTIC);
+ok(txt('rundl').indexOf('No wheel was moved') >= 0,
+  'its run details keep saying that no wheel was moved');
+ok(txt('rundl').indexOf('Operator at the acoustic stations') < 0,
+  'and never name an operator it does not have');
 sandbox.handle(PROV);
 // Back to the plain Fast Demo image, so nothing below inherits the microphone.
 IDENT.mode = 'fastdemo'; IDENT.real_front_end = false; IDENT.acoustic_demo_spokes = 0;

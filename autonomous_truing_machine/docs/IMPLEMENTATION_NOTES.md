@@ -615,6 +615,35 @@ is why the macro is kept rather than deleted.
   digest became `truing.chain_profile/2`. A per-station pulse change therefore never invalidates
   DSP evidence. The three checked-in capture bundles were migrated by derivation, with their
   original digest kept as `chain_digest_v1` (see `test/fixtures/acoustic/captures/README.md`).
+- **Composite wheel navigation (SPEC 10A.2, 6.2) — 2026-09-19, plan B1b / A6.** The acoustic
+  demonstration images fire real solenoids over a synthetic runout. With synthetic navigation the
+  orchestrator believed each spoke was at its acoustic station while nothing moved, so the derived
+  station's actuator struck whatever spoke was there and the result was filed under a spoke that was
+  never struck. `navigation_composite` routes by station: LEFT and RIGHT go to `navigation_manual`
+  (the operator moves the wheel), every other station to `navigation_synthetic`. Simulated requests
+  are refused until the physical reference exists.
+  - **Where it applies.** Real-front-end images without the campaign debug channel
+    (`nano_esp32_mic`, `nano_esp32_fastdemo_mic`, `s3_devkit_fastdemo_mic`). The **campaign bench
+    image keeps synthetic navigation**: `MEASURE_ONCE` names the spoke per shot and is admitted only
+    in READY, so a composite there would stall INITIALIZE at the reference confirmation. This is a
+    decision taken while implementing, reversible, and the campaign never runs a session. `/id`
+    reports `composite_navigation` and the UI wording follows that fact, not an inference.
+  - **What it removes.** The orchestrator's belief in a position that nothing produced. **What it
+    does not verify.** Placement: `sensor_confirmed` stays false, so a spoke put at the wrong
+    station, or a wheel put on backwards, is still filed under the wrong spoke with no reason code.
+    `MEASURE_ONCE` bypasses navigation entirely.
+  - **Reinterpretation, for the owner.** `query()` answers from the physical child only, so a
+    stand-in `DONE` (rim positioned at the runout station) is not reflected in the reported
+    `wheel_position`. That bends 10A.2's "DONE = the feature is at the station" for simulated
+    stations, defensible only because that data is simulated and the source is labelled.
+  - **Provenance label, open.** The composite's `source_impl` is the least real of its children, so
+    it reports SYNTHETIC. The vocabulary has no "mixed" value; adding one is a spec reconciliation
+    left to the owner. The mix appears in `impl_name` and telemetry, but only the boolean derived
+    from `source_impl` reaches the session record, so "operator-confirmed at the acoustic stations"
+    is not in the session header.
+  - **Evidence.** Host tests only (routing and authority, reference gate, weakest-link provenance,
+    pending-drop and stop, bad configuration, and N = 1 and N = 2 workflow runs). Nothing has run on
+    a board or with an operator.
 
 ## Model-preparation findings (Phase 1b) — need the owner's decision
 

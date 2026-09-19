@@ -34,7 +34,10 @@
  *                          front end is a real acquisition, not a validated measurement.
  *
  *   FAST DEMO + MIC        the acoustic demonstration: the real INMP441 front end with the
- *                          synthetic acquisition path, and a BOUND on how many spokes are
+ *                          synthetic acquisition path -- except that the two acoustic stations
+ *                          are answered by the OPERATOR (composite navigation), because the
+ *                          solenoids are real and each strike needs a real spoke under the
+ *                          plunger -- and a BOUND on how many spokes are
  *                          struck (TRUING_ACOUSTIC_DEMO_SPOKES). A few real strikes prove
  *                          the microphone -> DSP path; the remaining tension rows are left
  *                          uncollected because the active layout does not contain them.
@@ -45,6 +48,11 @@
  *                          drive a single station capture outside a session for bench
  *                          characterization (docs/SOLENOID_CAMPAIGN.md). Only this dedicated
  *                          build carries it; the demo image the audience sees never does.
+ *                          One difference from the line above: it keeps SYNTHETIC navigation.
+ *                          MEASURE_ONCE runs outside a session with the physical spoke declared
+ *                          per shot, and composite navigation would put a human confirmation of
+ *                          the reference between every boot and READY -- where MEASURE_ONCE is
+ *                          admitted -- stalling the bench flow.
  *
  * Fast demo is deliberately NOT self-play with a nicer label. Self-play leaves the REAL
  * manual implementations in place and has a robot press the buttons, which is right for a

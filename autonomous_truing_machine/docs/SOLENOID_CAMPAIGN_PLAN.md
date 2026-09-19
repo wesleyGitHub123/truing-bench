@@ -620,7 +620,7 @@ This assumes identical, independent spokes, which is false: the worst spoke and 
 
 ### B1b firmware
 
-- **Navigation composite** (`lib/truing_hal/src/navigation_*`): SPOKE targets at either acoustic station → manual; RIM targets → synthetic. One authority object; rotation re-anchored at each operator confirmation; the descriptor records the mix.
+- **Navigation composite** (`lib/truing_hal/src/navigation_*`): SPOKE targets at either acoustic station → manual; RIM targets → synthetic. One authority object; rotation re-anchored at each operator confirmation; the interface's `impl_name` states the mix (**Amendment 3 note, 2026-09-19:** that name is not persisted -- only the `source_impl`-derived boolean reaches the session record). **Built for the acoustic demonstration image only; the campaign bench image keeps synthetic navigation**, because `MEASURE_ONCE` declares the physical spoke per shot and is admitted only in READY, which the composite's reference confirmation would delay.
 - **Wiring:** `src/orch_demo.c` `wire_acquisition(automatic)` for the fast-demo acoustic image; `TRUING_ACOUSTIC_DEMO_SPOKES` bound chosen at G-demo.
 - **Review:** spec-reviewer (§10A, §6.2).
 

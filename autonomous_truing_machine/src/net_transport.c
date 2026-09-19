@@ -540,7 +540,7 @@ static esp_err_t capture_pcm_handler(httpd_req_t *req)
 
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
-    char body[384];
+    char body[448];   /* the reply is ~330 bytes; a truncated JSON body would be silently wrong */
     uint8_t mac[6] = { 0 };
     (void)esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     truing_net_stats_t st;
@@ -551,11 +551,12 @@ static esp_err_t id_get_handler(httpd_req_t *req)
     const int n = snprintf(body, sizeof(body),
         "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\",\"mode\":\"%s\","
         "\"acquisition\":\"%s\",\"acquisition_selectable\":%s,"
-        "\"real_front_end\":%s,\"acoustic_demo_spokes\":%d,"
+        "\"real_front_end\":%s,\"acoustic_demo_spokes\":%d,\"composite_navigation\":%s,"
         "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
         BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR,
         truing_demo_acquisition_is_automatic() ? "auto" : "manual", TRUING_FAST_DEMO ? "true" : "false",
         TRUING_REAL_FRONT_END ? "true" : "false", (int)TRUING_ACOUSTIC_DEMO_SPOKES,
+        truing_demo_navigation_is_composite() ? "true" : "false",
         mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");

@@ -241,14 +241,29 @@ wrong index — and `GET /id` reports it as `"mode":"interactive+inmp441"`.
 ### The acoustic demonstration (`*_fastdemo_mic`)
 
 `s3_devkit_fastdemo_mic` / `nano_esp32_fastdemo_mic` set **both** `-DTRUING_FAST_DEMO=1` and
-`-DTRUING_REAL_FRONT_END=1`: the real microphone with the synthetic acquisition path, and a
+`-DTRUING_REAL_FRONT_END=1`: the real microphone with the synthetic acquisition path (runout and
+adjustment), except for navigation of the two acoustic stations, and a
 **bound on how many spokes are struck** (`TRUING_ACOUSTIC_DEMO_SPOKES`, 3). The station
 solenoids strike a few spokes to show that the INMP441 → DSP path works; the remaining tension
 rows are left uncollected; the runout sweep is untouched and the real solver runs on it. Like
 every real-front-end image it refuses sessions until both stations' solenoids are declared.
-Its synthetic navigation also never moves the wheel, so its three "spokes" are one physical
-spoke. Reconciling that is plan gate G-demo, before it is a demonstration of more than one
-spoke.
+Its navigation is a **composite** (`navigation_composite`): the operator places and confirms each
+struck spoke at its solenoid station, while the runout and adjustment stations stay simulated. That
+replaced purely synthetic navigation, which never moved the wheel, so the orchestrator believed a
+spoke was positioned while the derived station's actuator struck whatever was under it -- three
+"spokes" were one physical spoke. What the composite does **not** do is verify placement: nothing
+senses which spoke is under the plunger (`sensor_confirmed` is false), so a misplaced spoke, or a
+wheel mounted the other way round, is still filed under the requested index with no reason code.
+The run is no longer unattended: expect a confirmation for the reference (spoke 0 at LEFT) and one
+for each struck spoke. It is still labelled `SYNTHETIC` -- the weakest of its parts -- and is still
+not a physical wheel result. How many spokes to strike stays the demo-scope decision (plan gate
+G-demo); one spoke needs the reference confirmation and one placement confirmation.
+
+The campaign bench variant, `nano_esp32_fastdemo_mic_campaign`, deliberately **keeps synthetic
+navigation**: `MEASURE_ONCE` runs outside a session with the physical spoke declared per shot, and
+the composite's reference confirmation would sit between every boot and `READY` -- the only state
+in which `MEASURE_ONCE` is admitted. It is a bench image; do not run a session on it, because its
+synthetic navigation moves nothing.
 
 This is the one combination that needs an argument, because real tension from the wheel in
 front of you and synthetic runout from a simulated rim describe two different objects, and a

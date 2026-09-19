@@ -50,6 +50,13 @@ const truing_excitation_profile_t *truing_demo_excitation_profile(void);
  *   automatic  navigation_synthetic + runout_synthetic, both TRUING_SOURCE_SYNTHETIC.
  *              The implementations answer for themselves, so the acquisition runs
  *              unattended. Not a physical result.
+ *              EXCEPT on the acoustic demonstration (a REAL front end, not the campaign bench
+ *              image): there navigation is navigation_composite -- the operator places and confirms
+ *              each struck spoke at its acoustic station, and only runout/adjustment positioning is
+ *              simulated. It is still labelled SYNTHETIC (the weakest of its parts) and runout is
+ *              still synthetic, so it is still not a physical wheel result; but the run is no longer
+ *              unattended. The campaign bench image keeps synthetic navigation: it runs MEASURE_ONCE
+ *              outside a session, with the physical spoke declared per shot.
  *
  * The choice is a property of the SESSION, not of a running one: it can only be applied
  * while the machine is idle, and applying it re-initialises the orchestrator so the whole
@@ -61,6 +68,9 @@ const truing_excitation_profile_t *truing_demo_excitation_profile(void);
  * In every other image the request is refused and the manual path is the only path, so
  * the ordinary firmware has no way to reach the synthetic implementations at all. */
 bool truing_demo_acquisition_is_automatic(void);
+/* True when navigation is the composite (the operator places each struck spoke, the rest is simulated).
+ * Reported by /id as a fact so the page never infers it from real_front_end + acquisition. */
+bool truing_demo_navigation_is_composite(void);
 
 /* Requests the path for the next session. False if this image has no automatic path, or a
  * session is currently active. `detail` (optional) receives a short reason. */

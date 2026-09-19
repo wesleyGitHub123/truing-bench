@@ -23,6 +23,7 @@
 #include "truing_hal/acoustic_real.h"
 #include "truing_hal/audio_source_if.h"
 #include "truing_hal/pluck_if.h"
+#include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
@@ -69,6 +70,10 @@ static struct {
     truing_navigation_if_t nav;
     truing_navigation_manual_ctx_t nctx;
     truing_navigation_synthetic_ctx_t nsyn;   /* FAST DEMO: positions itself instead of asking */
+    /* FAST DEMO on a REAL front end: nav is the composite of these two (plan A6 / B1b). */
+    truing_navigation_if_t nav_phys, nav_sim;
+    truing_navigation_composite_ctx_t ncomp;
+    bool composite_nav;   /* the wiring above is in use; reported by /id so the page does not infer it */
     /* FAST DEMO: the adjustment the operator is currently being asked to apply. The
      * simulated wheel reacts when they confirm it, which is what a real wheel would do. */
     bool     adj_pending;
@@ -123,11 +128,41 @@ static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke,
 /* Point navigation and runout at one path or the other. Both implementations already
  * declare what they are; this is the whole of the difference between the two paths, and it
  * is why provenance stays honest without anyone maintaining a second story about it. */
+/* Which images get the composite navigation: those that fire REAL solenoids inside an orchestrator
+ * session -- the acoustic demonstration. NOT the campaign bench image (TRUING_CAMPAIGN_DEBUG): it runs
+ * MEASURE_ONCE outside any session, and there the runner declares the physical spoke for every shot
+ * (plan A6), so it never relied on the navigation belief. Giving it the composite would also put a
+ * human confirmation of the reference between every boot and READY, and MEASURE_ONCE is admitted only
+ * in READY, so the bench flow would stall. Reported to the page as a fact (/id composite_navigation). */
+#define DEMO_COMPOSITE_NAV (TRUING_REAL_FRONT_END && !TRUING_CAMPAIGN_DEBUG)
+
 static void wire_acquisition(bool automatic)
 {
+    s.composite_nav = false;
     if (automatic) {
         truing_runout_synthetic_init(&s.runout, &s.rsyn, s.clock, 32u);
+#if DEMO_COMPOSITE_NAV
+        /* The solenoids here are REAL. Purely synthetic navigation would tell the orchestrator that a
+         * spoke was positioned at its station while nothing moved, so the derived station's actuator
+         * would strike whatever spoke happened to be under it and the result would be filed under a
+         * spoke that was never struck (plan A6). So the two acoustic stations are answered by the
+         * operator -- who places and confirms each struck spoke -- while runout and adjustment, whose
+         * data is simulated, stay simulated, behind one navigation authority. The composite is
+         * labelled SYNTHETIC (the weakest of its parts). This removes the orchestrator's belief that a
+         * spoke is positioned when nothing moved; it does NOT verify that the spoke the operator placed
+         * is the one requested -- nothing senses placement (sensor_confirmed is false). */
+        static const truing_station_id_t k_physical[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT };
+        truing_navigation_manual_init(&s.nav_phys, &s.nctx, s.clock, 32u, 32u, &s.machine);
+        truing_navigation_synthetic_init(&s.nav_sim, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
+        if (!truing_navigation_composite_init(&s.nav, &s.ncomp, &s.nav_phys, &s.nav_sim, k_physical, 2u)) {
+            /* Fail closed: a composite that did not initialise refuses every request, so no session can
+             * start. Falling back to synthetic navigation here would reintroduce the wrong-actuator hazard. */
+            ESP_LOGE(TAG, "navigation composite failed to initialise; sessions cannot start");
+        }
+        s.composite_nav = true;
+#else
         truing_navigation_synthetic_init(&s.nav, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
+#endif
         if (s.seeded) {
             for (uint8_t k = 0; k < 32u; ++k) {
                 truing_runout_synthetic_set_index(&s.rsyn, k, s.seed_lateral[k], s.seed_radial[k]);
@@ -143,6 +178,11 @@ static void wire_acquisition(bool automatic)
 bool truing_demo_acquisition_is_automatic(void)
 {
     return s.acq_automatic;
+}
+
+bool truing_demo_navigation_is_composite(void)
+{
+    return s.composite_nav;
 }
 
 /* SPEC §12.5. Read on the HTTP task while the orchestrator may be measuring: the view is a
@@ -345,8 +385,11 @@ static void demo_task(void *arg)
                                                   : (TRUING_REAL_FRONT_END
                                                           ? "INTERACTIVE with the PHYSICAL INMP441 front end: a person positions the wheel and reads the gauges; each spoke is struck by its station's solenoid"
                                                           : "INTERACTIVE: the session starts and the waits are answered from the web UI")),
-             TRUING_FAST_DEMO ? "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
-                                "SYNTHETIC runout"
+             TRUING_FAST_DEMO ? (DEMO_COMPOSITE_NAV
+                                         ? "acquisition path selectable in the UI; starts on COMPOSITE navigation (the operator "
+                                           "places each struck spoke at its solenoid station, the rest is simulated) + SYNTHETIC runout"
+                                         : "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
+                                           "SYNTHETIC runout")
                               : "manual navigation + manual runout",
              !TRUING_REAL_FRONT_END
                      ? "REAL acoustic layers 2-4 on a SYNTHETIC 460 Hz pluck source"
@@ -427,9 +470,9 @@ static void demo_task(void *arg)
     /* Wired by the composition root, which is the only place that knows there is a transport to
      * push to. The orchestrator's contract with the acoustic subsystem is unchanged. */
     truing_acoustic_real_set_observer(&s.acoustic, acoustic_phase_observer, NULL);
-    /* THE fast-demo substitution, and the only one. Both implementations already exist and
-     * both already declare what they are; picking between them here - before
-     * truing_orch_init() - is what makes the whole session honest downstream.
+    /* THE fast-demo substitution. Both implementations already exist and both already declare
+     * what they are; picking between them here - before truing_orch_init() - is what makes the
+     * whole session honest downstream.
      *
      *   manual     TRUING_SOURCE_REAL       a person turns the wheel and reads the gauges,
      *                                       so navigation returns PENDING_OPERATOR and
@@ -442,7 +485,12 @@ static void demo_task(void *arg)
      *
      * No orchestrator branch is involved and no wait is bypassed: POSITION and READ_RUNOUT
      * are entered and left exactly as before. The only difference is that the thing being
-     * asked can answer for itself, which is the entire point of the HAL boundary. */
+     * asked can answer for itself, which is the entire point of the HAL boundary.
+     *
+     * One refinement, and it is a second substitution rather than a variation of the first: on the
+     * acoustic demonstration (real solenoids, DEMO_COMPOSITE_NAV) the "synthetic" navigation is a
+     * composite -- the operator answers the two acoustic stations, the stand-in the rest -- because
+     * real strikes need a real spoke under the plunger. See wire_acquisition(). */
     wire_acquisition(TRUING_FAST_DEMO ? true : false);
     truing_artifact_store_status_t ast;
     const truing_artifact_t *art = truing_artifact_store_load_fixture(&s.wheel, &s.solver, &ast);
@@ -574,7 +622,9 @@ static void demo_task(void *arg)
                     (void)truing_orch_init(&s.orch, &s.deps);
                     ESP_LOGW(TAG, "acquisition path -> %s; re-initialising so the reference is "
                                   "established through it",
-                             s.acq_automatic ? "AUTOMATIC (synthetic navigation + synthetic runout)"
+                             s.acq_automatic ? (DEMO_COMPOSITE_NAV
+                                                        ? "AUTOMATIC (composite navigation: operator at the acoustic stations, synthetic elsewhere + synthetic runout)"
+                                                        : "AUTOMATIC (synthetic navigation + synthetic runout)")
                                              : "MANUAL (operator positions and reads the gauges)");
                     steps = 0u;
                     waits = 0u;

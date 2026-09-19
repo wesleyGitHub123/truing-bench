@@ -538,6 +538,9 @@ static const char TRUING_WEB_UI_HTML[] =
 /* The acoustic demonstration: a real microphone AND a bound on how many spokes it plucks.
    Both are reported by /id as facts, so the page never parses the mode name to find out. */
 "function micReal(){return !!ident&&ident.real_front_end===true;}\n"
+/* Reported by /id as a fact, never inferred from real_front_end + acquisition: the campaign bench
+   image also has a real front end and an automatic path, but keeps synthetic navigation. */
+"function compositeNav(){return !!ident&&ident.composite_navigation===true;}\n"
 "function acqBound(){return (!!ident&&ident.acoustic_demo_spokes)||0;}\n"
 "function renderMode(){\n"
 " var auto=autoAuto(),sel=!!ident&&ident.acquisition_selectable;\n"
@@ -548,8 +551,10 @@ static const char TRUING_WEB_UI_HTML[] =
 " el('b-acq-auto').className=auto?'sel':'';\n"
 " el('b-acq-manual').className=auto?'':'sel';\n"
 " el('acqnote').textContent=auto\n"
-"  ?('Positioning and runout are done by the synthetic implementations, so the machine '+\n"
-"    'covers the whole rim without stopping. '+\n"
+"  ?((compositeNav()?('You place each struck spoke at its solenoid station and confirm it; runout is simulated, so the machine '+\n"
+"    'covers the whole rim without stopping. ')\n"
+"     :('Positioning and runout are done by the synthetic implementations, so the machine '+\n"
+"    'covers the whole rim without stopping. '))+\n"
 "    (acqBound()?('The station solenoids strike '+acqBound()+' spokes on the real microphone; the rest '+\n"
 "      'are left uncollected because tension is not in the active solver layout.')\n"
 "     :'It measures all 32 spokes as well.')+' Not a physical result.')\n"
@@ -557,7 +562,7 @@ static const char TRUING_WEB_UI_HTML[] =
 "   'as it would on the real machine. 64 answers per cycle.';\n"
 " el('i-mode').textContent=(fastDemo()?(micReal()?'FAST DEMO + REAL MIC':'FAST DEMO')\n"
 "  :(ident&&ident.mode==='selfplay'?'SELF-PLAY':(micReal()?'INTERACTIVE + REAL MIC':'INTERACTIVE')))+\n"
-"  ' / acquisition '+(auto?'AUTOMATIC (synthetic)':'MANUAL (operator)');}\n"
+"  ' / acquisition '+(auto?(compositeNav()?'AUTOMATIC (spokes operator-placed, runout synthetic)':'AUTOMATIC (synthetic)'):'MANUAL (operator)');}\n"
 /* Changing the path re-initialises the machine, so it is only offered between sessions and
    the firmware refuses it during one. The reply is rendered rather than assumed. */
 "function setAcq(m){\n"
@@ -854,7 +859,7 @@ static const char TRUING_WEB_UI_HTML[] =
 " if(nSpokes&&nMeas>=nSpokes)\n"
 "  return 'Measurement pass complete: '+nSpokes+' / '+nSpokes+' spokes';\n"
 " return 'Measuring spokes automatically'+(nSpokes?(' - '+nMeas+' / '+nSpokes):'')+\n"
-"  ' \\u00b7 synthetic acoustic source';}\n"
+"  ' \\u00b7 '+(micReal()?'real microphone':'synthetic acoustic source');}\n"
 "function renderSummaryInto(p){\n"
 " if(!prov)return;\n"
 " var v=prov.verification,rows=[];\n"
@@ -936,8 +941,9 @@ static const char TRUING_WEB_UI_HTML[] =
 "  (ws2.spokes_verification_grade!==undefined)\n"
 "   ?(ws2.spokes_verification_grade+' spokes verification-grade'):'');\n"
 " if(autoAuto()){\n"
-"  row(h,'Positioning','Automatic - synthetic navigation',\n"
-"   'No wheel was moved; the machine positioned against a simulated reference');\n"
+"  row(h,'Positioning',compositeNav()?'Operator at the acoustic stations, simulated elsewhere':'Automatic - synthetic navigation',\n"
+"   compositeNav()?'The operator confirmed each struck spoke as placed at its solenoid station (nothing senses placement); positioning for runout was simulated'\n"
+"    :'No wheel was moved; the machine positioned against a simulated reference');\n"
 "  row(h,'Runout entry','Automatic - synthetic runout snapshot',\n"
 "   'No dial gauge was read; values came from the simulated rim');\n"
 " }else{\n"
