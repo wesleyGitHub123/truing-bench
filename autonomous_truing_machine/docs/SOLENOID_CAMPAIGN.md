@@ -53,8 +53,9 @@ tracks: solenoid, mount, standoff fitting, strike point. Current: **LEFT/rig-1**
   says so inline, same as that one does.
 - **Trial manifests should stamp this token per trial** (a field alongside `station`), so B3.2 and
   later evidence can be grouped by physical rig version without re-deriving it from dates. This is
-  a note for whichever tool writes the manifest (`tools/campaign_runner.py`, in progress
-  elsewhere) rather than something this doc enforces on its own.
+  a note for whichever tool writes the manifest; `tools/campaign_runner.py` does so as of
+  2026-09-18 (`campaign_rig_id`, plus `campaign_station`), rather than something this doc enforces
+  on its own.
 - **Why now, not later:** cheap to add before B3.2 data exists; expensive to retrofit once trials
   reference a rig state only by "whatever the table said that day."
 
@@ -550,7 +551,7 @@ firmware: rotate the wheel to a gap and fire normally. T2 220/220; campaign and 
 
 **Open, not settled here:**
 
-- `tools/review_packet.py` (untracked, another agent's) still lists no-fire and strike captures
+- `tools/review_packet.py` (untracked; no longer another agent's work, released to us 2026-09-19) still lists no-fire and strike captures
   identically — it does not show `fired` or `pulse_ms`. Needs fixing before any blind review packet
   is built from B3.0 data.
 - The override's ceiling is the driver's existing 1000 ms stuck-actuator bound, not a thermal or
