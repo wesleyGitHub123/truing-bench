@@ -261,6 +261,8 @@ Both comfortably inside the 0.5 ms bound, both channels now symmetric on E3. **B
 both channels.** This closes the one remaining gap in B2's electrical/pulse-timing checks — B2
 has no open items left blocking either station's PRESENT flip except operator sign-off.
 
+### B2-E4 — quiet boot, both channels (2026-09-17)
+
 **Tool used:** `tools/bench/solenoid_smoke` (the bench sketch itself, not the T6 harness —
 `pluck_timing_check` fires automatically by design and is the wrong tool for this check).
 
@@ -271,6 +273,17 @@ watching both plungers live through each one.
 **Result:** zero movement on either channel across all three resets. Matches the sketch's own
 design ("Fires nothing on boot; every activation is a keystroke") and confirms it holds in
 practice, not just by source inspection.
+
+**Scope, corrected 2026-09-19:** this was measured on the **bench sketch**, not on the firmware
+images, and the sketch fires nothing at boot whatever `PRESENT` says. So E4 establishes the
+*hardware* property — with the gate pull-downs fitted, neither MOSFET conducts through reset and
+the ROM/bootloader phase — and it stays valid for that. It says nothing about application-level
+firing. The firmware's bring-up (`src/bringup_acoustic.c`) deliberately fires one live measurement
+per station whose `PRESENT` is 1 (plan A9), and both are now 1 (`16c38e2`), so **on a firmware image
+each boot is expected to strike LEFT and then RIGHT once** — read from the code, not yet observed
+on target. This applies to every image with a real front end, the demo image
+`nano_esp32_fastdemo_mic` included. An earlier note of mine described E4 as "recorded at
+PRESENT=0"; that overstated it — E4 never exercised the firmware at all.
 
 ### B2-E1 — shared parts, both channels (2026-09-17)
 
@@ -330,7 +343,7 @@ demo positioning, per the operator).
 
 **M1 marked done, all four classes.**
 
-### B2-M2 — standoff, per class (in progress, 2026-09-18)
+### B2-M2 — standoff, per class (2026-09-18)
 
 **Method:** caliper measurement, plunger face to spoke at rest, per class. Fitting id and tower
 height recorded alongside (rig_id `LEFT/rig-1` / `RIGHT/rig-1`, per the registry above — unchanged
@@ -497,7 +510,7 @@ for this wheel, this mounting, as of this M8 run. **M8 marked done.**
 | E1 | anomaly noted, not chased (deferred, open) | anomaly noted, not chased (deferred, open) |
 | E2 | done | done |
 | E3 | done 2026-09-18 | done 2026-09-17 |
-| E4 | done | done |
+| E4 | done — hardware boot only, on the bench sketch (see E4 scope note) | same |
 | M1 | done | done |
 | M2 | done | done |
 | M3 | done | done |
