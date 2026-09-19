@@ -828,6 +828,14 @@ digest `6328445a925e`).
   is not a knob this campaign turns). The harness prints rows for them; they select nothing. A
   next-onset margin candidate is added only if truncation is observed, by amendment.
 
+**Found when the two-field rows were built (2026-09-19, before any strike): 7 of the 34 cannot run.** The config
+validator refuses a chain profile whose `gate_start_ms` + `window_ms` does not fit the capture. The harness prints
+these as `OUT_OF_RANGE`: gate 800 alone, and the pairs gate 300 + window 750, gate 500 + window 750, gate 800 +
+window 250, gate 800 + window 750, gate 800 + prominence 9, gate 800 + prominence 12 (sums of 1050 or more; the
+largest sum that runs is 1000). They stay in the registered list and nothing about the capture length changes. A
+candidate that cannot run has no clears, so its worst-spoke rate is 0: it cannot be chosen over an evaluable
+candidate and cannot meet the exploration gate. 27 candidates are evaluable.
+
 ### Selection, made operational
 
 Applied in this order, to the data as it stands when all 224 trials are kept. The control sets are:
