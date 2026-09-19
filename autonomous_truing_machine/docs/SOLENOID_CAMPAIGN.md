@@ -943,3 +943,77 @@ B3.0 verdict is unchanged); `tools/campaign_report.py` labels air-shot groups by
 
 **What did not change.** No threshold, no DSP constant, no candidate, no exploration spoke, no level.
 No B3.2 data existed: the plan committed in `fd75723` was never run.
+
+## B3.2 air blocks - interim record (2026-09-19, before any B3.2 strike data)
+
+Blocks 5 and 6 of `docs/campaign_plans/b32.json` (`B3.2-RIGHT-air`, `B3.2-LEFT-air`), plan sha256
+`be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904`, build `2511fdf`, chain digest
+`6328445a925e`, run 11:13-11:18 with `--start-block 4 --end-block 6`. **42 trials kept (trials 97-138),
+0 excluded, no exclusions ledger.** Board uptime continuous, no reboot. The wheel had not been moved since
+B3.0's last air block; the operator stated that both plungers were still in gaps and did not watch the wheel
+during the run.
+
+**Deviation, logged.** The registered order puts these blocks after the four RIGHT strike blocks; they were
+run **first**, because the wheel was already at a gap and the strike blocks need a person to place each
+spoke. Trial numbers still follow the plan (97-138), so the record is unaffected, but the seeded intent of
+spreading the air shots through the session in time is not met: they precede all strikes.
+
+**Result against the registered constraint: 0 false clears in 42.** Every air shot was rejected.
+
+| station | width (ms) | n | rejection reasons |
+|---|---|---|---|
+| LEFT | 40 | 6 | 6 `LOW_SNR` |
+| LEFT | 60 | 6 | 5 `LOW_SNR`, 1 `AMBIGUOUS_PEAK` |
+| LEFT | 72 | 6 | 3 `LOW_SNR`, 3 `AMBIGUOUS_PEAK` |
+| LEFT | 85 | 6 | 4 `LOW_SNR`, 2 `AMBIGUOUS_PEAK` |
+| RIGHT | 60 | 6 | 3 `LOW_SNR`, 3 `AMBIGUOUS_PEAK` |
+| RIGHT | 72 | 6 | 5 `LOW_SNR`, 1 `AMBIGUOUS_PEAK` |
+| RIGHT | 85 | 6 | 3 `LOW_SNR`, 2 `AMBIGUOUS_PEAK`, 1 `VALUE_OUT_OF_RANGE` |
+
+`capture_result` OK and `fired=true` on all 42; the recorded width equals the requested one on all 42. The one
+`VALUE_OUT_OF_RANGE` (trial 112) is the window-selection failure at `acoustic_real.c:148` ("too little signal
+survives gating"), not a near-clear: onset 115 ms into the capture, no window selected, and the host replay
+reproduces it (`NO_WINDOW`). Read as a very short click that decays below the decay floor before the minimum
+window; not traced further.
+
+**In-band lines at or above the 12 dB gate** (reported, not gated, per the registration; the lines-mode harness,
+onset floor disabled):
+
+| group | captures with a line at the gate | lines (Hz, dB) |
+|---|---|---|
+| LEFT 40 / 60 / 72 ms | 0 / 0 / 0 | none (strongest in-band peak 11.7 / 11.3 / 9.8 dB) |
+| LEFT 85 ms | 2 of 6 | 425.0 (12.4); 427.5 (13.8), different captures |
+| **RIGHT 60 ms** | **3 of 6** | **508.4-508.8 (12.4-14.2), 529.1-529.7 (13.2-15.9), 542.0-542.2 (13.7-14.5)** |
+| RIGHT 72 ms | 1 of 6 | 542.1 (14.7) |
+| RIGHT 85 ms | 1 of 6 | 495.5 (12.3) |
+
+### Finding: a recurring structure at RIGHT, present with a 60 ms actuation and not with a 20 ms one
+
+At the RIGHT station with a 60 ms pulse, three lines recur across the six air shots, at about **508.6, 529.5
+and 542.0 Hz** (within +-1.5 Hz, any SNR, counting captures that have one): 4 of 6, 4 of 6 and 3 of 6, with 3, 3
+and 2 of those at or above the gate, up to 15.9 dB. At RIGHT 72 and 85 ms they are weaker (at most 1 of 6 at the
+gate). **B3.0's 20 ms RIGHT air shots have none of them (0 of 10, at any SNR).** LEFT shows the same
+frequencies only at noise level (at most 3 of 6, at most 7.1 dB), and B3.0's no-fire controls show them at 4-8
+of 20 with at most 5.9 dB. So the lines are tied to the RIGHT station and to a long actuation, not to the
+room.
+
+What this is not: it is **not a false clear** (none of the 42 cleared), so the registered rule passes. What it
+is: a plunger that hits nothing still excites something at RIGHT that rings in the 350-600 Hz band, above the
+SNR gate, at frequencies where a spoke's own pitch could sit. Applying B3.0's own coherence wording (a line at
+the gate within +-2 Hz in at least half a group) to the RIGHT 60 ms group would put 508.6 and 529.5 Hz at
+exactly 3 of 6, 50 %; the B3.2 registration deliberately does not gate on it. The cause is **not identified**.
+The plan's C8 predicted a RIGHT-only structural resonator (the rotor) that air shots would not excite; this
+is evidence the actuation excites *something* at RIGHT anyway, but which part is not known and the rotor is
+one candidate among the tower, extrusion and fitting.
+
+**Why it matters for the strike data.** The registered consistency test is per spoke. A structural line that
+appears every time at the same frequency would look like a *consistent* clear on every RIGHT spoke, and the
+test would pass it. The registration has no check across spokes.
+
+**Waiting on a decision before any strike is taken** (the registered rules were written before this control
+result existed; changing them afterwards is the operator's call, and it has to be made before strike data, not
+after). **Decision pending; the answer is recorded below when given.**
+
+Bundles (`_campaign/`, gitignored, this machine only): 42 B3.2 air bundles; PCM manifest sha256 over them,
+sorted `name:pcm_sha256` lines:
+`f0e4e0ff9effdfb8d60280ff030b9aa24fba364eef82a49f7ab80069ae2c8bda`.
