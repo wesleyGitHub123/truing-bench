@@ -647,3 +647,107 @@ or more than one plan.
 **Stage-report contents (B3.0):** this section's commit hash; the plan sha256 and the exclusions
 ledger; `tools/b30_verdict.py` output verbatim; the per-group table; the 360 Hz report; the count of
 in-band strong peaks at or above the gate per group; and the statement above that a PASS is bounded.
+
+## B3.0 stage report - controls and coupling (2026-09-19)
+
+**Verdict: PASS**, under the rule registered in `8aa19d6` and bounded as that section says. Plan
+sha256 `65aec227b45562db99eddf9d32d34722f1855d0dce3c39e47ec910afe6c8adbb`, seed 20260919, build
+`2511fdf` (clean tree, `nano_esp32_fastdemo_mic_campaign`, 3-region esptool flash, 62/62 bring-up),
+run as `tools/campaign_runner.py --plan docs/campaign_plans/b30.json --no-prompt`, 10:43-10:48.
+**40 trials kept, 0 excluded.** The final run wrote no exclusions ledger.
+
+`tools/b30_verdict.py --run`, verbatim:
+
+```
+B3.0 verdict: PASS
+
+detector settings read from the data: f1 band 350-600 Hz, line = SNR >= 12.0 dB (the chain profile's own gate)
+plan sha256: 65aec227b45562db99eddf9d32d34722f1855d0dce3c39e47ec910afe6c8adbb
+chain digest: captures 6328445a925e, analysis 6328445a925e
+
+group         n   clears lines>=gate coherent lines 360Hz max SNR
+no_fire      20        0       7/20              0      12.8 dB
+air_LEFT     10        0       0/10              0       0.5 dB
+air_RIGHT    10        0       0/10              0       3.1 dB
+
+0 false clears in 40 controls: false-clear rate <= 7.2% at 95% confidence; per group <= 13.9% (n=20), <= 25.9% (n=10).
+
+PASS means: no false clear, and no line at or above the SNR gate recurring in half of any group.
+It does not mean nothing is there: a line below the gate, or recurring in fewer than half of a
+group, is not detected by this rule, and 20/10/10 captures cannot rule out a rare one.
+```
+
+**In-band lines, counted as the registration requires** (strong peaks the firmware detector reports
+in 350-600 Hz before any clear or reject gate):
+
+| group | captures | with a line at or above the gate | lines at or above the gate | strong in-band peaks, any SNR |
+|---|---|---|---|---|
+| no_fire | 20 | 7 | 11 | 469 |
+| air_LEFT | 10 | 0 | 0 | 103 |
+| air_RIGHT | 10 | 0 | 0 | 74 |
+
+The 360 Hz report: `no_fire` has one line at 361.2 Hz, 12.8 dB, in one capture (not coherent); the
+air groups have none at or above 0.5 dB and 3.1 dB respectively.
+
+**What the counts say, and what they do not.**
+
+- **A line at the SNR gate is not rare in these controls.** The 11 no-fire lines at or above the
+  gate sit at 361.2-389.1 Hz and 12.1-15.1 dB, in 7 of 20 captures. All 20 no-fire captures were
+  nevertheless rejected: 16 `AMBIGUOUS_PEAK` and 4 `LOW_SNR`. Which rejection stopped those seven
+  captures individually was not broken out, and whether the SNR gate alone would have cleared any of
+  them was not tested. The plan's carried-forward note that the 12 dB gate
+  "sits in the measured control/clear gap" rested on one ambient capture (maximum 11.2 dB); twenty
+  quiet captures now reach 15.1 dB. **Nothing is changed on this:** a threshold change needs strike
+  evidence, and that is B3.2's job. It does bind B3.2's reading: a strike clear at 12-15 dB near
+  360-390 Hz is not separated from room noise by SNR alone, and only the interleaved controls can say
+  whether it is discriminated.
+- **The lines are not coherent by the registered rule** (a peak within +-2 Hz in at least half of the
+  group), but they are not one frequency either: 11 lines spread over 361-389 Hz. The rule detects a
+  recurring line; it cannot say this is not a broad low-frequency noise feature.
+- **Every control reached spectral analysis.** No capture was stopped at the onset floor (the
+  rejections are `AMBIGUOUS_PEAK` and `LOW_SNR`, both post-onset), so the absolute onset floor did
+  not filter the quiet controls in this room. The recorded ambient fixture, by contrast, is rejected
+  `NO_ONSET_DETECTED` in the bring-up self-check. Why the live controls got further was not
+  investigated.
+- **PASS is bounded.** 0 false clears in 40 controls bounds the rate at 7.2% pooled, 13.9% for
+  no_fire and 25.9% for each air group, at 95%. It says nothing about strikes.
+
+**Process record: two aborted starts before any data, both kept.**
+
+| ledger (in `_campaign/`) | what happened | fix |
+|---|---|---|
+| `B3.0_aborted-start_exclusions.jsonl` | trial 1, three `FETCH_FAILED` in under a second. **No shot was fired.** On a freshly booted board `/debug/capture.json` answers 404 "nothing captured yet"; the runner's pre-shot sequence read let that 404 escape as a failed trial | `aee250e`; regression test fails without it |
+| `B3.0_aborted-httpd-crash_exclusions.jsonl` | trial 1, try 1: one no-fire shot was taken, then the board **panicked and rebooted** (`A stack overflow in task httpd`, serial log) when the runner fetched the finished capture. Discarded, no bundle | `2511fdf`: httpd stack 4 KB -> 8 KB |
+
+The overflow was reproduced with serial capture before the change and did not recur after it. The
+backtrace shows only the overflow hook, so the handler is identified by timing and by the measured
+margin (3960 bytes free of 8192 on one capture, so the handler used about 4.2 KB, more than the old
+4096), not by a stack trace. `MEASURE_ONCE` with a full capture fetch had never run on hardware
+before this, so the stack limit was a latent fault in every campaign fetch and in `/debug/capture.json`
+generally.
+
+**First on-target evidence for the no-fire override:** 20 of 20 no-fire captures record
+`fired=false`, `pulse_ms=0` and carry their spoke's station; 20 of 20 air shots record `fired=true`;
+`capture_result` is OK and `n_words` 57600 for all 40. The **pulse override was not exercised** on
+target (no strike levels yet); its first use is B3.2, and the runner's cross-check will flag any
+capture that records another width.
+
+**Also closed:** a boot at `PRESENT=1` strikes LEFT then RIGHT. Observed by the operator (two
+mechanical triggers) and in the bring-up serial log (spoke 0 LEFT 20026 us, spoke 1 RIGHT 20038 us).
+
+**Limits of this data.**
+
+- **Nobody watched the wheel.** The operator was out of the room and stated that both plungers were
+  clear. That was not independently verified. All 20 air shots were rejected `LOW_SNR` with a maximum
+  of 3.1 dB, which is consistent with a plunger hitting nothing but does not prove it.
+- **Ambient conditions were not measured** apart from the captures themselves.
+- **Where the evidence lives.** The bundles are under
+  `test/fixtures/acoustic/captures/_campaign/`, which is gitignored, so **they exist only on this
+  machine**. 40 of the 110 bundles in its `index.txt` are B3.0-stamped (the rest are earlier passes
+  and are ignored by the tool because they carry no `campaign_kind`). PCM manifest sha256 over the 40
+  (sorted `name:pcm_sha256` lines): `3d03d6022ffdd0627db6dc968634420fb724667ac0969817855933e3050e8b6c`.
+  Back them up if they matter beyond this session.
+- **The composite navigation is off on this image** (`composite_navigation:false`), as designed.
+
+**Next:** B3.2 is unblocked. Its pre-registration (`docs/campaign_plans/b32.json` and the rules)
+must be committed before any B3.2 data.

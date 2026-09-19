@@ -727,6 +727,13 @@ and the tension-model parameters all require measurement or model preparation),
 so a normal session cannot be admitted until 1b and a measurement campaign
 supply them; the firmware reports this honestly as "not provisioned".
 
+**Known gap: the excitation profile has no NVS key (2026-09-19).** `truing_config_store_key()` in
+`src/config_store_nvs.c` maps five blob kinds and returns NULL for `EXCITATION_PROFILE`, so it can
+be neither saved to nor loaded from flash; bring-up logs `config EXCITATION_PROFILE load failed:
+ESP_ERR_INVALID_ARG` on every boot. Harmless today because every image runs the fixture profile and
+nothing provisions one. It has to be fixed, with a load/save round-trip test, before a measured
+per-station excitation profile can be persisted. Found in the B3.0 boot log; not fixed.
+
 **Known limitation: acoustic spoke identity vs the solver's `indexing_origin` (2026-09-14).**
 
 - **What it is.** The acoustic subsystem's convention (spoke 0 is the spoke the LEFT solenoid
