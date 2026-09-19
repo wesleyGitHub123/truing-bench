@@ -1,0 +1,260 @@
+{
+ "blocks": [
+  {
+   "name": "B3.0-RIGHT",
+   "prompt": "RIGHT block: turn the wheel so the RIGHT plunger lands BETWEEN two spokes (an air shot must hit nothing), and hold it there. The no-fire controls in this block ignore the wheel. 10 air shots and 10 no-fire controls follow.",
+   "station": "RIGHT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 1
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 1
+    }
+   ]
+  },
+  {
+   "name": "B3.0-LEFT",
+   "prompt": "LEFT block: turn the wheel so the LEFT plunger lands BETWEEN two spokes (an air shot must hit nothing), and hold it there. The no-fire controls in this block ignore the wheel. 10 air shots and 10 no-fire controls follow.",
+   "station": "LEFT",
+   "trials": [
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "no_fire",
+     "pulse_ms": 0,
+     "spoke": 0
+    },
+    {
+     "arm": "",
+     "kind": "air_shot",
+     "pulse_ms": 0,
+     "spoke": 0
+    }
+   ]
+  }
+ ],
+ "seed": 20260919,
+ "stage": "B3.0"
+}
