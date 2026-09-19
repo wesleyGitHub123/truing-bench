@@ -183,6 +183,13 @@ def take_shot(ws, args, ctx, spoke_id, kind, pulse_ms, name_stem, extra):
         if ack.get("verdict") == "REJECT_DEBUG_DISABLED":
             raise SystemExit("debug_channel_enabled is false on this build/session; "
                              "MEASURE_ONCE cannot run until it is turned on")
+        if ack.get("verdict") == "REJECT_STATE":
+            # MEASURE_ONCE is admitted only in READY with no session. The usual causes: a session is
+            # running, the board has not finished starting, or its INITIALIZE is waiting on a
+            # reference confirmation (an image with composite navigation waits for a person to confirm
+            # spoke 0 at LEFT; the campaign bench image does not, and should reach READY by itself).
+            log("!! the board is not in READY: is a session running, is it still booting, or is it "
+                "waiting for a reference confirmation in the UI (http://%s/)?" % DEFAULT_HOST)
         return EXCLUSION_ACK_REJECTED, None
     if meta == "stale":
         log("-- sp%d %s: ack accepted but no new capture (excitation unavailable -- PRESENT=0?)" % (spoke_id, kind))
