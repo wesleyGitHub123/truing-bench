@@ -21,16 +21,16 @@ USB-Serial/JTAG port (`COM5`); see "Flashing the Nano ESP32" below.
 
 PlatformIO's ESP-IDF integration refuses build paths that contain spaces, and
 this project lives under `College Files - 4th Year\…`. Host tests are not
-affected. For ESP-IDF builds, create a space-free directory junction once:
+affected. For ESP-IDF builds, create a space-free directory junction once (run from inside the repository):
 
 ```powershell
-New-Item -ItemType Junction -Path "%USERPROFILE%\truing_ws" `
-    -Target "%USERPROFILE%\OneDrive\Desktop\College Files\College Files - 4th Year\1st Term\Stage 1\Workspace\Truing Repo\autonomous_truing_machine"
+New-Item -ItemType Junction -Path "$env:USERPROFILE\truing_ws" `
+    -Target (Join-Path (git rev-parse --show-toplevel) autonomous_truing_machine)
 ```
 
-and build with `-d %USERPROFILE%\truing_ws`. The junction is a view of the same
+and build with `-d "$env:USERPROFILE\truing_ws"`. The junction is a view of the same
 files; edits made in either location are the same edits. Remove it with
-`Remove-Item %USERPROFILE%\truing_ws` (this removes only the junction).
+`Remove-Item "$env:USERPROFILE\truing_ws"` (this removes only the junction).
 
 If a build fails during CMake configuration with "Include directory
 `…/.pio/build/<env>/config` is not a directory", delete
@@ -44,18 +44,18 @@ failed run under the other path is stale.
 pio test -e native
 
 # Firmware, development board (must always build)
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit
 
 # Firmware, final form-factor board (must always build)
-pio run -d %USERPROFILE%\truing_ws -e nano_esp32
+pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32
 
 # Flash and monitor the development board
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit -t upload
 pio device monitor -p COM4 -b 115200
 
 # One-off: provision the SYNTHETIC fixture configuration into NVS to exercise
 # persistence (SPEC 11.5). Never a demonstration configuration.
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit_provision -t upload
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_provision -t upload
 ```
 
 ## How much to verify, and when
@@ -311,12 +311,12 @@ once a real session has started. `GET /id` reports this image as
 the INMP441 is actually wired to (`docs/SOLENOID_CAMPAIGN.md`); there is no DevKit variant.
 
 ```bash
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit_selfplay -t upload   # unattended evidence
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit_fastdemo -t upload   # accelerated demonstration
-pio run -d %USERPROFILE%\truing_ws -e s3_devkit -t upload            # the physical-path image
-pio run -d %USERPROFILE%\truing_ws -e nano_esp32_mic -t upload        # the physical INMP441 front end
-pio run -d %USERPROFILE%\truing_ws -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
-pio run -d %USERPROFILE%\truing_ws -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_selfplay -t upload   # unattended evidence
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo -t upload   # accelerated demonstration
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit -t upload            # the physical-path image
+pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_mic -t upload        # the physical INMP441 front end
+pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
+pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant
 ```
 
 The boot banner says which one is running, and so does `GET /id`:

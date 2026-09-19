@@ -97,7 +97,7 @@ let sent = [];
 function WebSocket(url) { this.url = url; this.readyState = 1; WebSocket.last = this; this.send = s => sent.push(JSON.parse(s)); }
 const IDENT = {
   board: 'Arduino Nano ESP32', firmware: '0.1.0-phase1f', build: 'abc1234',
-  ui: 'e5797f70', ssid: 'truing-xxxxxx', uptime_s: 42, clients: 1, mode: 'interactive',
+  ui: 'e5797f70', ssid: 'truing-000000', uptime_s: 42, clients: 1, mode: 'interactive',
   acquisition: 'manual', acquisition_selectable: false,
   real_front_end: false, acoustic_demo_spokes: 0, composite_navigation: false,
 };

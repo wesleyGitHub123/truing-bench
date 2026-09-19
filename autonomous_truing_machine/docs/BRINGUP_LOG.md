@@ -304,7 +304,7 @@ net:    URL        http://192.168.4.1/
 ```
 
 The passphrase is derived from the same MAC and printed beside the SSID; neither
-is stored in the repository.
+is stored in the repository. (MAC and SSID are redacted from the captured excerpt above.)
 
 ### SPEC 9.4 — capture under WiFi load
 

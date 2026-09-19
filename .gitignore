@@ -13,5 +13,7 @@ autonomous_truing_machine/managed_components/
 Thumbs.db
 .DS_Store
 *.swp
+# Machine-specific editor settings at the repo root (contain absolute local paths)
+/.vscode/
 # --- Claude Code: repo settings are committed, local overrides are not ---
 .claude/settings.local.json
