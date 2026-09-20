@@ -1320,3 +1320,31 @@ Block 8 follow-up (2026-09-20, descriptive): the two softest strikes are both 40
 10 ms frame of -23.6 dBFS, about the level of a no-fire control (-22.6 to -24.0); trial 188 has peak -5.3 and loudest frame
 -21.7. The other 22 strikes have loudest frames of -12.7 dBFS or louder. Whether either was a weak or missed tap is not known;
 both stay in as taken (no exclusion code applies) and are put to the operator to listen to.
+
+### Block 9 of 10: `B3.2-LEFT-sp12` (trials 203-234), stopped and resumed
+
+Build `2511fdf`, `LEFT/rig-1`, same pillow note as blocks 7 and 8. Spoke 12 is LEFT-leading (12 mod 4 = 0). **The first run
+(`--start-block 8 --end-block 9`, 18:55) was stopped by the operator's accidental keypress after trials 203, 204 and 205 were
+recorded** (seq 171-173: strikes at 72, 72 and 85 ms, all `LOW_SNR`). The board had by then executed plan trial 206 (a no-fire
+control on spoke 12; seq 174, `fired=false`, capture OK, `AMBIGUOUS_PEAK`, 11.4 dB, 365.7 Hz, not a clear) but the runner had not
+recorded it. That capture was saved from the board's ring before any further shot as an orphan, not a plan trial:
+`_campaign/_orphans/ORPHAN_interrupted_B3.2-LEFT-sp12_no_fire_sp12_seq174.*` (PCM sha256
+`ecfdd012b9e2b4ae56fba3fe6e91085c835630a744da35d85c0aae3d09039628`), outside every directory the analysis tools read. The block
+was then resumed at trial 206 with `--start-trial 206` (added to the runner in `e8f1d5e`, which keeps the plan's numbering and
+changes no rule or exclusion code), about 19:00-19:04, and trial 206 was run fresh. No trial was chosen or dropped by its
+result: the orphan is a no-fire that was lost to the stop and its outcome is disclosed above. Operator's account of whether the
+wheel was touched between the stop and the restart: not yet given. **All 32 plan trials are recorded once (203-234; trials 1-234
+have no duplicates or gaps); 0 excluded; no ledger file.** PCM manifest sha256 over the 32 bundles (sorted `name:pcm_sha256`
+lines): `f42ff0875179f81e4192ec2972e0e90aa4a90791c165910e860c78d2e1de9dd6` (`_campaign/`, gitignored, this machine only).
+
+**Baseline results (firmware status as taken).** Strikes **0/24 clears** (23 `LOW_SNR`, 1 `AMBIGUOUS_PEAK`; SNR -5.1 to 7.6 dB;
+f1 354-401 Hz). **No-fire controls 1/8 clears: trial 210 (12.0 dB, f1 359.5 Hz), a third false clear at LEFT, one per LEFT block.**
+Median strike SNR by width: -0.9 dB at 40 ms, 4.6 at 60, 4.0 at 72, 0.8 at 85 (6 each): no ranking is made.
+
+**Audio, descriptive only.** Strike peak -2.6 dBFS median (-11.0 to -1.1), none touches the rail, loudest 10 ms frame median
+-17.8 dBFS; analysed window ended by the decay floor in 24 of 32 captures (median 284 ms, 170-500). The only lines in 350-600 Hz
+at least 10 dB over this block's no-fire floor in at least 60% of strikes: 436.2 Hz (20/24, +15.9), 571.2 (15/24, +10.8) and
+578.8 (16/24, +11.4); spokes 10 and 22 did not show 436.2. No overruns, one onset per capture, impact 0.15-0.23 s, worst read
+gap max 41.2 ms. No-fire loudest frames -19.0 to -24.2 dBFS; trial 218 is the loud one (-19.0), cause not known. Room-event scan:
+nothing mid-capture; edge-frame energy at -37.0 to -38.8 dBFS in trials 223, 231, 232. Listening copies added to
+`_wav/B3.2_strike_blocks_0920/`.
