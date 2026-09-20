@@ -1470,3 +1470,13 @@ sets after this data is a registered-rule change: **halt and ask the operator.**
 RIGHT 17 1/18, RIGHT 5 18/18, RIGHT 3 0/18, RIGHT 15 0/18, LEFT 10 13/24, LEFT 22 7/24, LEFT 12 2/24, LEFT 0 2/24. The worst spoke is
 0 for every one of the 27 evaluable candidates (checked over all of them: the best worst-spoke rate is 0.000 against the gate's 0.833), so the exploration gate (worst spoke at least 5/6) would fail at both stations even if rule 1 were set aside.
 The clears on RIGHT spoke 5 with a 300 ms gate are the same spoke whose strikes were about 14 dB quieter at the mic.
+
+Follow-up to the descriptive note above (2026-09-20, same status: not a selection, not used by any rule). The 300 ms-gate clears
+that look like a rescue on RIGHT spoke 5 and LEFT spoke 10 are at **f1 353.8 Hz (spoke 5, 17 clears within 353.5-354.1),
+352.6 Hz (spoke 10, 10 clears within 351.8-352.7) and 355.0 Hz (spoke 22, 6 clears)**: the bottom of the band, where the
+no-fire controls' own lowest strong peaks sit (351-363 Hz in the baseline results; the no-fire clears at LEFT are 350.0-361.9 Hz).
+The no-fire captures in those blocks do not clear under a 300 ms gate, but the window is anchored on the onset, and a no-fire
+capture's onset is whatever noise triggered it, so strike and no-fire windows are not the same thing and that comparison does
+not show the line is the spoke's. What is established: the clears are tightly consistent within a block and differ by 1-2 Hz
+between blocks. What is not: whether they are a spoke or structure tone or a persistent room line near 353 Hz. They are not
+evidence that these spokes are readable, and no reading of them is to be carried into the demo or B3.3 as one.
