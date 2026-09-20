@@ -1258,3 +1258,32 @@ from S0 was clear for spokes 17, 5, 3 and 15. The operator saw nothing different
 so the ~14 dB quieter ring in block 2 has no known cause and none is assumed. The operator also confirmed there was no pillow
 for "the automatic 10 air shots"; the earlier "as far as this record shows" wording therefore stands confirmed for the air
 shots. Not yet answered: where the pillow sits for the LEFT blocks, which is recorded when given.
+
+### Block 7 of 10: `B3.2-LEFT-sp10` (trials 139-170), the first LEFT block
+
+Run 2026-09-20, 17:38-17:42 local, `--start-block 6 --end-block 7`, build `2511fdf`, `LEFT/rig-1`. The `--note` stamped in each
+bundle says the wheel was held by a pillow resting on the rim, in the same spot as for the RIGHT blocks (operator's account),
+and that the air shots were taken without it. **32 kept (24 strikes at 40/60/72/85 ms, 6 each; 8 no-fire), 0 excluded, every
+trial on its first try; no ledger file.** PCM manifest sha256 over the 32 bundles (sorted `name:pcm_sha256` lines):
+`ab2b2ed613d491b9fb4fae8576752b869b7d136e463b4d12d6ee93b9483ba39c` (`_campaign/`, gitignored, this machine only). Spoke 10 is
+LEFT-trailing (10 mod 4 = 2).
+
+**Baseline results (firmware status as taken).** Strikes 1/24 clears: trial 157 (40 ms, `suspect`, 19.5 dB, f1 352.8 Hz); the
+other 23 are 17 `LOW_SNR` and 6 `AMBIGUOUS_PEAK` (f1 350-375 Hz). **No-fire controls 1/8 clears: trial 166 (13.5 dB, f1 352.2
+Hz), a false clear at LEFT.** The one strike clear and the one no-fire clear are 0.6 Hz apart near the bottom of the band, where
+the mains harmonic sits; that is recorded, not interpreted. Median strike SNR by width: 6.1 dB at 40 ms, 3.9 at 60, 5.5 at 72,
+5.0 at 85 (6 strikes each): no ranking of widths is made.
+
+**Audio, descriptive only.** Strikes are quieter at the mic than the RIGHT blocks 1, 3, 4, as expected from distance: peak -2.1
+dBFS median (-4.0 to -0.4), no strike touches the converter rail, loudest 10 ms frame median -17.2 dBFS (blocks 1, 3, 4 were -1.3
+to -2.2; block 2 -15.6). The analysed window was ended by the decay floor in 19 of 32 captures (median 403 ms, 81-500). Lines in
+350-600 Hz that stand at least 10 dB over this block's no-fire floor in at least 60% of the strikes: 352.5 Hz (20/24, +11.9
+dB), 386.2 (24/24, +21.1), 482.5 (24/24, +22.8), 530.0 (24/24, +21.7), 543.8 (22/24, +16.5), 571.2 (15/24, +11.5), 585.0 (24/24,
++24.6). Not yet compared with the LEFT air-shot lines. No overruns, one onset per capture, impact 0.15-0.23 s, no-fire loudest
+frames -23.1 to -23.8 dBFS, worst read gap max 40.6 ms again.
+
+**Dog.** The operator reported, as block 7 finished, that their dog barked; when is not known (the last capture was fetched at
+17:42:45, the report came about 17:44). A scan of all 32 captures (frames above 200 Hz, excluding each strike and its first 0.6
+s) finds nothing above -44 dBFS inside any capture; five captures have energy at -39.8 to -43.6 dBFS in their first or last
+frame (trials 150, 152, 155, 160, 163), which may be an edge artifact of the scan or something at the capture boundary. No
+trial is excluded: none of the five registered exclusion codes covers room noise, and the no-fire controls exist to absorb it.
