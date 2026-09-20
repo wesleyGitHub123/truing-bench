@@ -1175,3 +1175,17 @@ Pretest, not campaign data (scratch bundles, no plan, no trial numbers): this mo
 captures and four fired shots (20 ms and 72 ms at each station) confirmed both stations fire, are recorded as fired at
 the requested width and station, and that the 72 ms impact is clearly audible; the 20 ms impact is not distinguishable
 from room noise in the audio. One no-fire capture had a loud neighbourhood sound at its start and cleared.
+
+### Block 2 of 10: `B3.2-RIGHT-sp5` (trials 25-48)
+
+Run 2026-09-20, 16:38-16:42 local, `--start-block 1 --end-block 2`, same command shape, build `2511fdf`, `RIGHT/rig-1`,
+same pillow note. **24 kept, 0 excluded, every trial on its first try; no ledger file.** PCM manifest sha256 over the 24
+bundles (sorted `name:pcm_sha256` lines): `95756e8cc8e2da56c47b2accb88d9be5276fb2ef5fbb8dd046e54a0354d23ed6`
+(`_campaign/`, gitignored, this machine only). Spoke 5 is RIGHT-leading; block 1's spoke 17 is also RIGHT-leading
+(17 mod 4 = 1).
+
+**Baseline results (firmware status as taken).** Strikes 0/18 clears, all 18 `LOW_SNR` (SNR -1.2 to 9.1 dB, all under the
+12 dB gate; f1 352-422 Hz). No-fire controls 0/6 clears (3 `AMBIGUOUS_PEAK`, 3 `LOW_SNR`; SNR 2.1 to 9.3 dB). Per width, the
+median strike SNR was 6.1 dB at 60 ms, 7.3 dB at 72 ms and 3.9 dB at 85 ms (6 strikes each): nothing here supports a
+ranking of widths and none is made. Block 1's strikes were mostly `AMBIGUOUS_PEAK`; this block's are all `LOW_SNR`, and
+what separates the two is not looked at yet. No audio look, no sweep, nothing selected and no rule touched.
