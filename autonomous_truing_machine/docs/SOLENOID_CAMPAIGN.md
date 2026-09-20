@@ -1348,3 +1348,34 @@ at least 10 dB over this block's no-fire floor in at least 60% of strikes: 436.2
 gap max 41.2 ms. No-fire loudest frames -19.0 to -24.2 dBFS; trial 218 is the loud one (-19.0), cause not known. Room-event scan:
 nothing mid-capture; edge-frame energy at -37.0 to -38.8 dBFS in trials 223, 231, 232. Listening copies added to
 `_wav/B3.2_strike_blocks_0920/`.
+
+### Block 10 of 10: `B3.2-LEFT-sp0` (trials 235-266): the last strike block
+
+Run 2026-09-20, 19:14-19:19 local, `--start-block 9 --end-block 10`, build `2511fdf`, `LEFT/rig-1`, same pillow note as blocks 7-9.
+Spoke 0 is the S0 spoke, LEFT-leading (0 mod 4 = 0). **32 kept (24 strikes, 8 no-fire), 0 excluded, every trial on its first
+try; no ledger file.** PCM manifest sha256 over the 32 bundles (sorted `name:pcm_sha256` lines):
+`5b9a17e039a86d5721c17d24fd74ccf400c40b56ce000f49ae7006c2519f9e21` (`_campaign/`, gitignored, this machine only). The operator's
+account: the wheel was not touched between the stop and the restart of block 9.
+
+**Baseline results (firmware status as taken).** Strikes **0/24 clears** (20 `LOW_SNR`, 4 `AMBIGUOUS_PEAK`; SNR -6.0 to 6.3
+dB; f1 351-422 Hz). **No-fire controls 2/8 clears: trial 246 (15.4 dB, f1 352.0 Hz) and trial 250 (13.3 dB, f1 361.9 Hz).**
+Median strike SNR by width: -2.0 dB at 40 ms, 3.1 at 60, 3.9 at 72, 4.3 at 85 (6 each): no ranking is made.
+
+**Audio, descriptive only.** Strike peak -3.5 dBFS median (-6.5 to -1.0), none touches the rail, loudest 10 ms frame median -19.1
+dBFS (the quietest LEFT block); analysed window ended by the decay floor in 16 of 32 captures (median 421 ms, 184-500). Lines in
+350-600 Hz at least 10 dB over this block's no-fire floor in at least 60% of strikes: 426.2 Hz (23/24, +18.6), 546.2 (17/24,
++14.8) and 592.5 (24/24, +29.9). Block 9's (spoke 12, also LEFT-leading) was 436.2 Hz, not these; not interpreted. No overruns,
+one onset per capture, impact 0.15-0.22 s, worst read gap max 41.2 ms, no-fire loudest frames -22.3 to -23.7 dBFS. Room-event
+scan: nothing mid-capture; edge-frame energy at -39.1 to -39.4 dBFS in trials 243, 255, 263. Listening copies added to
+`_wav/B3.2_strike_blocks_0920/`.
+
+### B3.2 data taking is complete (2026-09-20)
+
+**All 266 planned trials are recorded once** (bundles for trials 1-266: 168 strikes, 56 no-fire, 42 air shots; no duplicates, no
+gaps; one plan sha256 `be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904`; one build `2511fdf`); **0 exclusions, no
+ledger file.** One disclosed orphan: the unrecorded no-fire of the interrupted block 9 (above), kept outside every analysed
+directory. Baseline firmware status as taken, strike blocks only (air shots not counted here): strikes **4/168 clears** (three on
+RIGHT spoke 15 near 430 Hz, one on LEFT spoke 10 at 352.8 Hz); no-fire controls **6/56 clears** (RIGHT 1/24; LEFT 5/32: trials
+166, 190, 210, 246, 250, all near the bottom of the band). Correction to two chat summaries of this session: the no-fire count
+after block 8 was 3/40, not 3/46, and 168 is the campaign's total strike count, not the number run at that point. Nothing has been
+selected; the registered offline sweep and selection are next.
