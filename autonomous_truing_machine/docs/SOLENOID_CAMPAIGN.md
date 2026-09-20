@@ -1287,3 +1287,9 @@ frames -23.1 to -23.8 dBFS, worst read gap max 40.6 ms again.
 s) finds nothing above -44 dBFS inside any capture; five captures have energy at -39.8 to -43.6 dBFS in their first or last
 frame (trials 150, 152, 155, 160, 163), which may be an edge artifact of the scan or something at the capture boundary. No
 trial is excluded: none of the five registered exclusion codes covers room noise, and the no-fire controls exist to absorb it.
+
+The listening copies described above now live in `_wav/B3.2_strike_blocks_0920/`, one folder per block with `norm/` (boosted
+listening copies) and `faithful/` (real levels) inside each, plus a manifest, a blank notes sheet and a README; it holds
+blocks 1-4 and 7 so far and gains each later block. The `_wav/b32_right_blocks1-4_0920/` folder named earlier was removed
+after the move (its notes sheet was blank; the files are regenerated from the bundles). The operator says the dog that may
+have barked around block 7 is downstairs.
