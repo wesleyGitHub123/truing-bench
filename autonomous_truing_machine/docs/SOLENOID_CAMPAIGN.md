@@ -1384,7 +1384,7 @@ selected; the registered offline sweep and selection are next.
 ### B3.2 offline sweep and registered selection (2026-09-20, after all 266 trials)
 
 **Inputs.** `native_sweep` (`pio test -e native_sweep -v`, `TRUING_SWEEP_MODE` unset, onset floor as it is) over `_campaign/`
-(330 bundles listed in its index: B3.0 controls, the B3.2 air shots, strikes and no-fire, and the earlier pass bundles; 14 min
+(376 bundles listed in its index: the 266 B3.2 trials, the 40 B3.0 controls and the earlier pass bundles; 14 min
 07 s) and over `test/fixtures/acoustic/captures/` (the ambient fixture and the others; 8 s), both PASSED. Raw pio output
 sha256 (local scratch files, they include timing lines): campaign `1b67dc0cf26f6002ccbeec5991a95a598fe0aa8d0e935c43521147a5c0cb9d29`, fixtures `13c11c49cf3e315a45b5ad94318649c1ea16ac6eb9714f3037295ce0eed4b446`. Selection: `python tools/b32_select.py
 --plan docs/campaign_plans/b32.json --dir _campaign --sweep <campaign> --dir captures --sweep <fixtures>` (no `--lines` CSV yet, so the
@@ -1468,5 +1468,5 @@ sets after this data is a registered-rule change: **halt and ask the operator.**
 **Descriptive only, not a selection and not used by any rule.** Among the registered candidates the most strike clears pooled is
 `gate_start_ms+prominence_db=300+12` with 43/168 (LEFT 24/96, RIGHT 19/72) and false clears in the controls; by spoke it clears
 RIGHT 17 1/18, RIGHT 5 18/18, RIGHT 3 0/18, RIGHT 15 0/18, LEFT 10 13/24, LEFT 22 7/24, LEFT 12 2/24, LEFT 0 2/24. The worst spoke is
-0 for every candidate, so the exploration gate (worst spoke at least 5/6) would fail at both stations even if rule 1 were set aside.
+0 for every one of the 27 evaluable candidates (checked over all of them: the best worst-spoke rate is 0.000 against the gate's 0.833), so the exploration gate (worst spoke at least 5/6) would fail at both stations even if rule 1 were set aside.
 The clears on RIGHT spoke 5 with a 300 ms gate are the same spoke whose strikes were about 14 dB quieter at the mic.
