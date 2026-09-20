@@ -1293,3 +1293,25 @@ listening copies) and `faithful/` (real levels) inside each, plus a manifest, a 
 blocks 1-4 and 7 so far and gains each later block. The `_wav/b32_right_blocks1-4_0920/` folder named earlier was removed
 after the move (its notes sheet was blank; the files are regenerated from the bundles). The operator says the dog that may
 have barked around block 7 is downstairs.
+
+### Block 8 of 10: `B3.2-LEFT-sp22` (trials 171-202)
+
+Run 2026-09-20, 18:03-18:07 local, `--start-block 7 --end-block 8`, build `2511fdf`, `LEFT/rig-1`, same pillow note as block 7
+(same spot as for the RIGHT blocks, operator's account). **32 kept (24 strikes, 8 no-fire), 0 excluded, every trial on its first
+try; no ledger file.** PCM manifest sha256 over the 32 bundles (sorted `name:pcm_sha256` lines):
+`9b477154c6433bb10ee10e6c8f3b465277d0b2372160b98b2ee97b3d7f40da05` (`_campaign/`, gitignored, this machine only). Spoke 22 is
+LEFT-trailing (22 mod 4 = 2), the same class as spoke 10.
+
+**Baseline results (firmware status as taken).** Strikes **0/24 clears**, all `LOW_SNR` (SNR -1.2 to 11.8 dB, none at the 12 dB
+gate; f1 350-426 Hz). **No-fire controls 1/8 clears: trial 190 (13.6 dB, f1 350.0 Hz, the bottom edge of the band), a second
+false clear at LEFT, one per LEFT block so far.** Median strike SNR by width: 2.2 dB at 40 ms, 4.4 at 60, 2.2 at 72, 2.8 at 85
+(6 each): no ranking is made.
+
+**Audio, descriptive only.** Strike peak -0.9 dBFS median but -10.7 to -0.1 (at least one strike is far softer than the rest;
+not examined), no strike touches the rail, loudest 10 ms frame median -15.6 dBFS; analysed window ended by the decay floor in 15
+of 32 captures (median 329 ms, 147-500). Lines in 350-600 Hz at least 10 dB over this block's no-fire floor in at least 60% of the
+strikes: 397.5 Hz (15/24, +11.8), 491.2 (23/24, +24.9), 500.0 (20/24, +18.9), 531.2 (23/24, +17.5), 548.8 (22/24, +21.0), 567.5
+(22/24, +17.3), 580.0 (23/24, +23.5). Block 7's (spoke 10) were 386.2, 482.5, 530.0, 543.8 and 585.0 Hz: only about 530 Hz is in
+both; not interpreted. No overruns, one onset per capture, impact 0.16-0.24 s, no-fire loudest frames -22.6 to -24.0 dBFS. The
+worst read gap maximum is 41.2 ms (40.6 in every earlier block). A room-event scan finds nothing mid-capture; edge-frame energy
+at -39.7 to -40.7 dBFS in trials 176, 181 and 194, as in block 7. Listening copies added to `_wav/B3.2_strike_blocks_0920/`.
