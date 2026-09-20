@@ -1201,3 +1201,24 @@ this machine only). Spoke 3 is RIGHT-trailing (3 mod 4 = 3), the first RIGHT blo
 dB, none at the 12 dB gate; f1 350-362 Hz, the bottom of the band). No-fire controls 0/6 clears (1 `AMBIGUOUS_PEAK`, 5
 `LOW_SNR`; SNR -0.4 to 11.5 dB, f1 351-361 Hz). Strike and no-fire results are not separated by SNR or f1 range in this
 block. No audio look, no sweep, nothing selected and no rule touched.
+
+### Block 4 of 10: `B3.2-RIGHT-sp15` (trials 73-96)
+
+Run 2026-09-20, 16:59-17:04 local, `--start-block 3 --end-block 4`, build `2511fdf`, `RIGHT/rig-1`, same pillow note.
+**24 kept, 0 excluded, every trial on its first try; no ledger file.** PCM manifest sha256 over the 24 bundles (sorted
+`name:pcm_sha256` lines): `84aaeac455ed58bbca57b047f9679add036bdcf8e890d74cff70049b99a06566` (`_campaign/`, gitignored,
+this machine only). Spoke 15 is RIGHT-trailing (15 mod 4 = 3), the same class as block 3's spoke 3. This closes the RIGHT
+strike blocks.
+
+**Baseline results (firmware status as taken).** Strikes **3/18 clears**, the first strike clears of the campaign: trials
+77 (85 ms, 15.2 dB, 430.0 Hz), 90 (60 ms, 15.3 dB, 430.3 Hz) and 95 (60 ms, 13.3 dB, 430.2 Hz); the other 15 are 12
+`LOW_SNR` and 3 `AMBIGUOUS_PEAK` (f1 350-373 Hz). No-fire controls 0/6 clears (2 `AMBIGUOUS_PEAK`, 4 `LOW_SNR`; SNR 5.5 to
+12.8 dB, f1 350-359 Hz), so no false clear in this block. The three clears fall within 0.3 Hz of one another; none is at
+72 ms; three clears at three trial numbers say nothing about widths.
+
+**Across the four RIGHT blocks, baseline as taken:** strikes 3/72 (all on spoke 15), no-fire 1/24 (block 1, trial 8). No
+strike on spokes 17, 5 or 3 has f1 within 425-435 Hz, and 430 Hz is not among the in-band lines listed for block 1 above.
+Whether 430 Hz is the spoke, a structure line that only this spoke's position excites, or chance is not known: a reported
+peak frequency is not a claim about the spoke's pitch (outcome vocabulary). No audio look at the other spokes, no sweep,
+nothing selected and no rule touched. Exploration-gate status for RIGHT is decided only by the registered selection over
+all blocks, not from this baseline.
