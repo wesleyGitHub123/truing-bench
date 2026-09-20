@@ -1379,3 +1379,94 @@ RIGHT spoke 15 near 430 Hz, one on LEFT spoke 10 at 352.8 Hz); no-fire controls 
 166, 190, 210, 246, 250, all near the bottom of the band). Correction to two chat summaries of this session: the no-fire count
 after block 8 was 3/40, not 3/46, and 168 is the campaign's total strike count, not the number run at that point. Nothing has been
 selected; the registered offline sweep and selection are next.
+
+
+### B3.2 offline sweep and registered selection (2026-09-20, after all 266 trials)
+
+**Inputs.** `native_sweep` (`pio test -e native_sweep -v`, `TRUING_SWEEP_MODE` unset, onset floor as it is) over `_campaign/`
+(330 bundles listed in its index: B3.0 controls, the B3.2 air shots, strikes and no-fire, and the earlier pass bundles; 14 min
+07 s) and over `test/fixtures/acoustic/captures/` (the ambient fixture and the others; 8 s), both PASSED. Raw pio output
+sha256 (local scratch files, they include timing lines): campaign `1b67dc0cf26f6002ccbeec5991a95a598fe0aa8d0e935c43521147a5c0cb9d29`, fixtures `13c11c49cf3e315a45b5ad94318649c1ea16ac6eb9714f3037295ce0eed4b446`. Selection: `python tools/b32_select.py
+--plan docs/campaign_plans/b32.json --dir _campaign --sweep <campaign> --dir captures --sweep <fixtures>` (no `--lines` CSV yet, so the
+air-shot line report is not in it), tool at `f83983d`. Its complete output, sha256 `c996acd50d3a982fe8582e2f0c990704867377fe450c1214b8fa70d3454eba38`:
+
+```
+B3.2 selection report
+plan sha256 be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904
+
+kept trials: 168 strikes, 42 air shots, 56 no-fire; control sets B3.0 40, B3.2 no-fire 56, ambient 1, pass-C 18
+
+candidate (registered order)       state          detail
+baseline=0                         inadmissible   false clears on controls: B3.2 no-fire 6
+gate_start_ms=100                  inadmissible   false clears on controls: B3.0 1, B3.2 no-fire 3
+gate_start_ms=200                  inadmissible   false clears on controls: B3.2 no-fire 3
+gate_start_ms=300                  inadmissible   false clears on controls: B3.2 no-fire 3
+gate_start_ms=500                  inadmissible   false clears on controls: B3.0 3, B3.2 no-fire 4
+gate_start_ms=800                  not evaluable  the validator refuses this chain profile
+window_ms=250                      inadmissible   false clears on controls: B3.0 1, B3.2 no-fire 10, pass-C 1
+window_ms=750                      inadmissible   false clears on controls: pass-C 1
+prominence_db=9                    inadmissible   false clears on controls: B3.2 no-fire 10
+prominence_db=12                   inadmissible   false clears on controls: B3.0 2, B3.2 no-fire 13
+gate_start_ms+window_ms=100+250    inadmissible   false clears on controls: B3.0 2, B3.2 no-fire 8, pass-C 1
+gate_start_ms+window_ms=100+750    inadmissible   false clears on controls: B3.0 1, B3.2 no-fire 2
+gate_start_ms+window_ms=200+250    inadmissible   false clears on controls: B3.0 3, B3.2 no-fire 9
+gate_start_ms+window_ms=200+750    inadmissible   false clears on controls: B3.2 no-fire 1
+gate_start_ms+window_ms=300+250    inadmissible   false clears on controls: B3.0 6, B3.2 no-fire 8
+gate_start_ms+window_ms=300+750    not evaluable  the validator refuses this chain profile
+gate_start_ms+window_ms=500+250    inadmissible   false clears on controls: B3.0 6, B3.2 no-fire 7
+gate_start_ms+window_ms=500+750    not evaluable  the validator refuses this chain profile
+gate_start_ms+window_ms=800+250    not evaluable  the validator refuses this chain profile
+gate_start_ms+window_ms=800+750    not evaluable  the validator refuses this chain profile
+gate_start_ms+prominence_db=100+9  inadmissible   false clears on controls: B3.0 1, B3.2 no-fire 7
+gate_start_ms+prominence_db=100+12 inadmissible   false clears on controls: B3.0 3, B3.2 no-fire 11
+gate_start_ms+prominence_db=200+9  inadmissible   false clears on controls: B3.0 2, B3.2 no-fire 11
+gate_start_ms+prominence_db=200+12 inadmissible   false clears on controls: B3.0 3, B3.2 no-fire 15
+gate_start_ms+prominence_db=300+9  inadmissible   false clears on controls: B3.0 1, B3.2 no-fire 4
+gate_start_ms+prominence_db=300+12 inadmissible   false clears on controls: B3.0 5, B3.2 no-fire 9
+gate_start_ms+prominence_db=500+9  inadmissible   false clears on controls: B3.0 8, B3.2 no-fire 7
+gate_start_ms+prominence_db=500+12 inadmissible   false clears on controls: B3.0 10, B3.2 no-fire 10
+gate_start_ms+prominence_db=800+9  not evaluable  the validator refuses this chain profile
+gate_start_ms+prominence_db=800+12 not evaluable  the validator refuses this chain profile
+window_ms+prominence_db=250+9      inadmissible   false clears on controls: B3.0 2, B3.2 no-fire 9, pass-C 1
+window_ms+prominence_db=250+12     inadmissible   false clears on controls: B3.0 3, B3.2 no-fire 10, pass-C 1
+window_ms+prominence_db=750+9      inadmissible   false clears on controls: B3.2 no-fire 2, pass-C 1
+window_ms+prominence_db=750+12     inadmissible   false clears on controls: B3.2 no-fire 8, pass-C 1
+
+HALT G-ANALYSIS: no candidate is eligible. A per-station analysis profile is an architecture decision.
+
+Median SNR per level (dB; the board's own expect_snr_db, recorded only where its baseline analysis found an f1; n):
+  LEFT  40 ms  1.5  n=24   lead -1.7 (n=12)   trail 3.4 (n=12)
+  LEFT  60 ms  3.9  n=24   lead 3.7 (n=12)   trail 3.9 (n=12)
+  LEFT  72 ms  4.4  n=24   lead 3.9 (n=12)   trail 4.6 (n=12)
+  LEFT  85 ms  4.2  n=24   lead 3.6 (n=12)   trail 4.5 (n=12)
+  RIGHT 60 ms  6.1  n=24   lead 6.1 (n=12)   trail 5.9 (n=12)
+  RIGHT 72 ms  3.9  n=24   lead 3.5 (n=12)   trail 5.1 (n=12)
+  RIGHT 85 ms  4.0  n=24   lead 3.7 (n=12)   trail 4.1 (n=12)
+Reported, not gating (per station and level):
+  LEFT  40 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 15, window_ms 9
+  LEFT  60 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 16, window_ms 8
+  LEFT  72 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 20, window_ms 4
+  LEFT  85 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 20, window_ms 4
+  RIGHT 60 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 5, window_ms 19
+  RIGHT 72 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 6, window_ms 18
+  RIGHT 85 ms  kept 24  exclusions none  overruns kept 0 / excluded 0  window truncated by decay_floor 6, window_ms 18
+Air groups, in-band lines: not reported (no --lines CSV given)
+
+This report applies the registered rules and changes no constant. A choice here is a candidate for the
+B3.3 freeze, which is halt-and-ask; a flagged cell in the cross-spoke report (tools/b32_crossspoke.py)
+holds that approval until the operator has looked at it.
+```
+
+**Result, as the registered rules give it: HALT G-ANALYSIS.** Of the 34 candidates, 7 cannot run at this capture length
+(recorded earlier) and **all 27 evaluable candidates are inadmissible under rule 1** (0 false clears across every control set),
+the baseline included (6 false clears in the B3.2 no-fire controls). The candidates closest to admissible: `window_ms=750` (1
+false clear, in a pass-C control), `gate_start_ms+window_ms=200+750` (1, a B3.2 no-fire at LEFT), `gate_start_ms+window_ms=100+750`
+(3) and `window_ms+prominence_db=750+9` (3). No candidate reaches rule 2, so the exploration gate is not evaluated by the tool. Per the
+plan a per-station analysis profile is an architecture decision, and any change to a rule, the candidate set or the control
+sets after this data is a registered-rule change: **halt and ask the operator.** Nothing is selected and no constant changes.
+
+**Descriptive only, not a selection and not used by any rule.** Among the registered candidates the most strike clears pooled is
+`gate_start_ms+prominence_db=300+12` with 43/168 (LEFT 24/96, RIGHT 19/72) and false clears in the controls; by spoke it clears
+RIGHT 17 1/18, RIGHT 5 18/18, RIGHT 3 0/18, RIGHT 15 0/18, LEFT 10 13/24, LEFT 22 7/24, LEFT 12 2/24, LEFT 0 2/24. The worst spoke is
+0 for every candidate, so the exploration gate (worst spoke at least 5/6) would fail at both stations even if rule 1 were set aside.
+The clears on RIGHT spoke 5 with a 300 ms gate are the same spoke whose strikes were about 14 dB quieter at the mic.
