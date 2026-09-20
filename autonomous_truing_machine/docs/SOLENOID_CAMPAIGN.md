@@ -1222,3 +1222,12 @@ Whether 430 Hz is the spoke, a structure line that only this spoke's position ex
 peak frequency is not a claim about the spoke's pitch (outcome vocabulary). No audio look at the other spokes, no sweep,
 nothing selected and no rule touched. Exploration-gate status for RIGHT is decided only by the registered selection over
 all blocks, not from this baseline.
+
+### Listening copies of the RIGHT strike blocks (2026-09-20)
+
+The 96 captures of blocks 1-4 were exported as WAV (faithful plus boosted listening copies, `--verify` read-back exact) to
+`_wav/b32_right_blocks1-4_0920/` (gitignored, this machine only), with a manifest and a blank notes sheet. The operator
+will listen later and give notes. That listening is informal and unblinded (file names show strike or no-fire, and the
+manifest shows the firmware status). It does not select anything, changes no rule, and is not the registered blind review,
+which is drawn later from all blocks with the machine verdicts sealed. Whatever the operator reports is recorded here as
+their account when it is given.
