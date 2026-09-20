@@ -1315,3 +1315,8 @@ strikes: 397.5 Hz (15/24, +11.8), 491.2 (23/24, +24.9), 500.0 (20/24, +18.9), 53
 both; not interpreted. No overruns, one onset per capture, impact 0.16-0.24 s, no-fire loudest frames -22.6 to -24.0 dBFS. The
 worst read gap maximum is 41.2 ms (40.6 in every earlier block). A room-event scan finds nothing mid-capture; edge-frame energy
 at -39.7 to -40.7 dBFS in trials 176, 181 and 194, as in block 7. Listening copies added to `_wav/B3.2_strike_blocks_0920/`.
+
+Block 8 follow-up (2026-09-20, descriptive): the two softest strikes are both 40 ms. Trial 183 has peak -10.7 dBFS and a loudest
+10 ms frame of -23.6 dBFS, about the level of a no-fire control (-22.6 to -24.0); trial 188 has peak -5.3 and loudest frame
+-21.7. The other 22 strikes have loudest frames of -12.7 dBFS or louder. Whether either was a weak or missed tap is not known;
+both stay in as taken (no exclusion code applies) and are put to the operator to listen to.
