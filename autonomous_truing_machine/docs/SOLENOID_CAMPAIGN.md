@@ -1250,3 +1250,11 @@ window ended by the decay floor in 17 of 24 captures (0, 0 and 1 in the others);
 
 **Other, unremarkable.** No overruns, one onset in every capture, impact 0.16-0.22 s in every strike, no-fire controls' loudest
 events -22.3 to -26.0 dBFS in every block. The worst read gap maximum is 40.6 ms in all four blocks (unexplained repeat).
+
+### Operator answers on the RIGHT blocks 1-4 questions (2026-09-20, their account)
+
+The pillow was in the same spot for all four RIGHT blocks. The mic and towers were untouched since the pretest. The counting
+from S0 was clear for spokes 17, 5, 3 and 15. The operator saw nothing different about spoke 5 (block 2) or spoke 17 (block 1),
+so the ~14 dB quieter ring in block 2 has no known cause and none is assumed. The operator also confirmed there was no pillow
+for "the automatic 10 air shots"; the earlier "as far as this record shows" wording therefore stands confirmed for the air
+shots. Not yet answered: where the pillow sits for the LEFT blocks, which is recorded when given.
