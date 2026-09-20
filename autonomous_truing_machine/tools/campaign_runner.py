@@ -257,6 +257,8 @@ def run_plan(ws, args, ctx, plan, plan_sha):
             input("    press Enter when the wheel is positioned... ")
         for t in block["trials"]:
             global_index += 1
+            if args.start_trial and global_index < args.start_trial:
+                continue   # resuming a block that was interrupted: these trials are already recorded
             extra = {"campaign_stage": plan["stage"], "campaign_block": block["name"],
                      "campaign_trial": global_index, "campaign_arm": t["arm"],
                      "campaign_plan_sha256": plan_sha, "campaign_plan_seed": plan["seed"]}
@@ -304,6 +306,10 @@ def main():
                                   "are not used with it")
     p.add_argument("--start-block", type=int, default=0,
                     help="with --plan: resume at this block index (0-based) after an interruption")
+    p.add_argument("--start-trial", type=int, default=None,
+                    help="with --plan: inside the --start-block block, skip the trials before this global trial "
+                         "number (1-based, as printed in [n/266]) to resume a block that was interrupted part way; "
+                         "trials keep their plan numbers, so nothing is renumbered or duplicated")
     p.add_argument("--end-block", type=int, default=None,
                     help="with --plan: stop before this block index (0-based, exclusive), so one block runs "
                          "and the wheel can be turned before the next; the plan and its sha256 are unchanged")
@@ -331,6 +337,12 @@ def main():
             raise SystemExit("--start-block must be 0..%d" % (len(plan["blocks"]) - 1))
         if args.end_block is not None and not args.start_block < args.end_block <= len(plan["blocks"]):
             raise SystemExit("--end-block must be in %d..%d" % (args.start_block + 1, len(plan["blocks"])))
+        if args.start_trial is not None:
+            first = sum(len(b["trials"]) for b in plan["blocks"][:args.start_block]) + 1
+            last = first + len(plan["blocks"][args.start_block]["trials"]) - 1
+            if not first <= args.start_trial <= last:
+                raise SystemExit("--start-trial must be inside block %d: %d..%d (got %d)" % (
+                    args.start_block, first, last, args.start_trial))
         spokes = sorted({t["spoke"] for b in plan["blocks"] for t in b["trials"]})
     else:
         try:
