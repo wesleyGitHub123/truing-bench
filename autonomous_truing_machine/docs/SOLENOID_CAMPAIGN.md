@@ -1131,3 +1131,47 @@ one of them (the draw) structurally unable to review one spoke per station; both
 **Checked how.** The selftest asserts these on the registered plan with synthetic clears; 37 single-rule mutations
 of the tool each fail it. On the real bundles the control sets count 40/18/1 and all 42 B3.2 air shots join their
 plan trials. Not checked: any strike data, because none exists. The tool has not been run on a complete campaign.
+
+## B3.2 strike blocks - interim record (2026-09-20)
+
+### Block 1 of 10: `B3.2-RIGHT-sp17` (trials 1-24)
+
+Run 2026-09-20, 16:20-16:23 local, `python tools/campaign_runner.py --plan docs/campaign_plans/b32.json --no-prompt
+--start-block 0 --end-block 1`. Build `2511fdf`, plan sha256 `be053f63cef29608abd7a7026ba6d7fa2b1f567b03cdccd688882e5f8e9a0904`,
+`RIGHT/rig-1`. **24 kept, 0 excluded, every trial on its first try; no ledger file was written.** PCM manifest sha256
+over the 24 bundles (sorted `name:pcm_sha256` lines): `aba051b85b678ba059941230cff0a28b126e8767925777c67d25eb0af475f259`
+(`_campaign/`, gitignored, this machine only).
+
+**New rig condition, declared for every strike block from here on: the wheel is held by a pillow resting on the rim.**
+The operator built it so the wheel stays aligned with nobody in the room; it is stamped into each bundle's `note`. It
+was first used this morning. The 42 B3.2 air shots and B3.0's controls were taken without it as far as this record
+shows (the wheel left at a gap; the operator's account of the pillow is this morning's, not confirmed for earlier
+runs). The interleaved no-fire controls in the strike blocks are taken with it; the air shots are not. Whether the
+pillow changes how the spokes or the structure ring is not known and is not measured here.
+
+**Baseline results (the firmware's own status, as taken).** Strikes 0/18 clears: 15 `AMBIGUOUS_PEAK`, 3 `LOW_SNR`,
+their f1 all between 350 and 366 Hz (the bottom of the band, where the mains harmonic sits). No-fire controls 1/6
+clears: trial 8, `suspect` at 13.0 dB and 366 Hz; the other five `rejected`. Quiet-room loudest events were
+-21.6 to -23.2 dBFS, the same as B3.0's no-fire controls; neighbourhood morning noise outside did not change that.
+
+**What a first look at the audio shows. This is a description, not a selection, and nothing here changes a rule.**
+- The plunger strikes are loud. 17 of 18 have 1 to 22 samples at the converter rail around the impact (about 0.16-0.21
+  s into the capture), never more than 2 in a row, over spans up to 16.6 ms; most of it precedes the analysed window.
+- After the impact there is ring. Between 1.0 and 2.5 kHz dozens of lines are present in 15-18 of the 18 strikes at
+  15-35 dB over the no-fire floor. Inside the 350-600 Hz band there are lines at 398.8, 492.5, 506.2, 541.2, 567.5 and
+  578.8 Hz in 14-18 of 18 strikes, 12-17 dB over that floor. 506 and 541 Hz sit on the RIGHT air-shot tones recorded
+  above (508.6, 529.5, 542 Hz), so the plunger-stop ring is present in strikes too. Whether any line is the spoke is not
+  known; the cross-spoke report over all four RIGHT spokes is what registration Amendment 2 provides for that.
+- A sanity sweep of these 24 bundles alone (nothing selected, nothing acted on): no registered candidate clears more
+  than 1 of the 18 strikes, and the 3 that clear one do so at 360 Hz; 19 of the 27 evaluable candidates clear at
+  least one of the 6 no-fire controls. One spoke and one block say nothing about the other seven blocks.
+
+**Not established:** anything about the other spokes, any candidate, any level, or whether the rings are the spoke or the
+structure. The remaining blocks run as registered (fixed n; no outcome-dependent stopping). If a station misses the
+exploration gate, Amendment 2 already names damping the plunger stops as a candidate for the one bounded mechanical
+lever, by a small amendment at that point.
+
+Pretest, not campaign data (scratch bundles, no plan, no trial numbers): this morning, before block 1, six no-fire
+captures and four fired shots (20 ms and 72 ms at each station) confirmed both stations fire, are recorded as fired at
+the requested width and station, and that the 72 ms impact is clearly audible; the 20 ms impact is not distinguishable
+from room noise in the audio. One no-fire capture had a loud neighbourhood sound at its start and cleared.
