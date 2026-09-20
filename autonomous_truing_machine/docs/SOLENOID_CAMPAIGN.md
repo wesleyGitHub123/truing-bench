@@ -1231,3 +1231,22 @@ will listen later and give notes. That listening is informal and unblinded (file
 manifest shows the firmware status). It does not select anything, changes no rule, and is not the registered blind review,
 which is drawn later from all blocks with the machine verdicts sealed. Whatever the operator reports is recorded here as
 their account when it is given.
+
+### RIGHT blocks 1-4: first audio comparison across the four spokes, and a correction (2026-09-20)
+
+Descriptive only; nothing selected, no rule touched, no candidate evaluated. Written to `_wav/TO_CONFIRM.md` for the operator.
+
+**Correction.** Block 4's record above says no strike on spokes 17, 5 or 3 has f1 near 430 Hz. That is true of the
+firmware's *reported* f1 and it read as if the line were only on spoke 15. In the audio (strongest bin in 420-440 Hz, 0.30-1.10
+s, 1.25 Hz bins) it sits at exactly 430.0 Hz in 18/18 spoke-15 strikes (+12 to +16 dB over the 24 pooled RIGHT no-fire
+controls) and in 12/18 spoke-5 strikes (median +16 dB); it is not present on spoke 17 (median +1 dB) and is broad, not at
+430.0, on spoke 3 (+11 dB). The firmware cleared 3/18 on spoke 15 because in the other 15 a lower line at 350-373 Hz was the
+lowest strong peak. Whether 430 Hz is the spoke or the structure is not known.
+
+**Block 2 (spoke 5) differs from the other three.** Loudest 10 ms frame in strikes: median -15.6 dBFS against -1.3 to -2.2
+in blocks 1, 3, 4; no rail samples in any of its 18 strikes (blocks 1, 3, 4: 17/18, 17/18, 18/18 strikes have some); analysed
+window ended by the decay floor in 17 of 24 captures (0, 0 and 1 in the others); median analysed window 384 ms (182-500) against
+500 ms. The initial click is similar (peak -1.5 dBFS median). Cause not known; put to the operator.
+
+**Other, unremarkable.** No overruns, one onset in every capture, impact 0.16-0.22 s in every strike, no-fire controls' loudest
+events -22.3 to -26.0 dBFS in every block. The worst read gap maximum is 40.6 ms in all four blocks (unexplained repeat).
