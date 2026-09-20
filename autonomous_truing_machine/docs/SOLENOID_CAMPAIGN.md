@@ -1189,3 +1189,15 @@ bundles (sorted `name:pcm_sha256` lines): `95756e8cc8e2da56c47b2accb88d9be5276fb
 median strike SNR was 6.1 dB at 60 ms, 7.3 dB at 72 ms and 3.9 dB at 85 ms (6 strikes each): nothing here supports a
 ranking of widths and none is made. Block 1's strikes were mostly `AMBIGUOUS_PEAK`; this block's are all `LOW_SNR`, and
 what separates the two is not looked at yet. No audio look, no sweep, nothing selected and no rule touched.
+
+### Block 3 of 10: `B3.2-RIGHT-sp3` (trials 49-72)
+
+Run 2026-09-20, 16:45-16:50 local, `--start-block 2 --end-block 3`, build `2511fdf`, `RIGHT/rig-1`, same pillow note.
+**24 kept, 0 excluded, every trial on its first try; no ledger file.** PCM manifest sha256 over the 24 bundles (sorted
+`name:pcm_sha256` lines): `64113eae8dc3594fa17fc0b59eb63dd3948303ac0eed6f0c0b2bb69d2fd948fe` (`_campaign/`, gitignored,
+this machine only). Spoke 3 is RIGHT-trailing (3 mod 4 = 3), the first RIGHT block of the other class.
+
+**Baseline results (firmware status as taken).** Strikes 0/18 clears: 11 `AMBIGUOUS_PEAK`, 7 `LOW_SNR` (SNR -0.8 to 11.7
+dB, none at the 12 dB gate; f1 350-362 Hz, the bottom of the band). No-fire controls 0/6 clears (1 `AMBIGUOUS_PEAK`, 5
+`LOW_SNR`; SNR -0.4 to 11.5 dB, f1 351-361 Hz). Strike and no-fire results are not separated by SNR or f1 range in this
+block. No audio look, no sweep, nothing selected and no rule touched.
