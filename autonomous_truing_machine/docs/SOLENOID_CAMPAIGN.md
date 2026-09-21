@@ -1573,3 +1573,48 @@ inherited came from a magnetic pickup that could not see the rig at all.
 **Not established:** that any of the per-spoke unique lines is a fundamental, that a pluck would avoid the rig ring on this
 mount, or any frequency-to-tension relation. Next test, operator-proposed: hand-pluck a spoke with a pencil and capture it on
 the same chain, to compare the ring against these strikes. Diagnostic, not campaign data.
+
+### Excitation probe: pulse sweep and hand plucks on spoke 0 (2026-09-21)
+
+Exploratory, outside the registration, selects nothing and changes no constant. Bundles in `_explore/` (gitignored, no plan, no
+trial numbers, no fixed n). LEFT/rig-1, spoke 0 (LEFT-leading, S0) under the LEFT plunger, build `2511fdf`, pillow hold. Tool
+`tools/explore_pulse_sweep.py` (`4680ca4`..`b4da924`).
+
+**Sweep, 6 shots at each of 9 widths, interleaved.** Impact = a click louder than -30 dBFS landing 0.10-0.32 s into the capture.
+Ring over floor = level 250-550 ms after the impact, above 200 Hz, minus the LEFT no-fire median (-59.6 dBFS), impact shots only.
+The board's own baseline DSP verdict is alongside.
+
+| pulse | impact | ring over floor | board clears | board median SNR |
+|---|---|---|---|---|
+| 15 ms | 0/6 | - | 0/6 | 2.7 dB |
+| 20 ms | 0/6 | - | 0/6 | 6.5 |
+| 25 ms | 0/6 | - | 0/6 | 5.8 |
+| 30 ms | 0/6 | - | 0/6 | 5.6 |
+| 35 ms | 3/6 | +13.1 dB | 1/6 | 1.6 |
+| 40 ms | 5/6 | +15.8 | 0/6 | 1.5 |
+| 50 ms | 4/6 | +10.4 | 0/6 | 1.5 |
+| 60 ms | 6/6 | +10.3 | 0/6 | -0.8 |
+| 85 ms | 6/6 | +7.4 | 0/6 | 4.5 |
+
+Below 35 ms the plunger does not arrive; from 40 ms to 85 ms the ring over floor falls monotonically (+15.8 to +7.4 dB), which
+fits a plunger resting on the spoke and damping it. **But the board's own SNR does not follow the ring**: it is 1.5 dB at 40 ms
+and 2.7 dB at 15 ms, where nothing touched the spoke, and only 1 of 54 shots cleared. The extra ring is broadband rig ring, not
+a spoke line. The over-floor measure, adopted for cross-excitation comparison on 2026-09-21 before this data, said a 40 ms strike
+(+15.8 dB) sits inside the plucks' range (+13.0 to +19.9); the direct outcome says it is nowhere near. **That measure was the
+wrong one and is withdrawn as a viability test**; it remains a within-solenoid width comparison only. The two 40 ms test shots
+fired earlier this session produced no impact, while 5 of 6 in the sweep did; the first shots after idle may be weaker (not
+tested).
+
+**Hand plucks, same spoke and chain, same unchanged DSP.** 15 cued plucks (`EXPLORE-pluck-lead3`, 12 of 15 windows opened after
+the pluck). The board cleared **5 of 15**: r1 (16.3 dB, f1 406.1 Hz), r2 (16.1, 406.3), r5 (23.9, 406.2), r9 (17.5, 406.2) and r14
+(12.7, 397.6). Of the five loud-click plucks, 4 cleared; of the operator's four ear-picked plucks, 1 cleared. **Four clears agree
+to within 0.2 Hz at 406.2 Hz**, with SNRs of 16 to 24 dB against the 12 dB gate. An earlier, spoke-untracked cued run showed
+lines at 405-407 Hz in five captures. The same DSP clears 1 of 54 solenoid shots today and 4 of 168 in B3.2. Solenoid strikes
+on spoke 0 in B3.2 showed a strong line at 426.2 Hz (23 of 24), not 406. **Hypothesis, untested:** a plunger in contact loads the
+spoke and shifts what it rings at, so the strike and the free spoke do not ring at the same frequency.
+
+**What is and is not established.** The chain, the mic and the unchanged DSP can read spoke 0 from a hand pluck: consistent,
+above the gate, with no window or constant changed. The solenoid, as mounted, cannot, at any width it can reach. Not
+established: that 406 Hz is the spoke's own tone rather than a rig line the pencil excites (one spoke; the operator has not
+plucked a second one yet), any frequency-to-tension relation, or that any mechanism the solenoid could be changed to would
+match a pluck.
