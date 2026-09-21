@@ -1480,3 +1480,60 @@ capture's onset is whatever noise triggered it, so strike and no-fire windows ar
 not show the line is the spoke's. What is established: the clears are tightly consistent within a block and differ by 1-2 Hz
 between blocks. What is not: whether they are a spoke or structure tone or a persistent room line near 353 Hz. They are not
 evidence that these spokes are readable, and no reading of them is to be carried into the demo or B3.3 as one.
+
+### Diagnostic after the G-analysis halt: the excitation, not the analysis (2026-09-21)
+
+Prompted by the operator, who listened to the block WAVs and said the no-strike ambience does not sound like electrical hum
+(they play guitar), that the strikes do not ring enough, and that a guitar tuner reads a plucked string with no windowing at
+all. Descriptive, outside the registration, selects nothing and changes no constant. All levels below are Hann-windowed
+in-band (350-600 Hz) RMS over equal 500 ms windows, on the same bundles.
+
+**1. The 350-366 Hz f1 is not a mains line. The earlier "hum" reading in this record's chat-level summaries was wrong.**
+Averaged over 40 B3.2 no-fire controls, the 60 Hz harmonics stand over their own local broadband floor by: 60 Hz +9.3 dB,
+120 +0.8, 180 +4.4, 240 +3.4, 300 -2.2, **360 +0.4**, 420 -1.6, 480 -2.1, 540 +1.4, 600 +0.4. There is effectively no line at
+360 Hz. What the DSP reports as f1 at 350-366 Hz is the top of the broadband floor at the bottom edge of the search band,
+which slopes downward with frequency; "the lowest strong peak" lands there because that is where the floor is highest, not
+because a tone is there. B3.0's line finding is not contradicted (different mode, onset floor disabled), but the reading that
+a mains tone drives these rejections is withdrawn. The operator's ear was right and the earlier hypothesis was not tested
+before it was acted on.
+
+**2. The chain's noise is dominated by content below 125 Hz, far under the search band.** Of the 20-16000 Hz power in a
+no-fire capture, 41.9 % is in 20-60 Hz and 48.8 % in 60-125 Hz; 250-500 Hz holds 3.7 %. In the time domain the mean of each
+50 ms block swings about 1.0 million counts of 8388608 peak-to-peak. At the INMP441's datasheet sensitivity a 30 dB SPL room
+would move about 265 counts. This is drift or sub-audio content, not room sound. It costs headroom (it is part of why RIGHT
+strikes touch the rail) but it sits below the band and is not what the peak picker sees.
+
+**3. The excitation delivers far less into the measurement band than a hand pluck did on this same board and mic.**
+
+| capture | in-band 350-600 Hz | board's own SNR |
+|---|---|---|
+| B3.2 no-fire control, nothing fired (n=56) | -63.7 dBFS | 8.1 dB median |
+| B3.2 solenoid strike, ring after impact (n=168) | -56.8 dBFS | **4.0 dB median** |
+| `nano_handpluck_provisional`, same chain (n=1) | -46.6 dBFS | 15.4 dB |
+| `golden_ts03_e2`, the research fixture (n=1) | -28.8 dBFS | 75.6 dB |
+
+The strike puts about 6.9 dB into the band over silence; the one hand pluck on this chain put about 17 dB, **10 dB more than
+the solenoid**. And the strikes' median SNR (4.0 dB) is *below* the no-fire controls' (8.1 dB): firing makes the board's own
+metric worse than not firing, because the impact's broadband energy lifts the floor around whatever peak is picked. n=1 for
+the pluck, so it bounds nothing; it is one same-chain reference point, and it points at the excitation.
+
+**4. The solenoid does not disturb the microphone electrically.** In the 100 ms before the plunger lands, in-band level is
+-63.2 dBFS in strike captures and -62.9 dBFS in no-fire captures (0.4 dB apart, n=168 and 56), and the low-frequency wander is
+the same (about 1.03 M counts against 0.96 M). The operator's supply/ground-coupling concern is not supported by these
+captures: the B0 wiring looks clean on this evidence.
+
+**5. The DSP constants were fitted on a different transducer and a different excitation.** The research campaign behind
+`golden_ts03_e2` plucks a spoke and captures it with a **magnetic pickup** (`Acoustic Repo/README.md`), a proximity sensor
+watching one spoke, with no room path and no rig ring. The search band, the 12 dB SNR gate and the 6 dB prominence come from
+that signal. Phase A already recorded this chain as 26-32 dB noisier; the table above puts the in-band gap at about 28 dB
+between the research fixture and a hand pluck here, and about 38 dB between it and a solenoid strike. Applying those constants
+to a MEMS microphone in a room hearing a hammer blow is a provenance mismatch that this campaign carried without testing it.
+
+**What this does and does not establish.** Established: the strike delivers little in-band energy; the hum reading was wrong;
+the coil does not pollute the mic. Not established: that a pluck-style excitation would work here (one capture), that any
+particular frequency is a spoke, or that a different algorithm would recover more from these captures. **Untested and cheap:**
+the campaign's estimator picks a peak from one windowed FFT, whereas an instrument tuner tracks periodicity continuously over
+a sustained ring (autocorrelation/YIN-style) and needs no window placement. Whether a periodicity estimator finds a consistent
+per-spoke frequency in the 168 captures already taken is an offline question needing no hardware, and it separates "the signal
+is absent" from "the estimator is the wrong one". It would be exploratory, not a registered candidate, and could support no
+claim without confirmation on held-out spokes.
