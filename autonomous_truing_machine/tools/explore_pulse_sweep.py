@@ -177,6 +177,18 @@ def run_pluck(a):
 
 # ---------------------------------------------------------------- report
 
+def room_floor(directory):
+    """{station: median dBFS} of the high-passed RMS of the no-fire controls in `directory`, per station."""
+    per = {}
+    for p in sorted(glob.glob(os.path.join(directory, "B3.2_t*.json"))):
+        j, x = load(p)
+        if j.get("campaign_kind") != "no_fire":
+            continue
+        e, _ = envelope(highpass(x))
+        per.setdefault(j.get("campaign_station") or "?", []).append(db(np.sqrt((e ** 2).mean())))
+    return {k: float(np.median(v)) for k, v in per.items()}
+
+
 def run_report(a):
     groups = {}
     for p in sorted(glob.glob(os.path.join(a.dir, "*.json"))):
@@ -208,11 +220,19 @@ def run_report(a):
         print("reach   = share of shots whose impact peak is within %.0f dB of the %.0f ms median (%.1f dBFS)."
               % (REACH_TOL_DB, a.reference, ref))
     print()
-    print("%-6s %8s %4s %10s %10s %8s   %s" % ("st", "pulse", "n", "sustain", "peak dBFS", "reach", "strongest line"))
+    floors = room_floor(a.floor_dir)
+    print("ring    = absolute level of the same 250-550 ms window, dBFS. over floor = ring minus the median room "
+          "level of that station's no-fire controls (%s)." % ", ".join("%s %.1f dBFS" % kv for kv in sorted(floors.items())))
+    print("Compare EXCITATIONS on over floor, not on sustain: sustain divides by the impact click, so a louder click")
+    print("makes a rig that rings harder look worse. Within one excitation type, sustain is fine.")
+    print()
+    print("%-6s %8s %4s %9s %9s %10s %8s   %s" % ("st", "pulse", "n", "sustain", "ring", "over floor", "reach", "strongest line"))
     for key in sorted(groups):
         rows = groups[key]
         sus = np.array([g[0][0] for g in rows])
         pk = np.array([g[0][1] for g in rows])
+        ring = sus + pk
+        over = "-" if key[0] not in floors else "%+.1f" % (np.median(ring) - floors[key[0]])
         reach = "-" if ref is None else "%d/%d" % (int((pk >= ref - REACH_TOL_DB).sum()), len(pk))
         peaks = [g[1] for g in rows if g[1]]
         if peaks:
@@ -222,8 +242,8 @@ def run_report(a):
             line = "%.1f Hz +%.0f dB, %d/%d agree" % (med, np.median([p[1] for p in peaks]), agree, len(peaks))
         else:
             line = "-"
-        print("%-6s %6.0f ms %4d %9.1f %10.1f %8s   %s" % (
-            key[0], key[1], len(rows), np.median(sus), np.median(pk), reach, line))
+        print("%-6s %6.0f ms %4d %9.1f %9.1f %10s %8s   %s" % (
+            key[0], key[1], len(rows), np.median(sus), np.median(ring), over, reach, line))
 
 
 def main():
@@ -254,6 +274,8 @@ def main():
     r.add_argument("--dir", default=EXPLORE_DIR)
     r.add_argument("--block", default=None, help="only this campaign_block")
     r.add_argument("--strikes-only", action="store_true", help="ignore no-fire and air-shot bundles")
+    r.add_argument("--floor-dir", default=os.path.join("test", "fixtures", "acoustic", "captures", "_campaign"),
+                   help="where the no-fire controls that define each station's room floor live")
     r.add_argument("--reference", type=float, default=40.0,
                    help="the width whose median impact peak defines reach (default 40)")
 
