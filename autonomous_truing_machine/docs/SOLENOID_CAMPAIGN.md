@@ -1537,3 +1537,39 @@ a sustained ring (autocorrelation/YIN-style) and needs no window placement. Whet
 per-spoke frequency in the 168 captures already taken is an offline question needing no hardware, and it separates "the signal
 is absent" from "the estimator is the wrong one". It would be exploratory, not a registered candidate, and could support no
 claim without confirmation on held-out spokes.
+
+### Wideband look: the strike rings the rig, and the search band may be in the wrong place (2026-09-21)
+
+Descriptive, outside the registration, selects nothing. Per block, the ring window (0.25-1.05 s) of every strike against that
+same block's own no-fire controls, over 100-4000 Hz. A "consistent line" is at least 10 dB over that block's no-fire floor in at
+least 80 % of its strikes.
+
+**Each spoke's strikes produce 78 to 107 consistent lines.** The strongest are all above the search band: spoke 15 has lines at
+1416, 1632, 1807, 1867, 2415 and 3325 Hz at +38 to +52 dB; spoke 0 at 634, 990, 1226, 1461, 1575 and 1615 Hz at +32 to +44 dB.
+The 350-600 Hz band the DSP searches holds none of the strong content.
+
+**Most of those lines are the rig, not the spoke.** Counting lines that appear within 6 Hz on at least 3 of a station's 4
+exploration spokes: **65 shared lines at RIGHT and 46 at LEFT**. Different spokes, same lines. Only a few are unique to one
+spoke, and inside 350-600 Hz they are: RIGHT sp17 none, sp5 354 and 388 Hz, sp3 342 and 556, sp15 468; LEFT sp10 352, 386 and
+481, sp22 491, sp12 436, sp0 426 and 592.
+
+**This retires the 430 Hz question.** 428 Hz is in the RIGHT shared list, so the line behind block 4's three clears is a
+structural line common to RIGHT spokes, not spoke 15's own tone. The earlier note that it "appears only on spoke 15" was based
+on the firmware's reported f1 and on two blocks; over all four RIGHT spokes and a wider band it is shared. No reading of those
+three clears as a spoke measurement survives.
+
+**A harmonic-sum estimate of the fundamental** (best f0 in 150-1200 Hz by the sum of its first four harmonics over the floor)
+gives, per spoke: RIGHT 17 798.8 Hz, RIGHT 5 553.8, RIGHT 3 810.0, RIGHT 15 603.8, LEFT 10 582.5, LEFT 22 490.0, LEFT 12 652.5,
+LEFT 0 635.0. **Five of the eight fall outside 350-600 Hz.** This is a weak estimator on a rig-dominated spectrum and is not a
+tension or mode claim; what it does show is that nothing justifies assuming this wheel's spoke tones sit inside a band inherited
+from a different wheel, a different transducer and a different excitation.
+
+**What this explains.** The peak picker takes the lowest strong peak in 350-600 Hz. On these captures that is either the
+band-edge floor or one of the 46-65 structural lines, and the spoke's own line, where it exists, is neither the lowest nor the
+strongest. `AMBIGUOUS_PEAK` on a spectrum with dozens of competing structural lines is the correct behaviour of the estimator,
+not a bug in it. The hammer blow that makes those lines is the excitation this campaign chose, and the research constants it
+inherited came from a magnetic pickup that could not see the rig at all.
+
+**Not established:** that any of the per-spoke unique lines is a fundamental, that a pluck would avoid the rig ring on this
+mount, or any frequency-to-tension relation. Next test, operator-proposed: hand-pluck a spoke with a pencil and capture it on
+the same chain, to compare the ring against these strikes. Diagnostic, not campaign data.
