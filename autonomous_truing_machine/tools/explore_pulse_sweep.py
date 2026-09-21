@@ -161,6 +161,9 @@ def run_pluck(a):
     try:
         for r in range(a.count):
             beep()
+            # the window opens when the command goes out, and a person needs ~0.5 s to react to a beep, so
+            # opening it at the beep put the pluck 0.4-1.1 s into a 1.2 s window and left almost no ring
+            time.sleep(a.lead)
             outcome, _ = cr.take_shot(ws, args, ctx, a.spoke, "no_fire", 0,
                                       "%s_sp%d_r%d" % (a.label, a.spoke, r), {})
             kept += outcome == "kept"
@@ -243,6 +246,9 @@ def main():
     k = sub.add_parser("pluck", help="cued hand pluck, the PC beeps as each capture starts")
     common(k)
     k.add_argument("--label", default="EXPLORE-pluck-beep")
+    k.add_argument("--lead", type=float, default=0.5,
+                   help="seconds between the beep and opening the capture window (default 0.5, about a "
+                        "person's reaction time, so the pluck lands early in the window)")
 
     r = sub.add_parser("report", help="sustain, reach and the strongest line, per station and width")
     r.add_argument("--dir", default=EXPLORE_DIR)
