@@ -14,6 +14,11 @@ test/fixtures/acoustic/captures/_campaign/
 # WAV exports from tools/capture_wav.py -- derived from the bundles, never the source of truth
 test/fixtures/acoustic/captures/_wav/
 
+# Exploratory captures: no plan, no trial numbers, no fixed n, no exclusion ledger. Deliberately
+# outside _campaign/ so no analysis tool can mistake them for evidence. Nothing here supports a
+# claim; anything that looks promising gets confirmed by a fresh registered run before it counts.
+test/fixtures/acoustic/captures/_explore/
+
 # Python tooling (tools/) byte-compiles here
 __pycache__/
 *.pyc
