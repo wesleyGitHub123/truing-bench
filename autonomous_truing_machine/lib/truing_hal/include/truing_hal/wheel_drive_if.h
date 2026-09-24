@@ -5,9 +5,19 @@
  * spokes, rim angles, stations, or how many steps make a wheel revolution — that
  * mapping belongs to the navigation implementation and its calibration.
  *
- * Expected first development implementation: TMC2209 (STEP/DIR + UART). It is a
- * development driver behind this boundary, NOT a committed final driver, and it
- * is not part of this phase; only the contract, a stub and a fake exist here.
+ * Expected first development implementation: TMC2209 (STEP/DIR + UART), in
+ * src/wheel_drive_tmc2209.c. It is a development driver behind this boundary, NOT a
+ * committed final driver. A stub and a fake live here.
+ *
+ * Semantics every implementation keeps (the navigation implementation relies on them):
+ *   - position_steps() counts the pulses ACTUALLY emitted, including after stop() cuts a
+ *     move short. It is commanded motion, never evidence the wheel followed (SPEC §10A.5).
+ *   - move_relative() while a move is in progress is refused (VALUE_OUT_OF_RANGE); it never
+ *     queues or merges.
+ *   - stop() is a controlled deceleration; is_moving() stays true until the last pulse.
+ *   - fault() latches: once the driver reports it cannot vouch for executing its motion
+ *     (over-temperature, short, a DIAG assertion), it stays faulted until the next
+ *     enable(true). `detail` is implementation-specific diagnostic data, for logs only.
  */
 #ifndef TRUING_HAL_WHEEL_DRIVE_IF_H
 #define TRUING_HAL_WHEEL_DRIVE_IF_H
@@ -34,6 +44,8 @@ struct truing_wheel_drive_if {
     bool (*is_moving)(const truing_wheel_drive_if_t *self);
     /* Actuator odometry in steps. NOT a wheel angle (SPEC §10A). */
     int32_t (*position_steps)(const truing_wheel_drive_if_t *self);
+    /* Latched driver fault; optional (NULL = the implementation cannot detect one). */
+    bool (*fault)(const truing_wheel_drive_if_t *self, uint32_t *detail_out);
     void *ctx;
 };
 
@@ -42,6 +54,7 @@ truing_status_t truing_wheel_drive_move_relative(truing_wheel_drive_if_t *self, 
 void            truing_wheel_drive_stop(truing_wheel_drive_if_t *self);
 bool            truing_wheel_drive_is_moving(const truing_wheel_drive_if_t *self);
 int32_t         truing_wheel_drive_position_steps(const truing_wheel_drive_if_t *self);
+bool            truing_wheel_drive_fault(const truing_wheel_drive_if_t *self, uint32_t *detail_out);
 
 /* ---- Stub: no drive hardware (Stage 1) ---------------------------------------- */
 typedef struct {
@@ -50,13 +63,28 @@ typedef struct {
 
 void truing_wheel_drive_stub_init(truing_wheel_drive_if_t *self, truing_wheel_drive_stub_ctx_t *ctx);
 
-/* ---- Fake: instantaneous, deterministic (tests / simulation) ---------------------- */
+/* ---- Fake: deterministic (tests / simulation) ------------------------------------- */
+/* By default a move completes instantly. Scripting, all off by default:
+ *   polls_per_move  a move stays in progress for that many is_moving() calls, then lands
+ *   stall           a move reports is_moving() until stop() (a hung drive)
+ *   fault_next      the next move latches a fault (detail = fault_detail) as it starts
+ * A stop() mid-move lands half of the remaining steps, standing in for deceleration. */
 typedef struct {
     bool     enabled;
     int32_t  position_steps;
     int32_t  last_move_steps;
     uint32_t moves;
     uint32_t stops;
+    uint32_t refused_busy;
+    uint32_t polls_per_move;
+    bool     stall;
+    bool     fault_next;
+    uint32_t fault_detail;
+    /* state */
+    bool     faulted;
+    bool     moving;
+    uint32_t polls_left;
+    int32_t  pending_steps;
 } truing_wheel_drive_fake_ctx_t;
 
 void truing_wheel_drive_fake_init(truing_wheel_drive_if_t *self, truing_wheel_drive_fake_ctx_t *ctx);

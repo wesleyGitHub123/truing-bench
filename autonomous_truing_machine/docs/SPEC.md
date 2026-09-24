@@ -1701,7 +1701,7 @@ stop()                        safe stop of any wheel motion (the ABORT safe poin
 
 | Outcome | Stage 1 (manual) | Stage 2 (automated) |
 |---|---|---|
-| `PENDING_OPERATOR` | enter `WAIT_FOR_OPERATOR` with a prompt naming the **feature and the station**; on `CONFIRM_POSITIONED` call `note_operator_confirmation()` | never returned |
+| `PENDING_OPERATOR` | enter `WAIT_FOR_OPERATOR` with a prompt naming the **feature and the station**; on `CONFIRM_POSITIONED` call `note_operator_confirmation()` | never returned by `request()`; `establish_reference()` MAY return it (hybrid reference, §10A.6) and is handled exactly as in Stage 1 |
 | `IN_MOTION` | never returned | poll until `DONE` or `FAULT` |
 | `DONE` | feature is at the station; proceed | same |
 | `REFUSED` | bad target, unknown station, no reference, unknown calibration | same |
@@ -1731,6 +1731,16 @@ Commanded motion does not establish absolute wheel position. An automated implem
 
 **Stage 2 — automated implementation, same contract.** Current leading concept: **motor → drive mechanism / rim-contact roller → wheel**, probably beginning with a stepper motor; **expected first development motor driver: TMC2209**. The TMC2209 is a development implementation behind the wheel-drive HAL boundary — **not an architectural dependency and not a committed final driver**; its current capability and compatibility with the eventual motor and mechanical load remain to be validated physically. The C2 → C3 transition is a driver/implementation replacement plus physically validated navigation behaviour, **not** an orchestrator or workflow redesign.
 
+**First development implementation — hybrid reference, open loop** (`navigation_roller`, 2026-09). Recorded so the contract's reading is explicit rather than inferred:
+
+- **Reference by the operator, positioning by the drive.** `establish_reference()` releases the drive (so the wheel turns by hand) and answers `PENDING_OPERATOR` with `CONFIRM_SPOKE0_AT_STATION`; the confirmation re-enables the drive and anchors the rotation state to the drive's step counter. Every `request()` thereafter is `IN_MOTION` → `DONE` / `FAULT`. This is the §10A.2 reading above, not a third mode.
+- **Dead reckoning, stated as such.** The rotation state is derived from the pulses the drive actually emitted since the anchor, divided by the calibration — never from the commanded target. `sensor_confirmed` is always false. Slip is not detected; the only re-anchoring is re-establishing the reference. This satisfies §10A.5's `FAULT` obligations (deadline overrun, latched driver fault, stop mid-move) but **not** its slip-correction goal, which still needs sensing (§10A.10).
+- **The calibration is signed** (its sign is the direction of wheel rotation for positive steps), carries the microstep setting it was measured under and a reference to its bench evidence, and is refused as `CALIBRATION_MISSING` while any of those is absent (§10A.4).
+- **A move deadline** (planned pulse-train duration × a factor + a margin) is a navigation policy that ends a hung or stalled move in `FAULT`; the orchestrator polls without a bound of its own.
+- **Provenance:** as real as its drive — `REAL` over a physical driver, `SYNTHETIC` over the test fake.
+
+It runs only in a dedicated development image on the DevKit and a separate wheel stand; the Stage 1 claims (manual positioning, `CONVERGED_GEOMETRIC_ONLY` ceiling) are unchanged by it.
+
 ### 10A.7 Safety
 
 `ABORT` during automated wheel motion: bring the drive to a controlled stop, then abort — never mid-motion (§12.3). After a stop mid-move the reference may be lost and MUST be re-established before positioning resumes. A navigation fault never corrupts measurements already recorded; it only refuses further positioning until a reference exists.
@@ -1744,11 +1754,14 @@ The navigation implementation owns the wheel-drive and index/reference-sensor pi
 - The manual implementation is host-testable through prompt / confirmation sequences.
 - A synthetic automated implementation exists with deterministic wheel position and scriptable slip and faults, so navigation-dependent orchestration runs with zero hardware (§14.5) and the believed-versus-true position distinction is exercised.
 - The wheel/station geometry relation has golden tests.
+- The open-loop development implementation is host-tested against a scriptable fake drive (latency, stall, latched fault, stop mid-move) and inside a full orchestrator session; its step timing and TMC2209 framing are host-tested as pure code.
 - Stage 2 adds calibration, slip-detection, positioning-tolerance and reference-sensor tests against real hardware.
 
 ### 10A.10 OPEN — Stage 2 hardware decisions (do not invent)
 
 Drive mechanism; motor; motor driver (TMC2209 suitability); roller geometry, material and contact pressure; transmission; microstepping; index/reference sensor and encoder arrangement and placement; station angles of the final frame; positioning tolerance; actuator-to-wheel calibration procedure; odometry method; slip detection and re-indexing policy; motion-control law; terminal handling of an unrecoverable navigation fault. All are resolved by physical testing, never by a value typed in to make code run.
+
+*Development hardware selected for the first bench prototype (2026-09-24):* a NEMA 17 stepper, a TMC2209, and a direct-drive polyurethane rim-contact roller on a 3D-printed mount and shaft. That selects **what is tested**, not what is validated: every item above stays open until measured, and measurements are recorded with their conditions in `docs/ROLLER_BENCH.md`.
 
 ---
 

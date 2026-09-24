@@ -9,6 +9,7 @@
 #include "truing_hal/clock_if.h"
 #include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_roller.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/wheel_drive_if.h"
 
@@ -369,6 +370,290 @@ static void test_wheel_drive_stub_and_fake(void)
     truing_wheel_drive_stop(NULL);
     TEST_ASSERT_EQUAL_STRING("PENDING_OPERATOR", truing_nav_outcome_str(TRUING_NAV_PENDING_OPERATOR));
     TEST_ASSERT_EQUAL_STRING("rim_angle", truing_nav_target_kind_str(TRUING_NAV_TARGET_RIM_ANGLE));
+    TEST_ASSERT_FALSE(truing_wheel_drive_fault(NULL, NULL));
+}
+
+/* The semantics navigation_roller relies on: busy refusal, pulses-emitted odometry after a
+ * stop, and a fault that latches until the next enable. */
+static void test_wheel_drive_fake_scripting(void)
+{
+    truing_wheel_drive_if_t d;
+    truing_wheel_drive_fake_ctx_t f;
+    truing_wheel_drive_fake_init(&d, &f);
+    truing_reason_t reason = TRUING_REASON_NONE;
+    truing_wheel_drive_enable(&d, true, &reason);
+    f.polls_per_move = 3u;
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_VALID, truing_wheel_drive_move_relative(&d, 100, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, truing_wheel_drive_move_relative(&d, 5, &reason));
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, reason);
+    TEST_ASSERT_EQUAL_UINT32(1u, f.refused_busy);
+    TEST_ASSERT_TRUE(truing_wheel_drive_is_moving(&d));
+    TEST_ASSERT_TRUE(truing_wheel_drive_is_moving(&d));
+    TEST_ASSERT_FALSE(truing_wheel_drive_is_moving(&d));   /* lands on the 3rd call */
+    TEST_ASSERT_EQUAL_INT32(100, truing_wheel_drive_position_steps(&d));
+
+    truing_wheel_drive_move_relative(&d, -40, &reason);
+    truing_wheel_drive_stop(&d);   /* decelerates partway */
+    TEST_ASSERT_FALSE(truing_wheel_drive_is_moving(&d));
+    TEST_ASSERT_EQUAL_INT32(80, truing_wheel_drive_position_steps(&d));
+
+    f.fault_next = true;
+    f.fault_detail = 0x2u;
+    truing_wheel_drive_move_relative(&d, 10, &reason);
+    uint32_t detail = 0u;
+    TEST_ASSERT_TRUE(truing_wheel_drive_fault(&d, &detail));
+    TEST_ASSERT_EQUAL_HEX32(0x2u, detail);
+    truing_wheel_drive_enable(&d, true, &reason);   /* already enabled: does not clear */
+    TEST_ASSERT_TRUE(truing_wheel_drive_fault(&d, NULL));
+    truing_wheel_drive_enable(&d, false, &reason);
+    truing_wheel_drive_enable(&d, true, &reason);
+    TEST_ASSERT_FALSE(truing_wheel_drive_fault(&d, &detail));
+}
+
+/* ---- roller navigation (automated, open loop; decisions D1-D5) ------------------------ */
+/* TEST calibration: arbitrary numbers standing in for a bench measurement. */
+static const truing_roller_calibration_t k_test_cal = { 3200.0f, 2000u, 4000u, 8u, "TEST calibration, not a measurement" };
+
+typedef struct {
+    truing_wheel_drive_if_t        drive;
+    truing_wheel_drive_fake_ctx_t  dctx;
+    truing_navigation_if_t         nav;
+    truing_navigation_roller_ctx_t nctx;
+} roller_rig_t;
+
+static roller_rig_t g_roller;
+
+static roller_rig_t *build_roller(const truing_roller_calibration_t *cal, uint32_t polls_per_move)
+{
+    roller_rig_t *r = &g_roller;
+    memset(r, 0, sizeof(*r));
+    truing_wheel_drive_fake_init(&r->drive, &r->dctx);
+    r->dctx.polls_per_move = polls_per_move;
+    truing_navigation_roller_init(&r->nav, &r->nctx, g_clock, 32u, 32u, &g_machine, &r->drive, cal);
+    return r;
+}
+
+static void roller_reference(roller_rig_t *r)
+{
+    truing_nav_result_t res;
+    truing_navigation_establish_reference(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    truing_navigation_confirm(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+}
+
+/* Run a request to completion; returns the final outcome. */
+static truing_nav_outcome_t roller_go(roller_rig_t *r, const truing_nav_target_t *t)
+{
+    truing_nav_result_t res;
+    truing_navigation_request(&r->nav, t, &res);
+    for (int i = 0; i < 100 && res.outcome == TRUING_NAV_IN_MOTION; ++i) {
+        truing_navigation_poll(&r->nav, &res);
+    }
+    return res.outcome;
+}
+
+static void test_roller_reference_is_operator_confirmed_and_releases_the_wheel(void)
+{
+    roller_rig_t *r = build_roller(&k_test_cal, 0u);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, r->nav.source_impl);   /* as real as its drive */
+    TEST_ASSERT_EQUAL_STRING("navigation_roller", r->nav.impl_name);
+    truing_nav_result_t res;
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->nav, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+
+    r->dctx.enabled = true;
+    truing_navigation_establish_reference(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_PENDING_OPERATOR, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION, res.wait_kind);
+    TEST_ASSERT_EQUAL_INT(g_machine.reference_station, res.target.station);
+    TEST_ASSERT_FALSE(r->dctx.enabled);   /* released so the operator can turn the wheel */
+    truing_navigation_request(&r->nav, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);   /* not until confirmed */
+
+    truing_navigation_establish_reference(&r->nav, &res);
+    truing_navigation_confirm(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    TEST_ASSERT_TRUE(r->dctx.enabled);
+    truing_wheel_position_t pos;
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_TRUE(pos.reference_established);
+    TEST_ASSERT_TRUE(pos.operator_confirmed);
+    TEST_ASSERT_FALSE(pos.sensor_confirmed);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f, pos.rotation_rad);   /* reference station is at 0 */
+
+    truing_navigation_confirm(&r->nav, &res);   /* nothing pending */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_STALE_INTENT, res.reason);
+}
+
+static void test_roller_refuses_an_incomplete_calibration(void)
+{
+    static const truing_roller_calibration_t k_bad[] = {
+        { 0.0f, 2000u, 4000u, 8u, "x" },           /* ratio unknown */
+        { 3200.0f, 0u, 4000u, 8u, "x" },           /* no speed */
+        { 3200.0f, 2000u, 0u, 8u, "x" },           /* no acceleration */
+        { 3200.0f, 2000u, 4000u, 0u, "x" },        /* microsteps unrecorded */
+        { 3200.0f, 2000u, 4000u, 8u, NULL },       /* no evidence */
+        { 3200.0f, 2000u, 4000u, 8u, "" },
+        { NAN, 2000u, 4000u, 8u, "x" },
+    };
+    for (size_t i = 0; i < sizeof(k_bad) / sizeof(k_bad[0]); ++i) {
+        TEST_ASSERT_FALSE(truing_roller_calibration_valid(&k_bad[i]));
+        roller_rig_t *r = build_roller(&k_bad[i], 0u);
+        roller_reference(r);   /* the operator step works without a calibration */
+        truing_nav_result_t res;
+        truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+        truing_navigation_request(&r->nav, &t, &res);
+        TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+        TEST_ASSERT_EQUAL_INT(TRUING_REASON_CALIBRATION_MISSING, res.reason);
+        TEST_ASSERT_EQUAL_UINT32(0u, r->dctx.moves);
+    }
+    roller_rig_t *r = build_roller(NULL, 0u);
+    roller_reference(r);
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, roller_go(r, &t));
+}
+
+static void test_roller_moves_in_actuator_steps_and_polls_to_done(void)
+{
+    roller_rig_t *r = build_roller(&k_test_cal, 3u);
+    roller_reference(r);
+    truing_nav_result_t res;
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);   /* ΔR = +π/4 -> 400 of 3200 */
+    truing_navigation_request(&r->nav, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, res.outcome);
+    TEST_ASSERT_EQUAL_INT32(400, r->dctx.last_move_steps);
+    truing_navigation_request(&r->nav, &t, &res);   /* one move at a time */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_UINT32(1u, r->dctx.moves);
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, res.outcome);
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, res.outcome);
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, res.outcome);
+    truing_wheel_position_t pos;
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, TRUING_PI / 4.0f, pos.rotation_rad);
+    TEST_ASSERT_FALSE(pos.operator_confirmed);   /* commanded motion since the anchor */
+    TEST_ASSERT_FALSE(pos.sensor_confirmed);
+
+    /* Already there: DONE without a move. */
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, roller_go(r, &t));
+    TEST_ASSERT_EQUAL_UINT32(1u, r->dctx.moves);
+    /* Shortest path back: −400, not +2800. */
+    t = spoke_at(0u, TRUING_STATION_ACOUSTIC_LEFT);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, roller_go(r, &t));
+    TEST_ASSERT_EQUAL_INT32(-400, r->dctx.last_move_steps);
+}
+
+/* The sign of the calibration is the direction: a motor mounted the other way round. */
+static void test_roller_negative_calibration_reverses_the_drive(void)
+{
+    truing_roller_calibration_t cal = k_test_cal;
+    cal.steps_per_wheel_rev = -3200.0f;
+    roller_rig_t *r = build_roller(&cal, 0u);
+    roller_reference(r);
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, roller_go(r, &t));
+    TEST_ASSERT_EQUAL_INT32(-400, r->dctx.last_move_steps);
+    truing_wheel_position_t pos;
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, TRUING_PI / 4.0f, pos.rotation_rad);
+}
+
+/* The believed rotation comes from the pulses emitted, so rounding each move to whole steps
+ * never accumulates: after a full revolution of spoke-by-spoke moves at a coarse 100 steps per
+ * revolution (3.125 steps per spoke pitch), every position is within half a step. */
+static void test_roller_position_comes_from_pulses_so_rounding_never_accumulates(void)
+{
+    truing_roller_calibration_t cal = k_test_cal;
+    cal.steps_per_wheel_rev = 100.0f;
+    roller_rig_t *r = build_roller(&cal, 0u);
+    roller_reference(r);
+    const float half_step = TRUING_PI / 100.0f;
+    for (uint8_t i = 1u; i <= 32u; ++i) {
+        truing_nav_target_t t = spoke_at((uint8_t)(i % 32u), TRUING_STATION_ACOUSTIC_LEFT);
+        TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, roller_go(r, &t));
+        truing_wheel_position_t pos;
+        truing_navigation_query(&r->nav, &pos);
+        const float wanted = truing_rotation_for_feature_at(truing_spoke_angle(32u, (uint8_t)(i % 32u)), 0.0f);
+        TEST_ASSERT_TRUE(truing_circular_distance(pos.rotation_rad, wanted) <= half_step + 1e-5f);
+        TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f,
+                                 truing_circular_distance(pos.rotation_rad,
+                                                          truing_navigation_roller_rotation_from_steps(
+                                                              &r->nctx, truing_wheel_drive_position_steps(&r->drive))));
+    }
+    /* One full revolution of spokes brings the counter back to exactly one wheel turn. */
+    TEST_ASSERT_EQUAL_INT32(-100, truing_wheel_drive_position_steps(&r->drive));
+}
+
+/* D4: a drive that never finishes cannot hold the session in POSITION forever. */
+static void test_roller_deadline_faults_a_hung_drive(void)
+{
+    roller_rig_t *r = build_roller(&k_test_cal, 0u);
+    roller_reference(r);
+    r->dctx.stall = true;
+    const uint32_t stops_before = r->dctx.stops;   /* establish_reference() already stopped it once */
+    truing_nav_result_t res;
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->nav, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, res.outcome);
+    truing_fake_clock_advance(&g_fc, 1000u);   /* inside 2 x ~0.45 s + 1 s */
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_IN_MOTION, res.outcome);
+    truing_fake_clock_advance(&g_fc, 2000u);
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_FAULT, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+    TEST_ASSERT_EQUAL_UINT32(stops_before + 1u, r->dctx.stops);   /* the fault stopped the drive */
+    TEST_ASSERT_EQUAL_UINT32(1u, r->nctx.faults);
+    truing_wheel_position_t pos;
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, pos.status);
+    TEST_ASSERT_FALSE(pos.reference_established);
+    truing_navigation_request(&r->nav, &t, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_REFUSED, res.outcome);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_WHEEL_REFERENCE_LOST, res.reason);
+}
+
+static void test_roller_drive_fault_ends_in_fault_until_rereferenced(void)
+{
+    roller_rig_t *r = build_roller(&k_test_cal, 2u);
+    roller_reference(r);
+    r->dctx.fault_next = true;
+    r->dctx.fault_detail = 0x2u;   /* e.g. DRV_STATUS.ot */
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_FAULT, roller_go(r, &t));
+    TEST_ASSERT_EQUAL_HEX32(0x2u, r->nctx.last_fault_detail);
+    /* Re-referencing re-enables the drive, which clears the latch. */
+    roller_reference(r);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_DONE, roller_go(r, &t));
+}
+
+/* ABORT mid-move (SPEC §10A.7): controlled stop, and the resting place is not vouched for. */
+static void test_roller_stop_mid_move_loses_the_reference(void)
+{
+    roller_rig_t *r = build_roller(&k_test_cal, 5u);
+    roller_reference(r);
+    truing_nav_result_t res;
+    truing_nav_target_t t = spoke_at(4u, TRUING_STATION_RUNOUT);
+    truing_navigation_request(&r->nav, &t, &res);
+    truing_navigation_stop(&r->nav);
+    truing_navigation_poll(&r->nav, &res);
+    TEST_ASSERT_EQUAL_INT(TRUING_NAV_FAULT, res.outcome);
+    TEST_ASSERT_EQUAL_INT32(200, truing_wheel_drive_position_steps(&r->drive));   /* pulses actually emitted */
+    truing_wheel_position_t pos;
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_FALSE(pos.reference_established);
+    /* A stop with nothing moving changes nothing. */
+    roller_reference(r);
+    truing_navigation_stop(&r->nav);
+    truing_navigation_query(&r->nav, &pos);
+    TEST_ASSERT_TRUE(pos.reference_established);
 }
 
 /* ---- composite navigation (plan A6 / B1b): the operator where it is physical, a stand-in elsewhere ----
@@ -585,6 +870,15 @@ int main(int argc, char **argv)
     RUN_TEST(test_synthetic_in_motion_polling_stop_and_fault);
     RUN_TEST(test_synthetic_refuses_unknown_calibration);
     RUN_TEST(test_wheel_drive_stub_and_fake);
+    RUN_TEST(test_wheel_drive_fake_scripting);
+    RUN_TEST(test_roller_reference_is_operator_confirmed_and_releases_the_wheel);
+    RUN_TEST(test_roller_refuses_an_incomplete_calibration);
+    RUN_TEST(test_roller_moves_in_actuator_steps_and_polls_to_done);
+    RUN_TEST(test_roller_negative_calibration_reverses_the_drive);
+    RUN_TEST(test_roller_position_comes_from_pulses_so_rounding_never_accumulates);
+    RUN_TEST(test_roller_deadline_faults_a_hung_drive);
+    RUN_TEST(test_roller_drive_fault_ends_in_fault_until_rereferenced);
+    RUN_TEST(test_roller_stop_mid_move_loses_the_reference);
     RUN_TEST(test_composite_sends_acoustic_stations_to_the_operator_and_the_rest_to_the_stand_in);
     RUN_TEST(test_composite_stand_in_is_refused_until_the_physical_reference_exists);
     RUN_TEST(test_composite_is_as_real_as_its_least_real_part_and_says_what_it_is);

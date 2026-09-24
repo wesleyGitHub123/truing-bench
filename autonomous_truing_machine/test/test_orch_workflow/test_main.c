@@ -13,6 +13,7 @@
 #include "truing_hal/clock_if.h"
 #include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_roller.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
@@ -214,6 +215,77 @@ static void rig_build_acoustic_composite(rig_t *r, const float *lateral, uint8_t
     truing_navigation_synthetic_init(&r->nav_sim, &r->nsyn, r->clock, 32u, 32u, &r->machine, NULL, 0.0f, 0u);
     TEST_ASSERT_TRUE(truing_navigation_composite_init(&r->nav, &r->ncomp, &r->nav_phys, &r->nav_sim, physical, 2u));
     rig_reinit(r, limit);
+}
+
+/* The roller image (decision D6): the fast demo's synthetic acquisition, but navigation is the
+ * AUTOMATED roller implementation over a drive that takes a few polls per move. The reference is
+ * the one operator step (D1); every other positioning is IN_MOTION -> poll -> DONE. */
+static truing_wheel_drive_if_t g_drive;
+static truing_wheel_drive_fake_ctx_t g_dctx;
+static truing_navigation_roller_ctx_t g_rctx;
+static const truing_roller_calibration_t k_roller_cal = { 3200.0f, 2000u, 4000u, 8u, "TEST calibration, not a measurement" };
+
+static void rig_build_roller(rig_t *r, const float *lateral, uint32_t polls_per_move)
+{
+    rig_build_fastdemo(r, lateral);
+    truing_wheel_drive_fake_init(&g_drive, &g_dctx);
+    g_dctx.polls_per_move = polls_per_move;
+    truing_navigation_roller_init(&r->nav, &g_rctx, r->clock, 32u, 32u, &r->machine, &g_drive, &k_roller_cal);
+    rig_reinit(r, 0u);
+}
+
+static void test_roller_navigation_runs_a_whole_session_by_polling(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    rig_build_roller(&g, lat, 3u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION]);
+    TEST_ASSERT_TRUE(g_dctx.enabled);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 40000u));
+
+    /* No positioning ever stopped for a person; the drive did the moving. */
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_RIM_INDEX]);
+    TEST_ASSERT_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(64u, g.sctx.state_entries[TRUING_STATE_POSITION]);
+    TEST_ASSERT_GREATER_THAN_UINT32(32u, g_dctx.moves);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_dctx.refused_busy);   /* never commanded over a running move */
+    TEST_ASSERT_EQUAL_UINT32(0u, g_rctx.faults);
+    truing_orch_snapshot_t snap;
+    truing_orch_snapshot(&g.orch, &snap);
+    TEST_ASSERT_TRUE(snap.last_result != TRUING_TERMINAL_ABORT_OPERATOR);
+    TEST_ASSERT_TRUE(snap.last_result != TRUING_TERMINAL_ABORT_PARTIAL_STATE);
+    /* Over the fake drive the navigation is SYNTHETIC; over the TMC2209 it is REAL (D5). */
+    TEST_ASSERT_EQUAL_STRING("navigation_roller", g.nav.impl_name);
+    TEST_ASSERT_EQUAL_INT(TRUING_SOURCE_SYNTHETIC, g.nav.source_impl);
+}
+
+/* ABORT while the wheel is moving: controlled stop first, then the terminal (SPEC §10A.7, §12.3). */
+static void test_roller_navigation_abort_mid_move_stops_the_drive(void)
+{
+    rig_build_roller(&g, NULL, 1000u);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    truing_orch_step_t s = TRUING_ORCH_ADVANCED;
+    for (int i = 0; i < 200 && s != TRUING_ORCH_POLL_NAVIGATION; ++i) {
+        s = truing_orch_step(&g.orch);
+    }
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_POLL_NAVIGATION, s);
+    TEST_ASSERT_TRUE(g_dctx.moving);
+    const uint32_t stops_before = g_dctx.stops;
+    truing_intent_t a;
+    memset(&a, 0, sizeof(a));
+    a.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &a, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 50u));
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, g.sctx.last_terminal);
+    TEST_ASSERT_GREATER_THAN_UINT32(stops_before, g_dctx.stops);
+    TEST_ASSERT_FALSE(g_dctx.moving);
+    truing_wheel_position_t pos;
+    truing_navigation_query(&g.nav, &pos);
+    TEST_ASSERT_FALSE(pos.reference_established);   /* the resting place is not vouched for */
 }
 
 /* The acquisition waits stop being issued, and only those. The machine still walks the same
@@ -1166,6 +1238,8 @@ int main(int argc, char **argv)
     (void)argv;
     UNITY_BEGIN();
     RUN_TEST(test_fastdemo_automates_acquisition_without_skipping_states);
+    RUN_TEST(test_roller_navigation_runs_a_whole_session_by_polling);
+    RUN_TEST(test_roller_navigation_abort_mid_move_stops_the_drive);
     RUN_TEST(test_fastdemo_still_asks_the_operator_to_apply_adjustments);
     RUN_TEST(test_fastdemo_provenance_declares_synthetic_acquisition);
     RUN_TEST(test_interactive_acquisition_is_operator_driven_and_declares_real);
