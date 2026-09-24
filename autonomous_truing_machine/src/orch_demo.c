@@ -25,11 +25,14 @@
 #include "truing_hal/pluck_if.h"
 #include "truing_hal/navigation_composite.h"
 #include "truing_hal/navigation_manual.h"
+#include "truing_hal/navigation_roller.h"
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
 #include "truing_orch/auto_operator.h"
 #include "truing_orch/orchestrator.h"
+#include "roller_calibration.h"
+#include "wheel_drive_tmc2209.h"
 
 static const char *TAG = "orch_demo";
 
@@ -44,6 +47,12 @@ static const char *TAG = "orch_demo";
  * macro would silently preprocess as 0 and hide a profile that simply forgot it. */
 #if !defined(BOARD_PLUCK_ACTUATOR_LEFT_PRESENT) || !defined(BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT)
 #error "board profile does not define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT and _RIGHT_PRESENT (0 or 1)"
+#endif
+
+/* The roller prototype is wired to the DevKit (docs/ROLLER_BENCH.md R0); the Nano's pins carry the
+ * acoustic campaign's microphone and solenoids. */
+#if TRUING_ROLLER_NAV && !defined(BOARD_PROFILE_S3_DEVKIT)
+#error "TRUING_ROLLER_NAV is DevKit only (s3_devkit_fastdemo_roller)."
 #endif
 
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
@@ -74,6 +83,12 @@ static struct {
     truing_navigation_if_t nav_phys, nav_sim;
     truing_navigation_composite_ctx_t ncomp;
     bool composite_nav;   /* the wiring above is in use; reported by /id so the page does not infer it */
+    /* ROLLER image: the automated navigation over the real TMC2209 drive (TRUING_ROLLER_NAV). */
+    truing_navigation_roller_ctx_t nroll;
+    truing_wheel_drive_if_t drive;
+    truing_wheel_drive_tmc2209_ctx_t drive_ctx;
+    bool drive_inited;
+    bool drive_ok;
     /* FAST DEMO: the adjustment the operator is currently being asked to apply. The
      * simulated wheel reacts when they confirm it, which is what a real wheel would do. */
     bool     adj_pending;
@@ -136,6 +151,40 @@ static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke,
  * in READY, so the bench flow would stall. Reported to the page as a fact (/id composite_navigation). */
 #define DEMO_COMPOSITE_NAV (TRUING_REAL_FRONT_END && !TRUING_CAMPAIGN_DEBUG)
 
+/* ROLLER image: the TMC2209 drive, brought up once and left DISABLED. Its motion profile and the
+ * microstep count it enforces come from the measured calibration; while that is empty the drive
+ * refuses moves and navigation refuses positioning (CALIBRATION_MISSING), so nothing turns. */
+#if TRUING_ROLLER_NAV
+static void roller_drive_init_once(void)
+{
+    if (s.drive_inited) {
+        return;
+    }
+    s.drive_inited = true;
+    const truing_tmc2209_pins_t pins = {
+        .step_gpio = BOARD_WHEEL_DRIVE_STEP_GPIO,
+        .dir_gpio = BOARD_WHEEL_DRIVE_DIR_GPIO,
+        .en_gpio = BOARD_WHEEL_DRIVE_ENABLE_GPIO,
+        .diag_gpio = BOARD_WHEEL_DRIVE_DIAG_GPIO,
+        .uart_num = BOARD_WHEEL_DRIVE_UART_NUM,
+        .uart_tx_gpio = BOARD_WHEEL_DRIVE_UART_TX_GPIO,
+        .uart_rx_gpio = BOARD_WHEEL_DRIVE_UART_RX_GPIO,
+        .node = 0u,
+    };
+    const truing_ramp_profile_t prof = { 1000000u, k_roller_calibration.max_step_hz, k_roller_calibration.accel_steps_s2 };
+    s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &prof, k_roller_calibration.microsteps);
+    if (!truing_roller_calibration_valid(&k_roller_calibration)) {
+        ESP_LOGW(TAG, "roller calibration is EMPTY (src/roller_calibration.h): every positioning will be refused "
+                      "CALIBRATION_MISSING until docs/ROLLER_BENCH.md R3/R4 fill it");
+    } else {
+        ESP_LOGI(TAG, "roller calibration: %.2f steps/wheel rev at %u microsteps, %lu steps/s, %lu steps/s2 (%s)",
+                 (double)k_roller_calibration.steps_per_wheel_rev, (unsigned)k_roller_calibration.microsteps,
+                 (unsigned long)k_roller_calibration.max_step_hz, (unsigned long)k_roller_calibration.accel_steps_s2,
+                 k_roller_calibration.evidence != NULL ? k_roller_calibration.evidence : "?");
+    }
+}
+#endif
+
 static void wire_acquisition(bool automatic)
 {
     s.composite_nav = false;
@@ -160,6 +209,13 @@ static void wire_acquisition(bool automatic)
             ESP_LOGE(TAG, "navigation composite failed to initialise; sessions cannot start");
         }
         s.composite_nav = true;
+#elif TRUING_ROLLER_NAV
+        /* The roller turns the real wheel for every positioning; the operator places spoke 0 once. A
+         * drive that failed to initialise is not handed over, so the reference is refused and no
+         * session can start -- never a silent fall back to synthetic positioning. */
+        roller_drive_init_once();
+        truing_navigation_roller_init(&s.nav, &s.nroll, s.clock, 32u, 32u, &s.machine, s.drive_ok ? &s.drive : NULL,
+                                      &k_roller_calibration);
 #else
         truing_navigation_synthetic_init(&s.nav, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
 #endif
@@ -169,6 +225,10 @@ static void wire_acquisition(bool automatic)
             }
         }
     } else {
+        if (s.drive_ok) {
+            /* Manual path on the roller image: a person turns the wheel, so the coils let go. */
+            truing_wheel_drive_enable(&s.drive, false, NULL);
+        }
         truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
         truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
     }
@@ -385,7 +445,10 @@ static void demo_task(void *arg)
                                                   : (TRUING_REAL_FRONT_END
                                                           ? "INTERACTIVE with the PHYSICAL INMP441 front end: a person positions the wheel and reads the gauges; each spoke is struck by its station's solenoid"
                                                           : "INTERACTIVE: the session starts and the waits are answered from the web UI")),
-             TRUING_FAST_DEMO ? (DEMO_COMPOSITE_NAV
+             TRUING_FAST_DEMO ? (TRUING_ROLLER_NAV
+                                         ? "acquisition path selectable in the UI; starts on ROLLER navigation (the TMC2209 "
+                                           "roller turns the real wheel from an operator-confirmed spoke 0, open loop) + SYNTHETIC runout"
+                                 : DEMO_COMPOSITE_NAV
                                          ? "acquisition path selectable in the UI; starts on COMPOSITE navigation (the operator "
                                            "places each struck spoke at its solenoid station, the rest is simulated) + SYNTHETIC runout"
                                          : "acquisition path selectable in the UI; starts on SYNTHETIC navigation + "
@@ -622,7 +685,9 @@ static void demo_task(void *arg)
                     (void)truing_orch_init(&s.orch, &s.deps);
                     ESP_LOGW(TAG, "acquisition path -> %s; re-initialising so the reference is "
                                   "established through it",
-                             s.acq_automatic ? (DEMO_COMPOSITE_NAV
+                             s.acq_automatic ? (TRUING_ROLLER_NAV
+                                                        ? "AUTOMATIC (roller navigation on the real wheel + synthetic runout)"
+                                                : DEMO_COMPOSITE_NAV
                                                         ? "AUTOMATIC (composite navigation: operator at the acoustic stations, synthetic elsewhere + synthetic runout)"
                                                         : "AUTOMATIC (synthetic navigation + synthetic runout)")
                                              : "MANUAL (operator positions and reads the gauges)");

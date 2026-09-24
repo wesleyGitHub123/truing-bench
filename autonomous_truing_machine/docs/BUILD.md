@@ -200,6 +200,7 @@ matters:
 | fast demo, automatic path | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
 | fast demo, manual path | `navigation_manual` | `runout_manual` | `TRUING_SOURCE_REAL` |
 | acoustic demonstration | `navigation_synthetic` | `runout_synthetic` | `TRUING_SOURCE_SYNTHETIC` |
+| roller image, automatic path | `navigation_roller` over `wheel_drive_tmc2209` | `runout_synthetic` | navigation `TRUING_SOURCE_REAL` (a real drive, open loop); the session is non-real through the synthetic runout and acoustic source |
 
 The manual implementations are REAL because a person turns a real wheel and reads real dial
 gauges. Having the firmware answer their waits with numbers it invented would record
@@ -309,6 +310,19 @@ Admission is still further restricted to `TRUING_STATE_READY` with no session ru
 once a real session has started. `GET /id` reports this image as
 `"mode":"fastdemo+inmp441+campaign"`. Nano-only: campaign bench work runs against the board
 the INMP441 is actually wired to (`docs/SOLENOID_CAMPAIGN.md`); there is no DevKit variant.
+
+### The roller development image (`s3_devkit_fastdemo_roller`)
+
+`-DTRUING_FAST_DEMO=1 -DTRUING_ROLLER_NAV=1`, DevKit only (`build_mode.h` and `orch_demo.c`
+refuse every other combination and the Nano). The fast demo's synthetic acoustic source and
+runout, with navigation by `navigation_roller` driving the real TMC2209 + NEMA 17 roller
+(SPEC §10A.6): at boot the drive is disabled and the orchestrator waits for
+`CONFIRM_SPOKE0_AT_STATION` — place spoke 0 at the reference station by hand and confirm — after
+which every positioning turns the real wheel, open loop. Positioning is refused
+(`CALIBRATION_MISSING`) while `src/roller_calibration.h` is empty, which it stays until
+`docs/ROLLER_BENCH.md` R3/R4 measure it. `GET /id` reports `"mode":"fastdemo+roller"`. A
+development image on a separate wheel stand, not a release image and not part of the Stage 1
+claims. The drive alone is exercised by `tools/bench/roller_smoke` (same driver source).
 
 ```bash
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_selfplay -t upload   # unattended evidence

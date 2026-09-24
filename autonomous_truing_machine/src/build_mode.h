@@ -54,6 +54,15 @@
  *                          the reference between every boot and READY -- where MEASURE_ONCE is
  *                          admitted -- stalling the bench flow.
  *
+ *   FAST DEMO + ROLLER     the roller development image (TRUING_ROLLER_NAV, DevKit only): the
+ *                          fast demo's synthetic acoustic and runout, but navigation is the
+ *                          AUTOMATED roller implementation driving a real TMC2209 + NEMA 17
+ *                          (navigation_roller over wheel_drive_tmc2209). The operator places
+ *                          spoke 0 once and confirms; every positioning after that turns the
+ *                          real wheel. Open loop: slip is not detected (SPEC 10A.6). Refuses
+ *                          every positioning until src/roller_calibration.h holds a measured
+ *                          calibration (docs/ROLLER_BENCH.md).
+ *
  * Fast demo is deliberately NOT self-play with a nicer label. Self-play leaves the REAL
  * manual implementations in place and has a robot press the buttons, which is right for a
  * test rig and wrong for a demonstration: provenance would record runout_manual/REAL for
@@ -130,9 +139,30 @@
 #error "TRUING_CAMPAIGN_DEBUG is the acoustic-demo bench variant only: it needs both TRUING_FAST_DEMO and TRUING_REAL_FRONT_END."
 #endif
 
+#ifndef TRUING_ROLLER_NAV
+#define TRUING_ROLLER_NAV 0
+#endif
+
+/* The roller image turns a real wheel for every positioning, so its acquisition must be the fast
+ * demo's automatic path. Self-play is excluded twice over: it is not a fast demo, and its
+ * auto-operator would confirm a spoke-0 reference nobody placed -- a synthetic answer anchoring a
+ * physical drive. The real front end is excluded because its microphone is on the Nano and this
+ * drive is on the DevKit (orch_demo.c enforces the board). */
+#if TRUING_ROLLER_NAV && TRUING_SELF_PLAY
+#error "TRUING_ROLLER_NAV turns a real wheel from an operator-confirmed reference: not with TRUING_SELF_PLAY."
+#endif
+#if TRUING_ROLLER_NAV && !TRUING_FAST_DEMO
+#error "TRUING_ROLLER_NAV is the fast-demo roller image: it needs TRUING_FAST_DEMO."
+#endif
+#if TRUING_ROLLER_NAV && TRUING_REAL_FRONT_END
+#error "TRUING_ROLLER_NAV is the DevKit roller image: not with TRUING_REAL_FRONT_END (the microphone is on the Nano)."
+#endif
+
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
+#if TRUING_FAST_DEMO && TRUING_ROLLER_NAV
+#define TRUING_BUILD_MODE_STR "fastdemo+roller"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441+campaign"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441"
