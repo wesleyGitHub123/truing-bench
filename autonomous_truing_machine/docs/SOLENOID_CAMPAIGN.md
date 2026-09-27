@@ -1618,3 +1618,34 @@ above the gate, with no window or constant changed. The solenoid, as mounted, ca
 established: that 406 Hz is the spoke's own tone rather than a rig line the pencil excites (one spoke; the operator has not
 plucked a second one yet), any frequency-to-tension relation, or that any mechanism the solenoid could be changed to would
 match a pluck.
+
+### Dual-microphone exploration: hardware change and workbench (2026-09-27)
+
+Exploratory and outside every registration: no plan, no trial numbers, no fixed n, no exclusion ledger. Nothing here
+selects anything or changes a constant, and nothing from it is campaign evidence until a later registered run.
+
+**Hardware change (operator).** One INMP441 per acoustic station, each seated near its own solenoid's strike point on an
+adjustable mount. Wiring: both on the shared bus (SCK D2/GPIO5, WS D3/GPIO6, SD D4/GPIO7, 3V3, GND); the original mic, L/R to
+GND, moves to the LEFT station (left slot); the new mic, L/R to 3V3, goes to the RIGHT station (right slot); one pull-down on
+SD at the board. Placement is not assumed to fix the Phase B excitation finding above.
+
+**Rig registry.** The provenance table lists mic position as a rig-registry field, but positions will change shot to shot
+during exploration, so they are recorded **per capture** (`wb_phys_*` fields, and per epoch in the workbench session) and the
+tokens stay `LEFT/rig-1` / `RIGHT/rig-1` until a configuration is chosen for anything formal. That choice bumps both tokens
+with a dated registry block, as the append-only rule requires.
+
+**Firmware seam.** Image `nano_esp32_fastdemo_mic_dualmic` (`TRUING_DUAL_MIC`, legal only with `TRUING_CAMPAIGN_DEBUG`):
+both slots read every frame; each capture hands the DSP the struck station's own mic only, and keeps the other as
+`/debug/capture_far.pcm`. The chain profile and digest are unchanged. Not yet run on target.
+
+**Tool.** `tools/workbench.py` (manual: `tools/WORKBENCH.md`); sessions under `test/fixtures/acoustic/captures/_explore/wb_*`
+(gitignored, this machine only).
+
+**Observation from existing data, not investigated (recorded so it is not rediscovered).** The board's onset landed at
+sample 0 -- the start of the capture, not the excitation -- in 60 of 168 B3.2 strikes, 44 of 56 B3.2 no-fire controls, 12 of
+15 of the 09-21 cued hand plucks and 41 of 54 of the 09-21 pulse-sweep shots. With the onset at 0 the board's analysis
+window is 40-540 ms, which for a strike spans pre-impact floor and the impact itself (impact 0.10-0.32 s). Of the four hand
+plucks that cleared at 406.2 Hz, two had the onset at 0 (r1, r2) and two a real one (r5 at sample 3120, r9 at 15360), so
+clearing does not depend on it either way and this does not by itself explain the strike result. What it means for the onset
+settings is an open question; the workbench draws the board window beside its own ring window on every shot so it stays
+visible.

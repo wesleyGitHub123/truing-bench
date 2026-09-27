@@ -310,6 +310,20 @@ once a real session has started. `GET /id` reports this image as
 `"mode":"fastdemo+inmp441+campaign"`. Nano-only: campaign bench work runs against the board
 the INMP441 is actually wired to (`docs/SOLENOID_CAMPAIGN.md`); there is no DevKit variant.
 
+### The dual-mic bench variant (`nano_esp32_fastdemo_mic_dualmic`)
+
+The campaign bench variant plus `-DTRUING_DUAL_MIC=1`, for a bus with **two** INMP441s: one at each
+acoustic station, sharing BCLK/WS/SD, the original mic's L/R to GND (left slot, LEFT station) and
+the new one's L/R to 3V3 (right slot, RIGHT station); `BOARD_I2S_MIC_INPUT_*_STATION` in the board
+profile record that mapping. The driver reads both slots every frame. Each capture still hands the
+DSP **one** mono stream -- the struck station's own mic -- so the chain profile, its digest and the
+replay path are unchanged; the other mic's words over the same frames are kept only as a dump,
+`GET /debug/capture_far.pcm`, and `capture.json` gains `mic_inputs`, `mic_input`, `far_input` and
+`far_n_words`. `build_mode.h` makes the flag illegal without `TRUING_CAMPAIGN_DEBUG`, so no session
+image can change what it listens with. `GET /id` reports `"mode":"fastdemo+inmp441x2+campaign"`.
+Exploratory, driven by `tools/workbench.py` (`tools/WORKBENCH.md`); on a bus with one mic, use the
+single-mic campaign image instead.
+
 ```bash
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_selfplay -t upload   # unattended evidence
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo -t upload   # accelerated demonstration
@@ -317,6 +331,7 @@ pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit -t upload            # the 
 pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_mic -t upload        # the physical INMP441 front end
 pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
 pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant
+python tools/flash.py nano_esp32_fastdemo_mic_dualmic                                     # dual-mic bench variant
 ```
 
 The boot banner says which one is running, and so does `GET /id`:
