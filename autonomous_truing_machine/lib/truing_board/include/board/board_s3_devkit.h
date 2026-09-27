@@ -22,6 +22,13 @@
 #define BOARD_I2S_MIC_BCLK_GPIO        4
 #define BOARD_I2S_MIC_WS_GPIO          5
 #define BOARD_I2S_MIC_DIN_GPIO         6
+/* Dual-mic bench wiring (TRUING_DUAL_MIC builds only): a second INMP441 shares BCLK/WS/DIN
+ * above, its L/R pin strapped to 3V3 so it answers in the right slot (the acoustic front end
+ * this workspace's Nano carried died to a wiring mistake 2026-09-27; both mics move to this
+ * board). 0 = left slot (L/R to GND), 1 = right slot (L/R to 3V3). SD wants a pull-down to GND
+ * at the board while both mics tri-state between slots. */
+#define BOARD_I2S_MIC_INPUT_LEFT_STATION   0
+#define BOARD_I2S_MIC_INPUT_RIGHT_STATION  1
 
 /* Wheel Navigation subsystem (SPEC §10A) — owns these pins exclusively.
  * Index / reference sensor input. */
@@ -37,8 +44,11 @@
 #define BOARD_WHEEL_DRIVE_UART_RX_GPIO 9
 #define BOARD_WHEEL_DRIVE_DIAG_GPIO    10
 
-/* Excitation actuators, one per acoustic station (reserved for the acoustic subsystem). The
- * DevKit has no solenoids and no microphone; both stations are absent (see board_nano_esp32.h). */
+/* Excitation actuators, one per acoustic station -- moving here from the Nano (dead, see the
+ * mic comment above). PRESENT stays 0 until each station is physically wired AND passes its own
+ * B0 electrical check (tools/bench/solenoid_smoke's s3_bench_solenoid env), the same discipline
+ * SOLENOID_CAMPAIGN.md applied on the Nano: gpio_config() succeeding is not evidence of a
+ * solenoid, and a bare pin makes gpio_fire() return true for nothing (SPEC 17.3). */
 #define BOARD_PLUCK_ACTUATOR_LEFT_GPIO     15
 #define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT  0
 #define BOARD_PLUCK_ACTUATOR_RIGHT_GPIO    21

@@ -45,7 +45,10 @@ NOTE = ("EXPLORATORY workbench capture (tools/workbench.py), not campaign data: 
         "no exclusion ledger. Nothing here supports a claim without a fresh registered run.")
 # Mirror of the board profile's BOARD_I2S_MIC_INPUT_*_STATION: which slot each station's own mic answers in.
 EXPECTED_MIC_INPUT = {"LEFT": "left_slot", "RIGHT": "right_slot"}
-# B2-M3 station brackets (SOLENOID_CAMPAIGN.md): widths outside them are allowed, but said.
+# B2-M3 station brackets (SOLENOID_CAMPAIGN.md), measured on the ORIGINAL (Nano) rig's mount and
+# standoff. Not re-verified on the new DevKit rig -- a different mount/standoff/spring makes a
+# different reach and dwell. Kept only as a starting point for a fresh sweep; widths outside them
+# are allowed, but said, and the note below flags them as unverified for this rig.
 BRACKET_MS = {"LEFT": (40, 85), "RIGHT": (60, 95)}
 REF_PRESETS = {
     # the 09-21 hand plucks on spoke 0 that cleared on the unchanged DSP at 406.2 Hz
@@ -447,7 +450,8 @@ class Workbench(cmd.Cmd):
                 cr.measure_once_arg(0, False, v)
                 lo, hi = BRACKET_MS[cr.station_for_spoke(int(self.s.knobs["spoke"]))]
                 if not lo <= v <= hi:
-                    print("   note: %d ms is outside this station's B2-M3 bracket [%d, %d]" % (v, lo, hi))
+                    print("   note: %d ms is outside the OLD rig's B2-M3 bracket [%d, %d] -- unverified on this "
+                          "rig; not yet re-measured" % (v, lo, hi))
             self.s.knobs[key] = v
             self.s.save()
             return

@@ -1,4 +1,4 @@
-"""Keyboard console for the solenoid bench sketch (tools/bench/solenoid_smoke) on the Nano.
+"""Keyboard console for the solenoid bench sketch (tools/bench/solenoid_smoke), Nano or DevKit.
 
 Each keypress goes straight to the board as one command (l/r shot, b/v baseline (raw) shot,
 L/R 500 ms hold, a alternating run, A one-person V_DS check (lead-in + long holds), +/- shot
@@ -11,10 +11,13 @@ Local keys, never sent to the board:
     n     type an observation note (Enter to finish), logged as  NOTE: ...
     Esc   quit (Ctrl+C also works)
 
-The Nano's DTR/RTS reach GPIO0/reset, so both are set low before open(), the same discipline as
-tools/nano_serial.py. A dropped port (board reset, replug) is reopened and marked in the log.
+On the Nano, DTR/RTS reach GPIO0/reset, so both are set low before open(), the same discipline as
+tools/nano_serial.py; this is a no-op on the DevKit's CH343 bridge (`pio device monitor` also works
+there). A dropped port (board reset, replug) is reopened and marked in the log.
 
-Usage: python tools/bench/solenoid_ctl.py [log path]   (Windows console; pyserial from the PlatformIO penv)
+Usage: python tools/bench/solenoid_ctl.py [--port COMx] [log path]
+Default port COM5 (the Nano). For the DevKit, `pio device list` first -- COM4 is the roller
+board's, not necessarily this one's -- then pass its actual port explicitly.
 Default log: %TEMP%\solenoid_ctl.log (appended).
 """
 import msvcrt
@@ -25,8 +28,12 @@ import time
 
 import serial
 
+args = sys.argv[1:]
 PORT = "COM5"
-log_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.environ.get("TEMP", "."), "solenoid_ctl.log")
+if args and args[0] == "--port":
+    PORT = args[1]
+    args = args[2:]
+log_path = args[0] if args else os.path.join(os.environ.get("TEMP", "."), "solenoid_ctl.log")
 log = open(log_path, "a", encoding="utf-8", buffering=1)
 lock = threading.Lock()
 stop = threading.Event()
