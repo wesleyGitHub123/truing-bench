@@ -165,7 +165,7 @@ The declared map, as seen from the rotor side:
 
 **What this campaign is not.** It does not identify the fundamental or any vibration mode, and it does not relate frequency to tension. That work is a separate campaign, which needs a calibration rig and an absolute-tension reference, and may live outside this repo. Here the firmware's `f1_hz` is only a **reported peak frequency** (SPEC §6.3). Nothing in this campaign labels any peak "correct" or "the fundamental". The claim ceiling is unchanged: `suspect` / `PROVISIONAL_MODE_ID`, and `CONVERGED_GEOMETRIC_ONLY` at best.
 
-**Goal.** Establish a trustworthy excitation/acquisition configuration before the **demo on 2026-09-26**, working up toward all 32 spokes.
+**Goal.** Establish a trustworthy excitation/acquisition configuration before the **demo on 2026-10-03** (was 2026-09-26; moved by the operator 2026-09-27), working up toward all 32 spokes.
 
 **Hand plucking is removed, not kept as a fallback.**
 - A session on a real-front-end image is **refused** unless every acoustic station has an actuator.
