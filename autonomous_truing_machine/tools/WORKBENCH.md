@@ -7,35 +7,59 @@ later registered run confirms it. The record of what was done lives in `docs/SOL
 
 Two people: **R** at the rig and **K** at the keyboard.
 
-## 1. Wiring
+## 1. Board and wiring
 
-This matches the board profile, `lib/truing_board/include/board/board_nano_esp32.h`. No new GPIO is
-needed.
+**The acoustic front end lives on a spare ESP32-S3-DevKitC-1**, not the Nano — the original Nano
+died to a wiring mistake (2026-09-27) while adding the second mic. Everything below is the DevKit's
+own pins (`lib/truing_board/include/board/board_s3_devkit.h`), which already reserves both the mic
+bus and both solenoid GPIOs with no conflicts.
 
-| INMP441 pin | LEFT-station mic (the original one) | RIGHT-station mic (the new one) |
+**If a second DevKitC-1 is also attached** (the roller campaign's, fixed at COM4): tell them apart
+with `pio device list` / each board's own `GET /id` before flashing or wiring anything — never by
+env name or "the DevKit" alone. This board's own upload port is not pinned in `platformio.ini` for
+exactly this reason; pass `--upload-port` explicitly once you know it.
+
+### Microphones
+
+| INMP441 pin | LEFT-station mic | RIGHT-station mic |
 |---|---|---|
-| VDD | Nano 3.3V | Nano 3.3V |
-| GND | Nano GND | Nano GND |
-| SCK | D2 (GPIO5), shared | D2 (GPIO5), shared |
-| WS | D3 (GPIO6), shared | D3 (GPIO6), shared |
-| SD | D4 (GPIO7), shared | D4 (GPIO7), shared |
+| VDD | 3.3V | 3.3V |
+| GND | GND | GND |
+| SCK | GPIO4, shared | GPIO4, shared |
+| WS | GPIO5, shared | GPIO5, shared |
+| SD | GPIO6, shared | GPIO6, shared |
 | **L/R** | **GND → left slot** | **3.3V → right slot** |
 
-- **SD pull-down:** fit one 100 kΩ from D4 to GND at the Nano. SD floats between the two mics'
-  slots. This is the usual multi-mic INMP441 arrangement, but it has not been checked against the
-  datasheet here, so read the datasheet first.
+- **SD pull-down:** fit one 100 kΩ from GPIO6 to GND. SD floats between the two mics' slots. This
+  is the usual multi-mic INMP441 arrangement, but it has not been checked against the datasheet
+  here, so read the datasheet first.
 - **L/R:** never leave it floating.
-- **Grounds:** mic grounds return to the Nano. The solenoid 12 V returns stay on the star ground.
-  Keep mic leads away from the solenoid leads.
 - **Lead length:** BCLK is 3.07 MHz, so keep leads short and twist each signal with a ground.
 - **Mount trap:** a mic on a solenoid tower hears the tower through its mount. Coupling is a knob to
   vary, not a detail.
 - **Wire before flashing anything new.** Every existing image reads only the left slot, so it still
   hears the LEFT mic.
 
+### Solenoids (bring up separately, after the mics)
+
+| | LEFT | RIGHT |
+|---|---|---|
+| GPIO | 15 | 21 |
+| `PRESENT` | 0 until bench-verified | 0 until bench-verified |
+
+Same electrical design as the Nano's stations (`docs/SOLENOID_CAMPAIGN.md`'s rig registry): IRLB4132
+logic-level MOSFET, 100–150 Ω series gate resistor, 10 kΩ gate-source pulldown (mandatory), flyback
+diode across the solenoid (mandatory). **Grounds:** mic grounds and the solenoid 12 V return meet
+only at the shared supply's star ground point — never route mic leads beside solenoid leads.
+**Do not flip `BOARD_PLUCK_ACTUATOR_*_PRESENT` in the board header until that station passes its own
+B0 electrical check** (`tools/bench/solenoid_smoke`'s `s3_bench_solenoid` env, `tools/bench/README.md`)
+— the same discipline the Nano's stations went through before `fire`/`air` were trusted. Until then,
+`fire`/`air` correctly reject `EXCITATION_UNAVAILABLE`; `ctrl` and `pluck` need no actuator and work
+today.
+
 ## 2. Image and first run
 
-    python tools/flash.py nano_esp32_fastdemo_mic_dualmic
+    python tools/flash.py s3_devkit_fastdemo_mic_dualmic
 
 The bring-up log prints a separate liveness line for the `LEFT-station mic` and the
 `RIGHT-station mic`. A line that is all zeros means that mic is dead or its L/R strap is wrong.
@@ -81,8 +105,9 @@ change:
 **1. Experiment**
 
     set spoke 0            spoke parity picks the station
-    set pulse 60           0 = the profile's width; the tool warns outside the B2-M3 brackets
-                           (LEFT 40–85, RIGHT 60–95)
+    set pulse 60           0 = the profile's width; the tool warns outside the OLD rig's B2-M3
+                           brackets (LEFT 40–85, RIGHT 60–95) -- unverified on this rig, kept only
+                           as a starting point until a fresh sweep re-measures them
     set reps 6
     set mic.dist 15        ANY key not listed by `knobs` is physical set-up and opens a new EPOCH:
     set mic.coupling foam  mic.mount, strike.point, standoff, hold, damping, ...

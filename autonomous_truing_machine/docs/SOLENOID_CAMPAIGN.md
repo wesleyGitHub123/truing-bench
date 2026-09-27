@@ -1649,3 +1649,47 @@ plucks that cleared at 406.2 Hz, two had the onset at 0 (r1, r2) and two a real 
 clearing does not depend on it either way and this does not by itself explain the strike result. What it means for the onset
 settings is an open question; the workbench draws the board window beside its own ring window on every shot so it stays
 visible.
+
+### Board change: the Nano died, both stations move to a spare DevKit (2026-09-27)
+
+While wiring the second INMP441 above, the Nano ESP32 was damaged by a wiring mistake and is out of rotation. The operator
+has a spare ESP32-S3-DevKitC-1 in stock; **the whole acoustic front end -- both mics and both solenoid stations -- moves
+there**, not just the mics. This is a board change, not a design change: nothing about the DSP, the chain profile, the
+excitation profile, or the workbench's method is different.
+
+**What carries over unchanged.** The chain profile, its digest, the DSP, `tools/workbench.py`, `tools/wb_analysis.py`, and
+every existing reference capture (`ref preset spoke0-pluck` etc.) -- those are frequency/shape comparisons already labelled
+"not comparable" on absolute level, and stay valid regardless of which board takes new captures.
+
+**What does not carry over.** The rig registry (`LEFT/rig-1` / `RIGHT/rig-1`) described the Nano's mounting hardware --
+solenoid tower, standoff fitting, strike point. None of that exists on the new board yet (no solenoids are wired there).
+**The tokens are not bumped now**, because there is nothing to register yet; whoever wires the solenoids records a fresh
+`LEFT/rig-2` / `RIGHT/rig-2` block with real values at that time, per the registry's own append-only rule -- reusing
+`rig-1`'s numbers for a different physical mount would misrepresent the rig. The B2-M3 pulse brackets (LEFT [40,85] ms,
+RIGHT [60,95] ms) are likewise Nano-rig-specific (mount, standoff, spring) and unverified here;
+`tools/workbench.py` keeps them only as a labelled starting point pending a fresh sweep.
+
+**Firmware.** `board_s3_devkit.h` already reserved mic pins (BCLK 4, WS 5, DIN 6) and solenoid pins (LEFT 15, RIGHT 21) with
+no conflicts against anything else on that board -- including the roller campaign's stepper pins (STEP 16, DIR 17, EN 18,
+UART 8/9, DIAG 10), which this does not touch. Added: `BOARD_I2S_MIC_INPUT_LEFT_STATION`/`_RIGHT_STATION` (mirrors the Nano
+header); `env:s3_devkit_fastdemo_mic_campaign` and `env:s3_devkit_fastdemo_mic_dualmic` in `platformio.ini` (same flags as
+their Nano counterparts, which stay in the matrix as a record of what ran there). No changes to `audio_i2s.c`,
+`acoustic_real.c`, `pluck_gpio.c`, `orch_demo.c` or `bringup_acoustic.c` -- all of it already read pins from the board
+profile rather than assuming which board.
+
+**Solenoids stay `PRESENT=0`.** Wiring two solenoids on a new board without redoing the Nano's B0 electrical validation
+(channel isolation, no cross-talk, V_DS check) would be exactly the kind of unverified assumption that damaged the Nano.
+`tools/bench/solenoid_smoke` gained an `s3_bench_solenoid` env (GPIO 15/21, `-DLEFT_GPIO=15 -DRIGHT_GPIO=21` overriding the
+Nano defaults) and `solenoid_ctl.py` gained a `--port` flag, so the same manual bring-up procedure documented in this file's
+B0 section can be repeated on the new board before `BOARD_PLUCK_ACTUATOR_*_PRESENT` is ever flipped. `MEASURE_ONCE`'s
+no-fire path needs no actuator at all (`acoustic_real.c`: `if (ov_no_fire) { pulse_ms = 0.0f; }` never checks one), so
+`tools/workbench.py`'s `ctrl` and `pluck` work today with zero solenoids wired; `fire`/`air` correctly reject
+`EXCITATION_UNAVAILABLE` until B0 passes and `PRESENT` is flipped per station.
+
+**Two physical DevKitC-1 boards, same type.** The roller campaign's board is fixed at `upload_port = COM4` in
+`[env:s3_devkit]`. This one is not pinned in `platformio.ini` for exactly this reason -- `pio device list` and each board's
+own `GET /id` (base MAC, AP SSID) are how they are told apart, never port or env name alone. Nothing here touches the
+roller worktree (`feat/roller-nav`, `truing_roller`) or its schedule.
+
+**Not yet done.** Nothing has been wired to the new board. This entry records the plan and the code/doc changes that make
+it possible; the mic wiring, the tap test, and (separately, later) the solenoid B0 check are still ahead.
