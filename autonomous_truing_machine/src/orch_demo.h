@@ -33,6 +33,9 @@ uint32_t truing_demo_capture_seq(void);
  * though the words are the new one's. The debug HTTP handlers check this before reading
  * anything (SPEC §12.5/§13.3): a 409 here, not a half-finished 200. */
 bool truing_demo_capture_pending(void);
+/* The other microphone's record of the last capture on a dual-mic build: same frames, never
+ * analysed. Guard it with truing_demo_capture_seq() exactly like the capture. False otherwise. */
+bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *input);
 truing_source_impl_t truing_demo_acoustic_source(void);
 
 /* The acoustic chain configuration the measurement ran under. Its digest is what lets a

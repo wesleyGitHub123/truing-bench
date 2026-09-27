@@ -465,6 +465,83 @@ static void test_a_source_without_capture_report_leaves_audio_report_false(void)
     src.close(&src);
 }
 
+/* ---- multi-input front end (select_station on audio_source_if.h) -------------------------
+ *
+ * A dual-mic front end must listen with the STRUCK station's own microphone, chosen before any
+ * actuator fires, and the DSP must still receive exactly one mono stream. A front end that cannot
+ * serve the station refuses the attempt with no strike, rather than filing another mic's words
+ * under this station. */
+static int g_selected_slot;
+static int g_select_calls;
+static bool g_select_ok;
+
+static bool fake_select_station(truing_audio_source_if_t *self, int station_slot)
+{
+    (void)self;
+    g_select_calls++;
+    g_selected_slot = station_slot;
+    return g_select_ok;
+}
+
+static void test_a_multi_input_source_listens_with_the_struck_stations_mic(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    TEST_ASSERT_NULL(src.select_station);   /* single-input sources leave it NULL */
+    src.select_station = fake_select_station;
+    g_select_ok = true;
+    g_select_calls = 0;
+    g_selected_slot = -1;
+    memset(&g_audio_report, 0, sizeof(g_audio_report));
+    g_audio_report.n_inputs = 2u;
+    g_audio_report.input_analysed = 1u;
+    g_audio_report_available = true;
+    src.capture_report = fake_capture_report;
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 3u, &g_wheel, 1u, &e);   /* spoke 3: the RIGHT station */
+    TEST_ASSERT_EQUAL_INT(1, g_select_calls);
+    TEST_ASSERT_EQUAL_INT(1, g_selected_slot);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);   /* the DSP ran on the one stream it got */
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_TRUE(truing_acoustic_real_last_capture(&a, &v));
+    TEST_ASSERT_EQUAL_UINT8(2u, v.diag.n_inputs);
+    TEST_ASSERT_EQUAL_UINT8(1u, v.diag.input_analysed);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);   /* spoke 0: the LEFT station */
+    TEST_ASSERT_EQUAL_INT(2, g_select_calls);
+    TEST_ASSERT_EQUAL_INT(0, g_selected_slot);
+    g_audio_report_available = false;
+    src.close(&src);
+}
+
+static void test_a_source_that_cannot_serve_the_station_refuses_before_any_strike(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    src.select_station = fake_select_station;
+    g_select_ok = false;
+    g_select_calls = 0;
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch, g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 2u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(1, g_select_calls);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[0].fires);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_pctx[1].fires);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_UNAVAILABLE, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NOT_IMPLEMENTED, e.meta.reason_code);
+    truing_acoustic_capture_view_t v;
+    TEST_ASSERT_FALSE(truing_acoustic_real_last_capture(&a, &v));   /* nothing captured */
+    src.close(&src);
+}
+
 /* A fire() that fails is a rejected attempt with a reason, before any window opens: no phase frame
  * claims an excitation, nothing is captured, the previous capture stays readable, the other station
  * is untouched, and the next attempt (the orchestrator's re-excitation, SPEC §7.4) fires normally.
@@ -1306,6 +1383,8 @@ int main(void)
     RUN_TEST(test_an_actuator_without_fire_report_still_measures_cleanly);
     RUN_TEST(test_capture_report_reaches_the_capture_view_when_the_source_provides_one);
     RUN_TEST(test_a_source_without_capture_report_leaves_audio_report_false);
+    RUN_TEST(test_a_multi_input_source_listens_with_the_struck_stations_mic);
+    RUN_TEST(test_a_source_that_cannot_serve_the_station_refuses_before_any_strike);
     RUN_TEST(test_a_failed_fire_rejects_the_attempt_before_any_capture);
     RUN_TEST(test_a_missing_actuator_rejects_its_station_and_is_not_ready);
     RUN_TEST(test_the_estimate_is_identical_with_and_without_an_observer);

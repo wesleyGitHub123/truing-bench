@@ -27,6 +27,13 @@
 #define BOARD_I2S_MIC_BCLK_GPIO        5
 #define BOARD_I2S_MIC_WS_GPIO          6
 #define BOARD_I2S_MIC_DIN_GPIO         7
+/* Dual-mic bench wiring (TRUING_DUAL_MIC builds only): a second INMP441 shares BCLK/WS/SD above,
+ * with its L/R pin strapped to 3V3 so it answers in the right slot. Which slot each acoustic
+ * station's own microphone answers in -- 0 = left (L/R to GND: the original mic, moved to the
+ * LEFT station), 1 = right (L/R to 3V3, at the RIGHT station). SD wants a pull-down to GND at the
+ * board while both mics tri-state between slots. */
+#define BOARD_I2S_MIC_INPUT_LEFT_STATION   0
+#define BOARD_I2S_MIC_INPUT_RIGHT_STATION  1
 
 /* Wheel Navigation subsystem (SPEC §10A). Index / reference sensor on D5. */
 #define BOARD_INDEX_SENSOR_GPIO        8

@@ -13,6 +13,7 @@
 
 #include "board/board_profile.h"
 #include "truing/limits.h"
+#include "truing_hal/audio_ring.h"
 
 static const char *TAG = "audio_i2s";
 
@@ -23,17 +24,24 @@ static const char *TAG = "audio_i2s";
 typedef struct {
     i2s_chan_handle_t        rx;
     truing_audio_i2s_config_t cfg;
-    int32_t                 *ring;            /* PSRAM */
-    uint32_t                 ring_cap;
-    volatile uint32_t        ring_head;       /* next write index */
-    volatile uint32_t        ring_filled;     /* <= ring_cap */
+    truing_audio_ring_t      ring;            /* one PSRAM ring per input, same indices = same instant */
+    uint32_t                 n_inputs;        /* 1, or 2 on the dual-mic bus */
+    uint32_t                 sel_input;       /* the input the next capture delivers (select_station) */
     int32_t                 *chunk;           /* internal read buffer: dma_desc_num x dma_buffer_size */
     uint32_t                 chunk_words;
     TaskHandle_t             drain_task;
     SemaphoreHandle_t        lock;
     SemaphoreHandle_t        done;
+    /* the other input of the last capture, when there is one (PSRAM) */
+    int32_t                 *companion;
+    uint32_t                 companion_cap;
+    uint32_t                 companion_n;     /* 0 = the last capture kept none */
+    uint8_t                  companion_input;
     /* active capture (guarded by lock) */
     int32_t                 *cap_out;
+    int32_t                 *cap_companion;   /* NULL: no companion for this capture */
+    uint32_t                 cap_input;
+    uint32_t                 cap_companion_input;
     uint32_t                 cap_total;
     uint32_t                 cap_written;
     volatile bool            cap_active;
@@ -77,21 +85,19 @@ static void drain_task(void *arg)
         const uint32_t n = (uint32_t)(got / sizeof(int32_t));
         c->stats.reads++;
         c->stats.words_drained += n;
-        /* ring append (single producer) */
-        for (uint32_t i = 0; i < n; ++i) {
-            c->ring[c->ring_head] = c->chunk[i];
-            c->ring_head = (c->ring_head + 1u) % c->ring_cap;
-        }
-        if (c->ring_filled < c->ring_cap) {
-            c->ring_filled = (c->ring_filled + n) < c->ring_cap ? c->ring_filled + n : c->ring_cap;
-        }
+        /* ring append (single producer); n / n_inputs frames */
+        const uint32_t frames = truing_audio_ring_append(&c->ring, c->chunk, n);
         /* live part of an active capture */
         if (c->cap_active) {
             xSemaphoreTake(c->lock, portMAX_DELAY);
             if (c->cap_active) {
                 const uint32_t room = c->cap_total - c->cap_written;
-                const uint32_t take = n < room ? n : room;
-                memcpy(c->cap_out + c->cap_written, c->chunk, (size_t)take * sizeof(int32_t));
+                const uint32_t take = frames < room ? frames : room;
+                truing_audio_frames_extract(c->chunk, take, c->n_inputs, c->cap_input, c->cap_out + c->cap_written);
+                if (c->cap_companion != NULL) {
+                    truing_audio_frames_extract(c->chunk, take, c->n_inputs, c->cap_companion_input,
+                                                c->cap_companion + c->cap_written);
+                }
                 c->cap_written += take;
                 if (c->cap_written >= c->cap_total) {
                     c->cap_active = false;
@@ -130,19 +136,28 @@ static truing_audio_result_t i2s_capture(truing_audio_source_if_t *self, int32_t
      * and skip or duplicate samples. With a ring far longer than the tail, the writer cannot
      * overtake this copy in the microseconds it takes. */
     xSemaphoreTake(c->lock, portMAX_DELAY);
-    const uint32_t head = c->ring_head;
+    const uint32_t head = c->ring.head;
     /* Sampled in the same critical section as head/pre, so it describes the ring's staleness at
      * the exact instant this capture's pre-roll tail was actually taken from it. */
     const int64_t ring_sample_us = esp_timer_get_time();
-    uint32_t pre = c->cfg.pre_trigger_words < c->ring_filled ? c->cfg.pre_trigger_words : c->ring_filled;
+    uint32_t pre = c->cfg.pre_trigger_words < c->ring.filled ? c->cfg.pre_trigger_words : c->ring.filled;
     if (pre > n_words) pre = n_words;
-    for (uint32_t i = 0; i < pre; ++i) {
-        const uint32_t idx = (head + c->ring_cap - pre + i) % c->ring_cap;
-        words[i] = c->ring[idx];
+    c->cap_input = c->sel_input;
+    truing_audio_ring_tail(&c->ring, c->cap_input, head, pre, words);
+    /* The other microphone over the very same frames, when there is one and it fits. */
+    c->cap_companion = NULL;
+    c->companion_n = 0u;
+    if (c->n_inputs == 2u && c->companion != NULL && n_words <= c->companion_cap) {
+        c->cap_companion_input = 1u - c->cap_input;
+        c->cap_companion = c->companion;
+        c->companion_input = (uint8_t)c->cap_companion_input;
+        truing_audio_ring_tail(&c->ring, c->cap_companion_input, head, pre, c->companion);
     }
     c->last_report.pre_roll_words_delivered = pre;
     c->last_report.pre_roll_words_configured = c->cfg.pre_trigger_words;
     c->last_report.ring_age_us = c->last_read_us != 0 ? (uint32_t)(ring_sample_us - c->last_read_us) : 0u;
+    c->last_report.n_inputs = (uint8_t)c->n_inputs;
+    c->last_report.input_analysed = (uint8_t)c->cap_input;
     c->cap_out = words;
     c->cap_total = n_words;
     c->cap_written = pre;
@@ -178,6 +193,7 @@ static truing_audio_result_t i2s_capture(truing_audio_source_if_t *self, int32_t
     c->last_report.capture_overrun_events = c->overrun_events - c->cap_overruns_at_start;
     c->last_report.worst_read_gap_us = c->stats.max_read_gap_us;
     if (n_captured != NULL) *n_captured = n_words;
+    c->companion_n = c->cap_companion != NULL ? n_words : 0u;
     if (c->overrun_events != c->cap_overruns_at_start) {
         c->stats.capture_overruns++;
         return TRUING_AUDIO_ERR_OVERRUN;
@@ -190,6 +206,16 @@ static bool i2s_capture_report(truing_audio_source_if_t *self, truing_audio_capt
     const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
     if (c == NULL || out == NULL) return false;
     *out = c->last_report;
+    return true;
+}
+
+static bool i2s_select_station(truing_audio_source_if_t *self, int station_slot)
+{
+    i2s_ctx_t *c = (i2s_ctx_t *)self->ctx;
+    if (c == NULL || c->n_inputs != 2u || station_slot < 0 || station_slot > 1) {
+        return false;
+    }
+    c->sel_input = c->cfg.station_input[station_slot];
     return true;
 }
 
@@ -209,8 +235,16 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     }
     memset(c, 0, sizeof(*c));
     c->cfg = *cfg;
+    c->n_inputs = cfg->n_inputs == 2u ? 2u : 1u;
+    if (cfg->n_inputs > 2u ||
+        (c->n_inputs == 2u && (cfg->station_input[0] > 1u || cfg->station_input[1] > 1u ||
+                               cfg->station_input[0] == cfg->station_input[1]))) {
+        if (detail != NULL) *detail = "dual-mic config: each station needs its own slot";
+        return false;
+    }
+    /* A DMA buffer holds whole frames, and a frame is one slot per input. */
     if (cfg->dma_frame_num == 0u || cfg->dma_frame_num > 511u || (cfg->dma_frame_num % 3u) != 0u ||
-        cfg->dma_frame_num * (TRUING_AUDIO_SLOT_BITS / 8u) > 4092u || cfg->dma_desc_num < 2u) {
+        cfg->dma_frame_num * c->n_inputs * (TRUING_AUDIO_SLOT_BITS / 8u) > 4092u || cfg->dma_desc_num < 2u) {
         if (detail != NULL) *detail = "DMA sizing violates SPEC 9.4.1";
         return false;
     }
@@ -233,7 +267,8 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
          * left-justified and every word is noise - full-scale, varying, and superficially
          * alive, which is the worst way for this to be wrong. Measured on the Nano: 24-bit
          * data width gave rms 0.520 (uniform noise is 0.577); 32-bit gives a real room. */
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
+                                                        c->n_inputs == 2u ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = BOARD_I2S_MIC_BCLK_GPIO,
@@ -244,7 +279,9 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
         },
     };
     sc.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;   /* 24-bit data in 32-bit slots (SPEC 9.3) */
-    sc.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;               /* INMP441 L/R tied low */
+    /* One mic: L/R tied low, left slot. Two: the second is strapped high and answers in the right
+     * slot of the same frame, interleaved left then right. */
+    sc.slot_cfg.slot_mask = c->n_inputs == 2u ? I2S_STD_SLOT_BOTH : I2S_STD_SLOT_LEFT;
     e = i2s_channel_init_std_mode(c->rx, &sc);
     if (e != ESP_OK) {
         if (detail != NULL) *detail = esp_err_to_name(e);
@@ -254,15 +291,30 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     const i2s_event_callbacks_t cbs = { .on_recv = NULL, .on_recv_q_ovf = on_overflow, .on_sent = NULL, .on_send_q_ovf = NULL };
     i2s_channel_register_event_callback(c->rx, &cbs, c);
     /* read buffer >= dma_desc_num x dma_buffer_size (SPEC 9.4.1 sizing method) */
-    c->chunk_words = cfg->dma_desc_num * cfg->dma_frame_num;
+    const uint32_t chunk_frames = cfg->dma_desc_num * cfg->dma_frame_num;
+    c->chunk_words = chunk_frames * c->n_inputs;
     c->chunk = heap_caps_malloc((size_t)c->chunk_words * sizeof(int32_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    c->ring_cap = cfg->ring_words > cfg->pre_trigger_words + c->chunk_words ? cfg->ring_words : cfg->pre_trigger_words + c->chunk_words;
-    c->ring = heap_caps_malloc((size_t)c->ring_cap * sizeof(int32_t), MALLOC_CAP_SPIRAM);
-    if (c->chunk == NULL || c->ring == NULL) {
+    c->ring.n_inputs = c->n_inputs;
+    c->ring.cap = cfg->ring_words > cfg->pre_trigger_words + chunk_frames ? cfg->ring_words : cfg->pre_trigger_words + chunk_frames;
+    bool alloc_ok = c->chunk != NULL;
+    for (uint32_t in = 0; in < c->n_inputs; ++in) {
+        c->ring.ring[in] = heap_caps_malloc((size_t)c->ring.cap * sizeof(int32_t), MALLOC_CAP_SPIRAM);
+        alloc_ok = alloc_ok && c->ring.ring[in] != NULL;
+    }
+    if (c->n_inputs == 2u && cfg->companion_words > 0u) {
+        c->companion = heap_caps_malloc((size_t)cfg->companion_words * sizeof(int32_t), MALLOC_CAP_SPIRAM);
+        c->companion_cap = c->companion != NULL ? cfg->companion_words : 0u;
+        alloc_ok = alloc_ok && c->companion != NULL;
+    }
+    c->sel_input = c->n_inputs == 2u ? cfg->station_input[0] : 0u;
+    if (!alloc_ok) {
         if (detail != NULL) *detail = "buffer allocation";
         i2s_del_channel(c->rx);
         heap_caps_free(c->chunk);
-        heap_caps_free(c->ring);
+        for (uint32_t in = 0; in < TRUING_AUDIO_MAX_INPUTS; ++in) {
+            heap_caps_free(c->ring.ring[in]);
+        }
+        heap_caps_free(c->companion);
         return false;
     }
     c->lock = xSemaphoreCreateMutex();
@@ -288,13 +340,34 @@ bool truing_audio_i2s_init(truing_audio_source_if_t *self, const truing_audio_i2
     self->open = i2s_open;
     self->capture = i2s_capture;
     self->capture_report = i2s_capture_report;
+    self->select_station = c->n_inputs == 2u ? i2s_select_station : NULL;
     self->close = i2s_close;
     self->ctx = c;
-    ESP_LOGI(TAG, "I2S RX enabled: 48 kHz, 24-in-32 mono, mic on GPIO bclk=%d ws=%d din=%d "
-                  "(every capture will be zero if this is not the wiring), dma %u x %u frames (%u B), drain on core %d prio %d, ring %u words in PSRAM",
+    ESP_LOGI(TAG, "I2S RX enabled: 48 kHz, 24-in-32 %s, mic on GPIO bclk=%d ws=%d din=%d "
+                  "(every capture will be zero if this is not the wiring), dma %u x %u frames (%u B), drain on core %d prio %d, ring %u samples x %u in PSRAM",
+             c->n_inputs == 2u ? "stereo (two mics, L/R strapped opposite)" : "mono",
              BOARD_I2S_MIC_BCLK_GPIO, BOARD_I2S_MIC_WS_GPIO, BOARD_I2S_MIC_DIN_GPIO,
-             (unsigned)cfg->dma_desc_num, (unsigned)cfg->dma_frame_num, (unsigned)(cfg->dma_frame_num * 4u), DRAIN_TASK_CORE,
-             DRAIN_TASK_PRIORITY, (unsigned)c->ring_cap);
+             (unsigned)cfg->dma_desc_num, (unsigned)cfg->dma_frame_num, (unsigned)(cfg->dma_frame_num * c->n_inputs * 4u),
+             DRAIN_TASK_CORE, DRAIN_TASK_PRIORITY, (unsigned)c->ring.cap, (unsigned)c->n_inputs);
+    if (c->n_inputs == 2u) {
+        ESP_LOGI(TAG, "dual mic: LEFT station hears input %u (%s slot), RIGHT station input %u (%s slot); companion %u samples",
+                 (unsigned)cfg->station_input[0], cfg->station_input[0] == 0u ? "left" : "right",
+                 (unsigned)cfg->station_input[1], cfg->station_input[1] == 0u ? "left" : "right",
+                 (unsigned)c->companion_cap);
+    }
+    return true;
+}
+
+bool truing_audio_i2s_companion(const truing_audio_source_if_t *self, const int32_t **words, uint32_t *n_words,
+                                uint8_t *input)
+{
+    const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
+    if (c == NULL || c->n_inputs != 2u || c->companion == NULL || c->companion_n == 0u) {
+        return false;
+    }
+    if (words != NULL) *words = c->companion;
+    if (n_words != NULL) *n_words = c->companion_n;
+    if (input != NULL) *input = c->companion_input;
     return true;
 }
 
@@ -332,7 +405,10 @@ void truing_audio_i2s_deinit(truing_audio_source_if_t *self)
     i2s_channel_disable(c->rx);
     i2s_del_channel(c->rx);
     heap_caps_free(c->chunk);
-    heap_caps_free(c->ring);
+    for (uint32_t in = 0; in < TRUING_AUDIO_MAX_INPUTS; ++in) {
+        heap_caps_free(c->ring.ring[in]);
+    }
+    heap_caps_free(c->companion);
     vSemaphoreDelete(c->lock);
     vSemaphoreDelete(c->done);
     c->open = false;

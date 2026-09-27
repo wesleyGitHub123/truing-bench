@@ -204,6 +204,18 @@ bool truing_demo_capture_pending(void)
     return truing_acoustic_real_capture_pending(&s.acoustic);
 }
 
+bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *input)
+{
+#if TRUING_REAL_FRONT_END && TRUING_DUAL_MIC
+    return truing_audio_i2s_companion(&s.audio, words, n_words, input);
+#else
+    (void)words;
+    (void)n_words;
+    (void)input;
+    return false;
+#endif
+}
+
 truing_source_impl_t truing_demo_acoustic_source(void)
 {
     return s.acoustic.source_impl;
@@ -419,6 +431,12 @@ static void demo_task(void *arg)
         .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
         .pre_trigger_words = (uint32_t)(s.chain.pre_trigger_ms * 48.0f),
         .ring_words = 48000u,
+#if TRUING_DUAL_MIC
+        /* One mic per acoustic station on the shared bus; the far one is a companion record. */
+        .n_inputs = 2u,
+        .station_input = { BOARD_I2S_MIC_INPUT_LEFT_STATION, BOARD_I2S_MIC_INPUT_RIGHT_STATION },
+        .companion_words = (uint32_t)((s.chain.pre_trigger_ms + s.chain.capture_ms) * 48.0f + 0.5f),
+#endif
     };
     const char *idetail = NULL;
     if (!truing_audio_i2s_init(&s.audio, &icfg, &idetail)) {

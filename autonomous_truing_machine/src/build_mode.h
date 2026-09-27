@@ -130,9 +130,25 @@
 #error "TRUING_CAMPAIGN_DEBUG is the acoustic-demo bench variant only: it needs both TRUING_FAST_DEMO and TRUING_REAL_FRONT_END."
 #endif
 
+#ifndef TRUING_DUAL_MIC
+#define TRUING_DUAL_MIC 0
+#endif
+
+/* TRUING_DUAL_MIC reads both I2S slots: a second INMP441 on the shared bus, one microphone per
+ * acoustic station. Each capture still hands the DSP ONE mono stream -- the struck station's own
+ * mic -- and keeps the other only as a debug-dump companion. It is an exploratory seam for the
+ * dual-mic characterization workbench (tools/workbench.py), so it is legal only on the campaign
+ * bench build: no session image, and least of all the demo, may change what it listens with until
+ * a configuration has earned it and per-station provenance exists (SPEC 11.3). */
+#if TRUING_DUAL_MIC && !TRUING_CAMPAIGN_DEBUG
+#error "TRUING_DUAL_MIC is the campaign bench build only: it needs TRUING_CAMPAIGN_DEBUG."
+#endif
+
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_DUAL_MIC
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+campaign"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441+campaign"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441"
