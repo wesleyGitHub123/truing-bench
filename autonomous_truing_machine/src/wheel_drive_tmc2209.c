@@ -157,12 +157,13 @@ static truing_status_t tmc_enable(truing_wheel_drive_if_t *self, bool on, truing
         gpio_set_level((gpio_num_t)c->pins.en_gpio, 1);
         c->enabled = false;
     } else {
-        if (!c->enabled) {
-            /* A fresh enable clears what a restart can clear; a microstep mismatch is a
-             * configuration fact and stays until the configuration changes. */
-            c->fault_detail &= TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
-            c->faulted = c->fault_detail != 0u;
-        }
+        /* Every enable(true) clears what a restart can clear, whether or not it was already
+         * enabled -- pressing enable again is how an operator clears a latched fault, and
+         * gating this on a disabled->enabled transition left it stuck if they never explicitly
+         * disabled first. A microstep mismatch is a configuration fact, not a transient fault,
+         * and stays until the configuration changes. */
+        c->fault_detail &= TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
+        c->faulted = c->fault_detail != 0u;
         gpio_set_level((gpio_num_t)c->pins.en_gpio, 0);
         c->enabled = true;
     }

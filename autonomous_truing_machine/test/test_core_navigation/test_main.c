@@ -403,9 +403,8 @@ static void test_wheel_drive_fake_scripting(void)
     uint32_t detail = 0u;
     TEST_ASSERT_TRUE(truing_wheel_drive_fault(&d, &detail));
     TEST_ASSERT_EQUAL_HEX32(0x2u, detail);
-    truing_wheel_drive_enable(&d, true, &reason);   /* already enabled: does not clear */
-    TEST_ASSERT_TRUE(truing_wheel_drive_fault(&d, NULL));
-    truing_wheel_drive_enable(&d, false, &reason);
+    /* enable(true) clears a latched fault even without an intervening disable -- pressing
+     * enable again is how an operator recovers, not just a disabled->enabled transition. */
     truing_wheel_drive_enable(&d, true, &reason);
     TEST_ASSERT_FALSE(truing_wheel_drive_fault(&d, &detail));
 }

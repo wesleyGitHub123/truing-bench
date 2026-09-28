@@ -120,8 +120,8 @@ static truing_status_t fake_enable(truing_wheel_drive_if_t *self, bool on, truin
     if (!on && ctx->moving) {
         fake_land(ctx, 0);   /* hard disable: no further pulses */
     }
-    if (on && !ctx->enabled) {
-        ctx->faulted = false;   /* a fresh enable is the only thing that clears a latched fault */
+    if (on) {
+        ctx->faulted = false;   /* every enable(true) clears a latched fault, not just a fresh transition */
     }
     ctx->enabled = on;
     if (reason_out != NULL) {
