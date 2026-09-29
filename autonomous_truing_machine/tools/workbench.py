@@ -645,6 +645,7 @@ MENU = """
   fire [n]         solenoid strikes (needs solenoids wired and enabled in the firmware)
   roll [...]       the roller, lab image only: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`
   listen [s]       record the mic live for s seconds (up to 30) and play it: the ear / wiring check
+  burst [n] [ms] [gap]  rapid solenoid burst while both mics are watched live (needs PRESENT=1 in the image)
   play local|far   listen to the last shot         view        reopen its figure
   ls               shots so far                    report      write report.md for the session
   knobs            current set-up                  guide       the full experiment loop
@@ -809,6 +810,84 @@ class Workbench(cmd.Cmd):
 
     do_heartbeat = do_mic
     do_hb = do_mic
+
+    def do_burst(self, arg):
+        """burst [shots] [pulse_ms] [gap_ms] [left|right|both]: fire the solenoids in a rapid burst (default 20 shots
+        of 20 ms every 250 ms, alternating) while BOTH mics are watched live, ten times a second: does a mic
+        stay ALIVE, does the rail sag, how loud is each hit. The gap is held to >= 4 x the pulse (25 % duty).
+        Saves both channels as listening wavs. Needs the solenoids enabled in the image (PRESENT=1)."""
+        if self.offline:
+            raise ValueError("offline session: no board")
+        nums, which = [], "both"
+        for tok in arg.split():
+            if tok.lower() in ("left", "right", "both"):
+                which = tok.lower()
+            else:
+                nums.append(int(tok))
+        shots, pulse, gap = (nums + [20, 20, 250][len(nums):])[:3]
+        gap = max(gap, 4 * pulse, 100)
+        fs = {"left": 0, "right": 1, "both": 2}[which]
+        host = self.s.knobs["host"]
+        ms = 400 + shots * gap + 800
+        url = "http://%s/debug/listen.pcm?ms=%d&station=2&fn=%d&fp=%d&fg=%d&fs=%d" % (host, ms, shots, pulse, gap, fs)
+        n = len(glob.glob(os.path.join(self.s.dir, "burst_*_LEFT.pcm"))) + 1
+        base = os.path.join(self.s.dir, "burst_%02d" % n)
+        self._drop_ws()
+        print("   %d shots of %d ms every %d ms on %s, both mics watched live (~%.1f s) ..." % (
+            shots, pulse, gap, which.upper(), ms / 1000.0))
+        blk = 9600                                            # 0.2 s of frames; two words each
+        need = blk * 2 * 4
+        chans = {"left_slot": [], "right_slot": []}
+        peaks = {"left_slot": [], "right_slot": []}
+        dead = {"left_slot": 0, "right_slot": 0}
+        hits = 0
+        t = 0.0
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=ms / 1000.0 + 20) as r:
+                buf = b""
+                while True:
+                    part = r.read(need - len(buf))
+                    if not part:
+                        break
+                    buf += part
+                    if len(buf) < need:
+                        continue
+                    w = np.frombuffer(buf, dtype="<i4")
+                    buf = b""
+                    row, hit = [], False
+                    for slot, arr in (("left_slot", w[0::2]), ("right_slot", w[1::2])):
+                        chans[slot].append(arr.copy())
+                        h = wa.mic_health(arr)
+                        rms = h["rms_dbfs"] if h["rms_dbfs"] is not None else -999.0
+                        pk = h["peak_dbfs"] if h["peak_dbfs"] is not None else -999.0
+                        base_pk = np.median(peaks[slot][-8:]) if len(peaks[slot]) >= 3 else None
+                        this_hit = h["state"] != "DEAD" and base_pk is not None and pk > base_pk + TAP_DB
+                        hit = hit or this_hit
+                        if h["state"] == "DEAD":
+                            dead[slot] += 1
+                        else:
+                            peaks[slot].append(pk)
+                        row.append("%s %-8s %6.1f rms %6.1f pk" % ("L" if slot == "left_slot" else "R", h["state"], rms, pk))
+                    hits += 1 if hit else 0
+                    t += blk / 48000.0
+                    print("  %4.1fs  %s  |  %s%s" % (t, row[0], row[1], "   << HIT" if hit else ""))
+        except urllib.error.HTTPError as e:
+            raise ValueError("the board refused: %s %s" % (e.code, e.read().decode(errors="replace")[:160]))
+        except OSError as e:
+            raise ValueError(UNREACHABLE % (host,) + " (%s)" % e)
+        if not chans["left_slot"]:
+            raise ValueError("no samples came back")
+        for slot, tag in (("left_slot", "LEFT"), ("right_slot", "RIGHT")):
+            write_listening_wav(base + "_%s.norm.wav" % tag, np.concatenate(chans[slot]))
+        total = len(chans["left_slot"])
+        print("   summary: %d windows, %d with a hit  |  LEFT dead in %d, RIGHT dead in %d" % (
+            total, hits, dead["left_slot"], dead["right_slot"]))
+        if dead["left_slot"] == 0 and dead["right_slot"] == 0:
+            print("   both mics stayed ALIVE through the whole burst")
+        else:
+            print("   !! a mic went DEAD during the burst: suspect the supply rail or the solenoid wiring")
+        print("   files:", base + "_LEFT.norm.wav", "and", base + "_RIGHT.norm.wav")
 
     def do_listen(self, arg):
         """listen [seconds] [left|right]: record the mic live for as long as you like (1..30 s, default 10) and

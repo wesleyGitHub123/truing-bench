@@ -155,6 +155,20 @@ The board serves nothing else while it streams (a ~20 s pause for the heartbeat 
 listener is refused. If the stream ends early it says so instead of splicing over a gap. The Wi-Fi is the
 limit: the PC may need `netsh wlan connect name=truing-xxxxxx` first if it dropped off the AP.
 
+### Rapid burst with the mics watched (`burst`)
+
+    burst                        # 20 shots of 20 ms every 250 ms, LEFT and RIGHT alternating
+    burst 10 20 250 right        # 10 shots, 20 ms, 250 ms apart, RIGHT solenoid only
+
+A normal `fire` waits for a capture and a full analysis (~7 s a shot), so it cannot be rapid and you cannot
+watch a mic while it runs. `burst` sends one request: the board streams both mics live and fires the
+solenoids between reads, and the workbench prints both mics every 0.2 s (ALIVE/DEAD, level, peak, `<< HIT`)
+and ends with a verdict on whether either mic went DEAD (a sagging supply rail, or the solenoid wiring). It
+saves both channels as wavs. Limits, enforced in firmware: at most 40 shots, 5..60 ms pulses, and a gap of
+at least 4 x the pulse and 100 ms (25 % duty). It needs the solenoids enabled in the image
+(`BOARD_PLUCK_ACTUATOR_*_PRESENT`, default 0 -- the board refuses with a clear message). With `PRESENT` 1
+the bring-up also fires each solenoid a few times at every boot for its live measurement.
+
 This runs with the system `python` (numpy and matplotlib). Sessions are written to
 `test/fixtures/acoustic/captures/_explore/wb_<date>_<tag>/`, which is gitignored and exists only on
 this machine.
