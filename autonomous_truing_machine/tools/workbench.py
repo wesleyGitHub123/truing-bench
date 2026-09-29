@@ -267,12 +267,63 @@ Tap a mic: its bar should jump and show << TAP. Ctrl+C stops.
 """
 
 
+def board_answers(host, timeout=2.5):
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://%s/id" % host, timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def truing_networks():
+    """The board's AP name(s) this PC can join (Windows): visible networks first, then saved profiles."""
+    import re
+    import subprocess
+    names = []
+    for args in (["netsh", "wlan", "show", "networks"], ["netsh", "wlan", "show", "profiles"]):
+        try:
+            out = subprocess.run(args, capture_output=True, text=True, timeout=15).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for n in re.findall(r"truing-[0-9a-f]{6}", out):
+            if n not in names:
+                names.append(n)
+    return names
+
+
+def ensure_board(host, wait_s=90.0, say=print):
+    """Get this PC talking to the board with no manual steps: if it does not answer, join its Wi-Fi
+    (truing-xxxxxx, a saved Windows profile) and wait for it to boot. True once /id answers."""
+    if board_answers(host):
+        return True
+    import subprocess
+    t_end = time.time() + wait_s
+    say("   the board is not answering: joining its Wi-Fi and waiting for it (a fresh boot takes ~30 s)")
+    last_join = 0.0
+    while time.time() < t_end:
+        if time.time() - last_join > 15.0:
+            last_join = time.time()
+            for name in truing_networks()[:1]:
+                try:
+                    subprocess.run(["netsh", "wlan", "connect", "name=" + name], capture_output=True, timeout=20)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+        if board_answers(host):
+            say("   the board is up")
+            return True
+        time.sleep(2.0)
+    say("   still no answer after %d s: is the board powered (USB), and is its Wi-Fi profile saved on this PC?" % wait_s)
+    return False
+
+
 def heartbeat(host, timeout=20.0, beats=None):
     """Repeated no-fire captures on spoke 0 (LEFT local, RIGHT far), one status line per mic per beat."""
     def say(text):
         print(text, flush=True)                           # a live monitor: never sit in a pipe's buffer
 
     say(HEARTBEAT_HELP)
+    ensure_board(host, say=say)
     ws, seq, beat, peaks = None, 0, 0, {}
     try:
         while beats is None or beat < beats:
@@ -298,8 +349,9 @@ def heartbeat(host, timeout=20.0, beats=None):
                 if ws is not None:
                     ws.close()
                     ws = None
-                say("%s  %s (%s)" % (time.strftime("%H:%M:%S"), UNREACHABLE % host, e.__class__.__name__))
-                time.sleep(3)
+                say("%s  lost the board (%s)" % (time.strftime("%H:%M:%S"), e.__class__.__name__))
+                if not ensure_board(host, say=say):
+                    time.sleep(3)
                 continue
             except SystemExit as e:                       # fetch_bundle's refusals, e.g. seq moved mid-download
                 say("%s  %s; retrying" % (time.strftime("%H:%M:%S"), e))
@@ -1419,6 +1471,8 @@ def main(argv=None):
         ap.error("give --session <tag> for the workbench, or --heartbeat for a quick mic check")
     s = Session(a.session)
     s.knobs["host"] = a.host
+    if not a.offline:
+        ensure_board(a.host)
     wb = Workbench(s, a.offline)
     if a.command:
         for c in a.command:

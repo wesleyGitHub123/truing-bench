@@ -121,7 +121,10 @@ Join the board's AP, then:
 ### Mic heartbeat (`--heartbeat`, or `mic` inside a session)
 
 This takes one silent capture every ~3 s and prints one line per mic. Run it while you wire, and tap each
-mic to confirm it.
+mic to confirm it. Double-click `heartbeat.cmd` (in the repo's `autonomous_truing_machine` folder) or run
+`python tools/workbench.py --heartbeat`: it joins the board's Wi-Fi and waits for the board to boot by
+itself, and does the same again if the board drops out mid-run. The `--session` workbench does this at
+start-up too.
 
 | state | meaning |
 |---|---|
