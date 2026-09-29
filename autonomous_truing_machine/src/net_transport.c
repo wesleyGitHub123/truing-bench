@@ -601,18 +601,33 @@ static esp_err_t listen_pcm_handler(httpd_req_t *req)
 {
     static bool busy;
     static int32_t a[512], b[512], out[1024];
-    char q[64], v[12];
+    char q[112], v[12];
     uint32_t ms = 5000u, station = 0u;
+    /* An optional bench burst fired while the stream runs, to watch the microphones through it:
+     * fn shots (0 = none, max 40) of fp ms (5..60) with fg ms between shot starts, on station fs (0 LEFT,
+     * 1 RIGHT, 2 alternating), the first after a 400 ms lead-in. The gap is held to at least 4 x the pulse
+     * and 100 ms, so a coil is never asked for more than a 25 % duty. */
+    uint32_t fire_n = 0u, fire_ms = 20u, fire_gap = 250u, fire_st = 2u;
     no_store(req);
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
         if (httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK) ms = (uint32_t)strtoul(v, NULL, 10) * 1000u;
         if (httpd_query_key_value(q, "ms", v, sizeof(v)) == ESP_OK) ms = (uint32_t)strtoul(v, NULL, 10);
         if (httpd_query_key_value(q, "station", v, sizeof(v)) == ESP_OK) station = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "fn", v, sizeof(v)) == ESP_OK) fire_n = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "fp", v, sizeof(v)) == ESP_OK) fire_ms = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "fg", v, sizeof(v)) == ESP_OK) fire_gap = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "fs", v, sizeof(v)) == ESP_OK) fire_st = (uint32_t)strtoul(v, NULL, 10);
     }
-    if (ms < 100u || ms > LISTEN_MAX_SECONDS * 1000u || station > 2u) {
+    if (ms < 100u || ms > LISTEN_MAX_SECONDS * 1000u || station > 2u || fire_n > 40u || fire_st > 2u ||
+        (fire_n != 0u && (fire_ms < 5u || fire_ms > 60u || fire_gap < 4u * fire_ms || fire_gap < 100u || fire_gap > 2000u))) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"s 1..30 or ms 100..30000, station 0, 1 or 2 (both)\"}");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"s 1..30 or ms 100..30000, station 0-2; burst fn<=40 fp 5..60 fg>=4*fp,>=100\"}");
+    }
+    if (fire_n != 0u && ((fire_st != 1u && !truing_demo_fire_ready(0u)) || (fire_st != 0u && !truing_demo_fire_ready(1u)))) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no solenoid enabled on that station in this image (PRESENT=0)\"}");
     }
     uint32_t pos = 0u, lost = 0u;
     if (busy || !truing_demo_listen_start(&pos)) {
@@ -626,9 +641,16 @@ static esp_err_t listen_pcm_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/octet-stream");
     const uint32_t want = ms * (TRUING_AUDIO_SAMPLE_RATE_HZ / 1000u);   /* frames */
     const int64_t deadline_us = esp_timer_get_time() + ((int64_t)ms + 3000) * 1000;
-    uint32_t sent = 0u;
+    uint32_t sent = 0u, fired = 0u, refused = 0u;
+    int64_t next_fire_us = esp_timer_get_time() + 400000;
     esp_err_t rc = ESP_OK;
     while (sent < want && rc == ESP_OK && lost == 0u && esp_timer_get_time() < deadline_us) {
+        if (fired < fire_n && esp_timer_get_time() >= next_fire_us) {
+            /* Blocks for the pulse; the ring keeps filling meanwhile (a second deep), so nothing is lost. */
+            if (!truing_demo_fire(fire_st < 2u ? fire_st : (fired & 1u), (float)fire_ms)) refused++;
+            fired++;
+            next_fire_us += (int64_t)fire_gap * 1000;
+        }
         const uint32_t room = want - sent;
         const uint32_t take = room < 512u ? room : 512u;
         uint32_t n;
@@ -657,6 +679,10 @@ static esp_err_t listen_pcm_handler(httpd_req_t *req)
         sent += n;
     }
     busy = false;
+    if (fire_n != 0u) {
+        ESP_LOGI(TAG, "listen burst: %" PRIu32 " of %" PRIu32 " shots fired (%" PRIu32 " refused), %" PRIu32 " ms each, %" PRIu32 " ms apart",
+                 fired, fire_n, refused, fire_ms, fire_gap);
+    }
     if (lost != 0u) {
         ESP_LOGW(TAG, "listen ended early at %" PRIu32 " of %" PRIu32 " samples: the reader fell %" PRIu32 " behind",
                  sent, want, lost);

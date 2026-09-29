@@ -296,6 +296,28 @@ bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *
 #endif
 }
 
+bool truing_demo_fire(uint32_t station, float pulse_ms)
+{
+#if TRUING_REAL_FRONT_END
+    if (station >= TRUING_ACOUSTIC_STATIONS || !s.pluck_gpio_ctx[station].configured) return false;
+    return s.pluck[station].fire != NULL && s.pluck[station].fire(&s.pluck[station], pulse_ms);
+#else
+    (void)station;
+    (void)pulse_ms;
+    return false;
+#endif
+}
+
+bool truing_demo_fire_ready(uint32_t station)
+{
+#if TRUING_REAL_FRONT_END
+    return station < TRUING_ACOUSTIC_STATIONS && s.pluck_gpio_ctx[station].configured;
+#else
+    (void)station;
+    return false;
+#endif
+}
+
 bool truing_demo_listen_start(uint32_t *pos)
 {
 #if TRUING_REAL_FRONT_END
