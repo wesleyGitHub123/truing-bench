@@ -153,3 +153,20 @@ bool truing_pluck_gpio_init(truing_pluck_if_t *self, truing_pluck_gpio_ctx_t *ct
     self->ctx = ctx;
     return ctx->configured;
 }
+
+void truing_pluck_gpio_deinit(truing_pluck_gpio_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    if (ctx->timer != NULL) {
+        (void)gptimer_disable(ctx->timer);   /* refused if it was never enabled: nothing to undo then */
+        (void)gptimer_del_timer(ctx->timer);
+        ctx->timer = NULL;
+    }
+    if (ctx->done_sem != NULL) {
+        vSemaphoreDelete(ctx->done_sem);
+        ctx->done_sem = NULL;
+    }
+    ctx->configured = false;
+}

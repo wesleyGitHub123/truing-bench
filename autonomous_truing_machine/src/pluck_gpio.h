@@ -29,4 +29,9 @@ typedef struct {
 
 bool truing_pluck_gpio_init(truing_pluck_if_t *self, truing_pluck_gpio_ctx_t *ctx, int gpio);
 
+/* Returns the actuator's hardware timer and semaphore. Safe on a ctx that never initialised. The S3
+ * has four general-purpose timers: bring-up's throw-away actuators hand theirs back before the
+ * orchestrator builds its own pair, so the roller's step timer (TRUING_BENCH_DRIVE) still fits. */
+void truing_pluck_gpio_deinit(truing_pluck_gpio_ctx_t *ctx);
+
 #endif /* TRUING_PLUCK_GPIO_H */

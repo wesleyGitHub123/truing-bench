@@ -316,6 +316,13 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
                 check(pass, fail, e.meta.status != TRUING_STATUS_VALID && (e.meta.status != TRUING_STATUS_SUSPECT || isfinite(e.tension_n)),
                       "live measurement reports a status, never a fabricated valid value (P2/P7)");
             }
+            /* These actuators live on this stack frame. Hand their timers back now: the orchestrator
+             * builds its own pair right after bring-up, and the S3 has four general-purpose timers, one
+             * of which the roller's step generator needs (TRUING_BENCH_DRIVE). Nothing below fires them. */
+            for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+                truing_pluck_gpio_deinit(&pctx[i]);
+                actuators.at[i] = NULL;
+            }
             /* ---- drain integrity with a compute task competing on the audio core ------------- */
             truing_audio_i2s_stats_t before, after;
             truing_audio_i2s_stats(&i2s, &before);
