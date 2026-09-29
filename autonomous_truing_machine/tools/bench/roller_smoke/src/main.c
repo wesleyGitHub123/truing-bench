@@ -30,6 +30,7 @@
  *   u          TMC2209 register dump over UART
  *   a          scan UART node addresses 0..3
  *   w          raw UART probe: every byte that comes back after a read request, per node
+ *   X          the 'w' check with TX and RX swapped in software (no rewiring)
  *   l          internal loopback: the UART and this code with no wire, plus the RX pin's idle level
  *   m          next microstep setting (written and verified over UART)
  *   i / I      IRUN -1 / +1 (writes IHOLD_IRUN; IHOLD = IRUN/2) -- changes motor current
@@ -241,6 +242,34 @@ static void raw_probe(void)
     }
 }
 
+/* 'X': the same wire check with TX and RX swapped in software -- transmit on the RX GPIO, listen on the TX
+ * GPIO -- for a module whose TX/RX pins are two separate directions wired straight-through instead of
+ * crossed. Needs no rewiring; the board's pins are restored afterwards. */
+static void swapped_probe(void)
+{
+    if (g_ctx.pins.uart_num < 0) {
+        printf("UART not set up in this build\n");
+        return;
+    }
+    const uart_port_t port = (uart_port_t)g_ctx.pins.uart_num;
+    const int tx = g_ctx.pins.uart_tx_gpio, rx = g_ctx.pins.uart_rx_gpio;
+    uart_set_pin(port, rx, tx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    printf("SWAPPED: transmitting on GPIO %d, listening on GPIO %d\n", rx, tx);
+    printf("  pass 1, driver disabled (EN high):\n");
+    int best = raw_pass(port);
+    truing_wheel_drive_enable(&g_drive, true, NULL);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    printf("  pass 2, driver ENABLED (EN low):\n");
+    const int b2 = raw_pass(port);
+    truing_wheel_drive_enable(&g_drive, false, NULL);
+    if (b2 > best) best = b2;
+    uart_set_pin(port, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    printf("  restored: TX GPIO %d, RX GPIO %d\n", tx, rx);
+    static const char *const k_what[] = { "nothing back", "garbled bytes", "echo only (line joined, driver silent)",
+                                          "THE DRIVER ANSWERS with the pins swapped: swap them in board_s3_devkit.h" };
+    printf("  VERDICT (swapped): %s\n", k_what[best]);
+}
+
 /* 'l': the UART peripheral and this code, with no wire involved -- the chip's internal loopback routes TX
  * straight to RX. Four bytes back means the driver, the port and the read path work, so a silent 'w' is
  * the wiring or the TMC2209; nothing back here means the software/peripheral setup itself is wrong. Also
@@ -447,6 +476,7 @@ void app_main(void)
         case 'a': scan_nodes(); break;
         case 'w': raw_probe(); break;
         case 'l': loopback_probe(); break;
+        case 'X': swapped_probe(); break;
         case 'm': next_microsteps(); break;
         case 'i': if (g_irun > 0u) { set_irun(g_irun - 1u); } break;
         case 'I': set_irun(g_irun + 1u); break;
