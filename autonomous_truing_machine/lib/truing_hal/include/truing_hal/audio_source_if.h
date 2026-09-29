@@ -51,6 +51,8 @@ typedef struct {
     uint32_t capture_overrun_events;     /* per-capture delta of driver overrun events (not just a bool) */
     uint32_t ring_age_us;                /* how stale the ring was when this capture's pre-roll tail was read */
     uint32_t worst_read_gap_us;          /* driver-lifetime worst gap between drain reads, as of this capture */
+    uint8_t  n_inputs;                   /* physical inputs the source captured over the same frames (0 = not reported) */
+    uint8_t  input_analysed;             /* which of them these words are (the others are companions the DSP never sees) */
 } truing_audio_capture_report_t;
 
 struct truing_audio_source_if {
@@ -68,6 +70,12 @@ struct truing_audio_source_if {
      * the capture() just completed, not the one about to happen -- call it only after
      * capture() has returned. */
     bool (*capture_report)(truing_audio_source_if_t *self, truing_audio_capture_report_t *out);
+    /* Optional; NULL for a source with a single input. Chooses the input the NEXT capture()
+     * delivers: the microphone at acoustic station `station_slot` (truing_acoustic_station_slot(),
+     * 0 LEFT, 1 RIGHT). The words handed to the caller stay one mono stream in the system format;
+     * any other input the source records alongside is its own business and never reaches the
+     * DSP. False when the source cannot serve that station -- the caller must not capture then. */
+    bool (*select_station)(truing_audio_source_if_t *self, int station_slot);
     void (*close)(truing_audio_source_if_t *self);
     void *ctx;
 };

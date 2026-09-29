@@ -146,8 +146,8 @@
 /* The roller image turns a real wheel for every positioning, so its acquisition must be the fast
  * demo's automatic path. Self-play is excluded twice over: it is not a fast demo, and its
  * auto-operator would confirm a spoke-0 reference nobody placed -- a synthetic answer anchoring a
- * physical drive. The real front end is excluded because its microphone is on the Nano and this
- * drive is on the DevKit (orch_demo.c enforces the board). */
+ * physical drive. The real front end is excluded because the acoustic front end now runs on its
+ * own DevKit (orch_demo.c enforces the board); this image has no microphone or solenoid wiring. */
 #if TRUING_ROLLER_NAV && TRUING_SELF_PLAY
 #error "TRUING_ROLLER_NAV turns a real wheel from an operator-confirmed reference: not with TRUING_SELF_PLAY."
 #endif
@@ -155,13 +155,29 @@
 #error "TRUING_ROLLER_NAV is the fast-demo roller image: it needs TRUING_FAST_DEMO."
 #endif
 #if TRUING_ROLLER_NAV && TRUING_REAL_FRONT_END
-#error "TRUING_ROLLER_NAV is the DevKit roller image: not with TRUING_REAL_FRONT_END (the microphone is on the Nano)."
+#error "TRUING_ROLLER_NAV is the DevKit roller image: not with TRUING_REAL_FRONT_END (the acoustic front end runs on its own DevKit; this image has no microphone or solenoid wiring)."
+#endif
+
+#ifndef TRUING_DUAL_MIC
+#define TRUING_DUAL_MIC 0
+#endif
+
+/* TRUING_DUAL_MIC reads both I2S slots: a second INMP441 on the shared bus, one microphone per
+ * acoustic station. Each capture still hands the DSP ONE mono stream -- the struck station's own
+ * mic -- and keeps the other only as a debug-dump companion. It is an exploratory seam for the
+ * dual-mic characterization workbench (tools/workbench.py), so it is legal only on the campaign
+ * bench build: no session image, and least of all the demo, may change what it listens with until
+ * a configuration has earned it and per-station provenance exists (SPEC 11.3). */
+#if TRUING_DUAL_MIC && !TRUING_CAMPAIGN_DEBUG
+#error "TRUING_DUAL_MIC is the campaign bench build only: it needs TRUING_CAMPAIGN_DEBUG."
 #endif
 
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
 #if TRUING_FAST_DEMO && TRUING_ROLLER_NAV
 #define TRUING_BUILD_MODE_STR "fastdemo+roller"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_DUAL_MIC
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+campaign"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441+campaign"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END

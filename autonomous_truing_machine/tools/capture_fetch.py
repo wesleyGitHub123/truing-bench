@@ -52,25 +52,39 @@ def get(url, timeout):
         return r.read(), (seq.strip() if seq else None)
 
 
-def fetch_bundle(host, timeout):
-    """metadata, samples, metadata again - and refuse anything that moved in between."""
+def fetch_bundle(host, timeout, with_far=False):
+    """metadata, samples, metadata again - and refuse anything that moved in between.
+
+    with_far=True also pulls /debug/capture_far.pcm when the board says it kept one (dual-mic
+    builds: `far_n_words` in the metadata) inside the same seq check, and returns
+    (meta, pcm, far_pcm_or_None) instead of (meta, pcm)."""
     base = "http://%s" % host
     meta_raw, seq_a = get(base + "/debug/capture.json", timeout)
     meta = json.loads(meta_raw.decode("utf-8"))
     if meta.get("schema") not in SCHEMAS:
         raise SystemExit("board speaks schema %r, this tool speaks %r" % (meta.get("schema"), SCHEMAS))
     pcm, seq_b = get(base + "/debug/capture.pcm", timeout)
+    seqs = [seq_a, seq_b]
+    far = None
+    if with_far and meta.get("far_n_words"):
+        far, seq_f = get(base + "/debug/capture_far.pcm", timeout)
+        seqs.append(seq_f)
     _, seq_c = get(base + "/debug/capture.json", timeout)
-    if None in (seq_a, seq_b, seq_c):
+    seqs.append(seq_c)
+    if None in seqs:
         raise SystemExit("the board did not report %s; it cannot be told whether the capture "
                          "changed mid-download" % SEQ_HEADER)
-    if not (seq_a == seq_b == seq_c):
+    if len(set(seqs)) != 1:
         raise SystemExit(
-            "the board measured again while this was downloading (seq %s -> %s -> %s); "
-            "fetch while the machine is idle" % (seq_a, seq_b, seq_c))
+            "the board measured again while this was downloading (seq %s); "
+            "fetch while the machine is idle" % " -> ".join(seqs))
     expected = int(meta["n_words"]) * 4
     if len(pcm) != expected:
         raise SystemExit("expected %d bytes of samples, got %d" % (expected, len(pcm)))
+    if far is not None and len(far) != int(meta["far_n_words"]) * 4:
+        raise SystemExit("expected %d bytes of far-mic samples, got %d" % (int(meta["far_n_words"]) * 4, len(far)))
+    if with_far:
+        return meta, pcm, far
     return meta, pcm
 
 
@@ -80,7 +94,7 @@ def default_name(meta):
         int(meta.get("attempt", 0)), time.strftime("%Y%m%dT%H%M%S"))
 
 
-def write_bundle(name, meta, pcm, note, out_dir):
+def write_bundle(name, meta, pcm, note, out_dir, far_pcm=None):
     os.makedirs(out_dir, exist_ok=True)
     pcm_name = name + ".pcm"
     with open(os.path.join(out_dir, pcm_name), "wb") as f:
@@ -89,6 +103,13 @@ def write_bundle(name, meta, pcm, note, out_dir):
     doc["name"] = name
     doc["pcm"] = pcm_name
     doc["pcm_sha256"] = hashlib.sha256(pcm).hexdigest()
+    if far_pcm is not None:
+        # The other microphone over the same frames. Never what the board analysed: `pcm` is.
+        far_name = name + ".far.pcm"
+        with open(os.path.join(out_dir, far_name), "wb") as f:
+            f.write(far_pcm)
+        doc["far_pcm"] = far_name
+        doc["far_pcm_sha256"] = hashlib.sha256(far_pcm).hexdigest()
     doc["fetched_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     doc["origin"] = "board"
     if note:

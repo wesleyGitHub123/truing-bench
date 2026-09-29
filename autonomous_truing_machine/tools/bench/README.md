@@ -5,15 +5,17 @@ driver channels **outside** the firmware — no acoustic subsystem, no orchestra
 
 | | |
 |---|---|
-| `solenoid_smoke/` | standalone ESP-IDF sketch for the Nano. LEFT = GPIO 9 (D6), RIGHT = GPIO 10 (D7) — the pins `board_nano_esp32.h` declares. Fires nothing on boot; every activation is a keystroke. |
+| `solenoid_smoke/` | standalone ESP-IDF sketch, two envs: `nano_bench_solenoid` (GPIO 9 / D6, GPIO 10 / D7 — that board died to a wiring mistake 2026-09-27) and `s3_bench_solenoid` (GPIO 15, GPIO 21 — `board_s3_devkit.h`'s pins, the acoustic front end's new home). Fires nothing on boot; every activation is a keystroke. |
 | `solenoid_ctl.py` | the laptop side. Sends each keypress to the board, logs the board's replies and your own notes (`n`) into one timestamped record at `%TEMP%\solenoid_ctl.log`. |
 
 Run it (the Nano's DTR/RTS reach GPIO0/reset, so this script — not a naive monitor — is the way
-to open COM5):
+to open COM5; harmless no-op on the DevKit's bridge):
 
-    & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" "$env:USERPROFILE\truing_ws\tools\bench\solenoid_ctl.py"
+    & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" "$env:USERPROFILE\truing_ws\tools\bench\solenoid_ctl.py"                    # Nano, COM5
+    & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" "$env:USERPROFILE\truing_ws\tools\bench\solenoid_ctl.py" --port COM<n>       # DevKit -- check `pio device list` first
 
-Build and flash per `docs/DEV_NOTES.md`'s Nano rules (never `-t upload`; three regions with esptool).
+Build and flash the Nano env per `docs/DEV_NOTES.md`'s Nano rules (never `-t upload`; three regions with
+esptool). The DevKit env uploads the ordinary way (`-t upload`); its bridge handles reset.
 
 ## Keys
 

@@ -298,6 +298,13 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
      * hand-pluck fallback (plan A10), so a window opened now would record room noise under a
      * measurement's name. The orchestrator's retry re-excites (SPEC §7.4). */
     const int slot = truing_acoustic_station_slot((truing_station_id_t)c->attempt_station);
+    /* A multi-input front end listens with the struck station's own microphone. Chosen before
+     * anything fires: a front end that cannot serve this station refuses the attempt with no
+     * strike, rather than filing another microphone's words under this station. */
+    if (c->source->select_station != NULL && !c->source->select_station(c->source, slot)) {
+        truing_hal_fill_unavailable_estimate(out, TRUING_REASON_NOT_IMPLEMENTED, cycle_index, now, self->source_impl);
+        return;
+    }
     truing_pluck_if_t *const act = slot >= 0 ? c->actuator[slot] : NULL;
     /* A campaign pulse override replaces the profile's width for this strike only; the width that
      * was applied is what diag records. A no_fire control never commands an actuator at all --
@@ -358,6 +365,8 @@ static void measure_run(truing_acoustic_if_t *self, uint8_t spoke_id, const trui
             c->diag.capture_overrun_events = rpt.capture_overrun_events;
             c->diag.ring_age_us = rpt.ring_age_us;
             c->diag.worst_read_gap_us = rpt.worst_read_gap_us;
+            c->diag.n_inputs = rpt.n_inputs;
+            c->diag.input_analysed = rpt.input_analysed;
         }
     }
     c->diag.capture_us = (truing_clock_now_ms(&c->clock) - t0) * 1000u;

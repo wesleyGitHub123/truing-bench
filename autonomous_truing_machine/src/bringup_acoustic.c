@@ -14,6 +14,7 @@
 
 #include "audio_i2s.h"
 #include "board/board_profile.h"
+#include "build_mode.h"
 #include "pluck_gpio.h"
 #include "truing_fixtures/acoustic_golden.h"
 #include "truing_fixtures/fixtures.h"
@@ -76,6 +77,10 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
         .dma_desc_num = 8u,         /* 40 ms of driver buffering against a 100 ms worst-case drain gap */
         .pre_trigger_words = (uint32_t)(chain.pre_trigger_ms * 48.0f),
         .ring_words = 48000u,
+#if TRUING_DUAL_MIC
+        .n_inputs = 2u,
+        .station_input = { BOARD_I2S_MIC_INPUT_LEFT_STATION, BOARD_I2S_MIC_INPUT_RIGHT_STATION },
+#endif
     };
     const char *detail = NULL;
     const bool i2s_ok = truing_audio_i2s_init(&i2s, &icfg, &detail);
@@ -85,6 +90,16 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
     }
     if (i2s_ok) {
         vTaskDelay(pdMS_TO_TICKS(300));   /* let the ring fill past the pre-trigger depth */
+    }
+    /* One liveness capture per microphone: once on a single-mic bus, once per station's own mic
+     * on the dual-mic bench build, so a dead or unstrapped second mic is named, not averaged in. */
+    const unsigned n_mics = TRUING_DUAL_MIC ? 2u : 1u;
+    for (unsigned mic = 0; i2s_ok && mic < n_mics; ++mic) {
+        const char *mic_name = n_mics == 1u ? "mic" : (mic == 0u ? "LEFT-station mic" : "RIGHT-station mic");
+        if (i2s.select_station != NULL && !i2s.select_station(&i2s, (int)mic)) {
+            check(pass, fail, false, "front end serves this station's microphone");
+            continue;
+        }
         const uint32_t n = 9600u;         /* 200 ms */
         int32_t *buf = heap_caps_malloc(n * sizeof(int32_t), MALLOC_CAP_SPIRAM);
         uint32_t got = 0u;
@@ -107,13 +122,13 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
         const double mean = got ? sum / got : 0.0;
         const double rms = got ? sqrt(sumsq / got) : 0.0;
         check(pass, fail, r == TRUING_AUDIO_OK && got == n, "200 ms capture completes with the pre-trigger tail from the ring");
-        ESP_LOGI(TAG, "capture: %s, %" PRIu32 " words in %lld ms (pre-trigger %" PRIu32 " words) | nonzero %" PRIu32 " | min %ld max %ld | "
+        ESP_LOGI(TAG, "%s capture: %s, %" PRIu32 " words in %lld ms (pre-trigger %" PRIu32 " words) | nonzero %" PRIu32 " | min %ld max %ld | "
                       "dc %.2e | rms %.2e (%.1f dBFS)",
-                 truing_audio_result_str(r), got, (long long)(dt / 1000), icfg.pre_trigger_words, nonzero, (long)vmin, (long)vmax,
+                 mic_name, truing_audio_result_str(r), got, (long long)(dt / 1000), icfg.pre_trigger_words, nonzero, (long)vmin, (long)vmax,
                  mean, rms, rms > 0.0 ? 20.0 * log10(rms) : -999.0);
         if (nonzero == 0u) {
-            ESP_LOGW(TAG, "  every captured word is zero: no microphone signal on GPIO %d. The transducer is NOT verified by this run.",
-                     BOARD_I2S_MIC_DIN_GPIO);
+            ESP_LOGW(TAG, "  %s: every captured word is zero: no microphone signal on GPIO %d. The transducer is NOT verified by this run.",
+                     mic_name, BOARD_I2S_MIC_DIN_GPIO);
         } else if (nonzero < got / 2u || vmin == vmax) {
             ESP_LOGW(TAG, "  the capture is not a plausible microphone signal (constant or mostly zero). Transducer NOT verified.");
         } else {

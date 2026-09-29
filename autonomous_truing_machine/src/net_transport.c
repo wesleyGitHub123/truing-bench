@@ -485,6 +485,19 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
         truing_json_u32(&w, "capture_overrun_events", v.diag.capture_overrun_events);
         truing_json_u32(&w, "ring_age_us", v.diag.ring_age_us);
         truing_json_u32(&w, "worst_read_gap_us", v.diag.worst_read_gap_us);
+        /* Dual-mic builds only: which microphone these words are, and the other one's record
+         * (/debug/capture_far.pcm). The words above are still the ONLY input the DSP saw. */
+        if (v.diag.n_inputs >= 2u) {
+            truing_json_u32(&w, "mic_inputs", v.diag.n_inputs);
+            truing_json_str(&w, "mic_input", v.diag.input_analysed == 0u ? "left_slot" : "right_slot");
+            const int32_t *far_words = NULL;
+            uint32_t far_n = 0u;
+            uint8_t far_input = 0u;
+            if (truing_demo_far_capture(&far_words, &far_n, &far_input)) {
+                truing_json_str(&w, "far_input", far_input == 0u ? "left_slot" : "right_slot");
+                truing_json_u32(&w, "far_n_words", far_n);
+            }
+        }
     }
     truing_json_obj_close(&w);
     size_t len = 0u;
@@ -496,6 +509,35 @@ static esp_err_t capture_meta_handler(httpd_req_t *req)
     ESP_LOGI(TAG, "capture.json served: httpd stack high-water %u of %u bytes free",
              (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)), (unsigned)HTTPD_STACK_BYTES);
     return sent;
+}
+
+/* Chunked, because a capture is a couple of hundred kilobytes and the HTTP task's stack is not.
+ * Between chunks the measuring task may start another capture into this very buffer; when it
+ * does, the transfer is abandoned mid-stream so the client sees a broken response rather than
+ * two halves of different plucks spliced together. */
+static esp_err_t stream_capture_words(httpd_req_t *req, const int32_t *words, uint32_t n_words, uint32_t seq)
+{
+    capture_seq_header(req, seq);
+    httpd_resp_set_type(req, "application/octet-stream");
+    const uint8_t *p = (const uint8_t *)words;
+    size_t remaining = (size_t)n_words * sizeof(int32_t);
+    while (remaining > 0u) {
+        const size_t chunk = remaining > 4096u ? 4096u : remaining;
+        if (truing_demo_capture_seq() != seq) {
+            ESP_LOGW(TAG, "capture dump abandoned: a new measurement overwrote the buffer");
+            return ESP_FAIL;
+        }
+        if (httpd_resp_send_chunk(req, (const char *)p, chunk) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        p += chunk;
+        remaining -= chunk;
+    }
+    if (truing_demo_capture_seq() != seq) {
+        ESP_LOGW(TAG, "capture dump abandoned at the end: the buffer changed during the transfer");
+        return ESP_FAIL;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t capture_pcm_handler(httpd_req_t *req)
@@ -515,32 +557,32 @@ static esp_err_t capture_pcm_handler(httpd_req_t *req)
         httpd_resp_set_type(req, "application/json");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"nothing captured yet\"}");
     }
-    capture_seq_header(req, v.seq);
-    httpd_resp_set_type(req, "application/octet-stream");
-    /* Chunked, because the capture is a couple of hundred kilobytes and the HTTP task's stack
-     * is not. Between chunks the measuring task may start another capture into this very
-     * buffer; when it does, the transfer is abandoned mid-stream so the client sees a broken
-     * response rather than two halves of different plucks spliced together. */
-    const uint8_t *p = (const uint8_t *)v.words;
-    size_t remaining = (size_t)v.n_words * sizeof(int32_t);
-    while (remaining > 0u) {
-        const size_t chunk = remaining > 4096u ? 4096u : remaining;
-        if (truing_demo_capture_seq() != v.seq) {
-            ESP_LOGW(TAG, "capture dump abandoned: a new measurement overwrote the buffer");
-            return ESP_FAIL;
-        }
-        if (httpd_resp_send_chunk(req, (const char *)p, chunk) != ESP_OK) {
-            return ESP_FAIL;
-        }
-        p += chunk;
-        remaining -= chunk;
-    }
-    if (truing_demo_capture_seq() != v.seq) {
-        ESP_LOGW(TAG, "capture dump abandoned at the end: the buffer changed during the transfer");
-        return ESP_FAIL;
-    }
-    return httpd_resp_send_chunk(req, NULL, 0);
+    return stream_capture_words(req, v.words, v.n_words, v.seq);
 }
+
+#if TRUING_DUAL_MIC
+/* GET /debug/capture_far.pcm: the other microphone over the same frames as /debug/capture.pcm,
+ * same format and the same seq guard. Never analysed on the board -- the workbench's reference. */
+static esp_err_t capture_far_pcm_handler(httpd_req_t *req)
+{
+    truing_acoustic_capture_view_t v;
+    no_store(req);
+    if (truing_demo_capture_pending()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"capture outcome not yet settled\"}");
+    }
+    const int32_t *far_words = NULL;
+    uint32_t far_n = 0u;
+    uint8_t far_input = 0u;
+    if (!truing_demo_last_capture(&v) || !truing_demo_far_capture(&far_words, &far_n, &far_input)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no far-mic record for the last capture\"}");
+    }
+    return stream_capture_words(req, far_words, far_n, v.seq);
+}
+#endif
 
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
@@ -714,6 +756,13 @@ bool truing_net_start(void)
         httpd_register_uri_handler(s_server, &cap_pcm_uri) != ESP_OK) {
         ESP_LOGW(TAG, "capture dump endpoints not registered; /debug/capture.* will 404");
     }
+#if TRUING_DUAL_MIC
+    static const httpd_uri_t cap_far_uri = { .uri = "/debug/capture_far.pcm", .method = HTTP_GET,
+                                             .handler = capture_far_pcm_handler };
+    if (httpd_register_uri_handler(s_server, &cap_far_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "far-mic dump endpoint not registered; /debug/capture_far.pcm will 404");
+    }
+#endif
 #if TRUING_FAST_DEMO
     /* Only this image serves it at all. */
     static const httpd_uri_t acq_uri = { .uri = "/demo/acquisition", .method = HTTP_GET,

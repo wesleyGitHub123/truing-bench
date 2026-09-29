@@ -1,8 +1,9 @@
 /* Solenoid bench for both driver channels, driven by hand from the serial console.
- * LEFT = GPIO 9 (D6), RIGHT = GPIO 10 (D7) on the Nano ESP32 -- the pins the two-station
- * firmware declares as BOARD_PLUCK_ACTUATOR_LEFT/RIGHT_GPIO. Same gate wiring as pluck_gpio.c
- * (100-150 ohm series gate resistor, 10 k gate-source pulldown), none of the acoustic or
- * orchestrator code.
+ * LEFT/RIGHT_GPIO default to the Nano ESP32's pins (GPIO 9 / D6, GPIO 10 / D7; that board died
+ * to a wiring mistake 2026-09-27) and the s3_bench_solenoid env overrides them to the DevKit's
+ * (GPIO 15, GPIO 21) -- in both cases the pins the two-station firmware declares as
+ * BOARD_PLUCK_ACTUATOR_LEFT/RIGHT_GPIO. Same gate wiring as pluck_gpio.c (100-150 ohm series
+ * gate resistor, 10 k gate-source pulldown), none of the acoustic or orchestrator code.
  *
  * The gate is driven through LEDC (PWM) instead of a plain GPIO write, so duty can ramp and be
  * held at intermediate levels. One shot runs five stages, every one of them adjustable:
@@ -99,8 +100,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define LEFT_GPIO        9    /* D6 */
-#define RIGHT_GPIO       10   /* D7 */
+/* Pins default to the Nano's (dead 2026-09-27); the s3_bench_solenoid env overrides both via
+ * build_flags to the DevKit's BOARD_PLUCK_ACTUATOR_LEFT/RIGHT_GPIO (board_s3_devkit.h: 15, 21).
+ * This sketch still takes no board_profile.h dependency -- the override is a bare number, kept
+ * in sync with the board header by comment, not by including it. */
+#ifndef LEFT_GPIO
+#define LEFT_GPIO        9    /* D6 on the Nano */
+#endif
+#ifndef RIGHT_GPIO
+#define RIGHT_GPIO       10   /* D7 on the Nano */
+#endif
 #define HOLD_PULSE_MS    500u
 #define SHOT_MS_INIT     20u
 #define SHOT_MS_STEP     5u
@@ -493,7 +502,7 @@ void app_main(void)
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj));
     usb_serial_jtag_vfs_use_driver();
 
-    ESP_LOGI(TAG, "solenoid bench, manual -- LEFT GPIO %d (D6), RIGHT GPIO %d (D7). Nothing fires until a key.",
+    ESP_LOGI(TAG, "solenoid bench, manual -- LEFT GPIO %d, RIGHT GPIO %d. Nothing fires until a key.",
              LEFT_GPIO, RIGHT_GPIO);
     help();
     status();

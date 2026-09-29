@@ -78,6 +78,8 @@ typedef struct {
     uint32_t capture_overrun_events;
     uint32_t ring_age_us;
     uint32_t worst_read_gap_us;
+    uint8_t  n_inputs;                  /* inputs the front end captured over the same frames; 0 when not reported */
+    uint8_t  input_analysed;            /* the one these words are -- the only one the DSP saw */
     /* True iff this capture was fired by the debug channel's MEASURE_ONCE (SPEC §12.5), not by
      * the orchestrator's own state machine. A safety discriminator: it must never be easy for
      * campaign tooling, or any future report generator reading /debug/capture.json, to mistake

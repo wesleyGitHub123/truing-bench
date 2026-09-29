@@ -298,18 +298,33 @@ The record says what it holds and why: provenance carries `tension_sample_limit`
 so three tension records on a 32-spoke wheel can never be read as a wheel that was measured
 and mostly failed.
 
-### The campaign bench variant (`nano_esp32_fastdemo_mic_campaign`)
+### The campaign bench variant (`nano_esp32_fastdemo_mic_campaign`, `s3_devkit_fastdemo_mic_campaign`)
 
-Same wiring as `nano_esp32_fastdemo_mic` above, plus `-DTRUING_CAMPAIGN_DEBUG=1`. This is the
-only environment where `deps.debug_channel_enabled` is ever set true, which is what makes
+Same wiring as the plain `_mic` image on that board, plus `-DTRUING_CAMPAIGN_DEBUG=1`. This is the
+only kind of environment where `deps.debug_channel_enabled` is ever set true, which is what makes
 `TRUING_INTENT_DEBUG` (SPEC §12.5) admissible at all — everywhere else, including the demo
 image itself, it rejects with `REJECT_DEBUG_DISABLED` regardless of anything a client sends.
 Admission is still further restricted to `TRUING_STATE_READY` with no session running, so
 `MEASURE_ONCE` (the one debug code currently defined, `docs/SOLENOID_CAMPAIGN_PLAN.md` item
 10) can fire a single station capture for bench characterization, but can never be reached
 once a real session has started. `GET /id` reports this image as
-`"mode":"fastdemo+inmp441+campaign"`. Nano-only: campaign bench work runs against the board
-the INMP441 is actually wired to (`docs/SOLENOID_CAMPAIGN.md`); there is no DevKit variant.
+`"mode":"fastdemo+inmp441+campaign"`. Campaign bench work runs against whichever board the
+acoustic front end is actually wired to — historically the Nano; that board died to a wiring
+mistake 2026-09-27, and the front end moved to a spare DevKit, hence the `s3_devkit_*` variant.
+
+### The dual-mic bench variant (`nano_esp32_fastdemo_mic_dualmic`, `s3_devkit_fastdemo_mic_dualmic`)
+
+The campaign bench variant plus `-DTRUING_DUAL_MIC=1`, for a bus with **two** INMP441s: one at each
+acoustic station, sharing BCLK/WS/SD, the original mic's L/R to GND (left slot, LEFT station) and
+the new one's L/R to 3V3 (right slot, RIGHT station); `BOARD_I2S_MIC_INPUT_*_STATION` in the board
+profile record that mapping. The driver reads both slots every frame. Each capture still hands the
+DSP **one** mono stream -- the struck station's own mic -- so the chain profile, its digest and the
+replay path are unchanged; the other mic's words over the same frames are kept only as a dump,
+`GET /debug/capture_far.pcm`, and `capture.json` gains `mic_inputs`, `mic_input`, `far_input` and
+`far_n_words`. `build_mode.h` makes the flag illegal without `TRUING_CAMPAIGN_DEBUG`, so no session
+image can change what it listens with. `GET /id` reports `"mode":"fastdemo+inmp441x2+campaign"`.
+Exploratory, driven by `tools/workbench.py` (`tools/WORKBENCH.md`); on a bus with one mic, use the
+single-mic campaign image instead.
 
 ### The roller development image (`s3_devkit_fastdemo_roller`)
 
@@ -330,8 +345,17 @@ pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo -t upload   # acce
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit -t upload            # the physical-path image
 pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_mic -t upload        # the physical INMP441 front end
 pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic -t upload   # the acoustic demonstration
-pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant
+pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic_campaign -t upload   # campaign bench variant (Nano; dead)
+python tools/flash.py nano_esp32_fastdemo_mic_dualmic                                     # dual-mic bench variant (Nano; dead)
+pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo_mic_campaign -t upload      # campaign bench variant, DevKit
+python tools/flash.py s3_devkit_fastdemo_mic_dualmic                                       # dual-mic bench variant, DevKit
 ```
+
+The Nano commands above are kept as a record of what ran there; that board is dead (2026-09-27) and
+the acoustic front end now lives on a spare DevKit. **Two physical DevKitC-1 boards may now be
+attached at once** (the roller campaign's, fixed at `upload_port = COM4` in `[env:s3_devkit]`, and
+this spare one) — check `pio device list` / `GET /id` before flashing either, never assume by env
+name alone.
 
 The boot banner says which one is running, and so does `GET /id`:
 
