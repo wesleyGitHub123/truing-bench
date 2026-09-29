@@ -584,6 +584,42 @@ static esp_err_t capture_far_pcm_handler(httpd_req_t *req)
 }
 #endif
 
+#if TRUING_BENCH_DRIVE
+/* GET /debug/drive.json: the lab image's bench drive, read-only (control is the DRIVE_* debug codes
+ * over /ws). Plain reads of the driver's fields -- see truing_demo_bench_drive_state(). */
+static esp_err_t drive_json_handler(httpd_req_t *req)
+{
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    truing_demo_drive_state_t d;
+    if (!truing_demo_bench_drive_state(&d)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no bench drive (init failed)\"}");
+    }
+    char body[320];
+    truing_json_writer_t w;
+    truing_json_init(&w, body, sizeof(body));
+    truing_json_obj_open(&w, NULL);
+    truing_json_str(&w, "schema", "truing.bench.drive/1");
+    truing_json_bool(&w, "enabled", d.enabled);
+    truing_json_bool(&w, "moving", d.moving);
+    truing_json_bool(&w, "faulted", d.faulted);
+    truing_json_u32(&w, "fault_detail", d.fault_detail);
+    truing_json_bool(&w, "diag_high", d.diag_high);
+    truing_json_bool(&w, "uart_ok", d.uart_ok);
+    truing_json_i32(&w, "position_steps", d.position_steps);
+    truing_json_u32(&w, "max_step_hz", d.max_step_hz);
+    truing_json_u32(&w, "accel_steps_s2", d.accel_steps_s2);
+    truing_json_obj_close(&w);
+    size_t len = 0u;
+    if (!truing_json_finish(&w, &len)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"drive state did not fit\"}");
+    }
+    return httpd_resp_send(req, body, len);
+}
+#endif
+
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[448];   /* the reply is ~330 bytes; a truncated JSON body would be silently wrong */
@@ -731,6 +767,8 @@ bool truing_net_start(void)
      * on target rather than assumed. */
     hc.stack_size = HTTPD_STACK_BYTES;
     hc.lru_purge_enable = true;
+    /* The default is 8, which the lab image (ui, id, ws, capture x3, drive, acquisition) exactly fills. */
+    hc.max_uri_handlers = 12;
     /* Core 1 is the audio core (SPEC §4.5); the web server belongs with the control
      * work on core 0 so it cannot preempt a capture. */
     hc.core_id = 0;
@@ -761,6 +799,13 @@ bool truing_net_start(void)
                                              .handler = capture_far_pcm_handler };
     if (httpd_register_uri_handler(s_server, &cap_far_uri) != ESP_OK) {
         ESP_LOGW(TAG, "far-mic dump endpoint not registered; /debug/capture_far.pcm will 404");
+    }
+#endif
+#if TRUING_BENCH_DRIVE
+    static const httpd_uri_t drive_uri = { .uri = "/debug/drive.json", .method = HTTP_GET,
+                                           .handler = drive_json_handler };
+    if (httpd_register_uri_handler(s_server, &drive_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "bench-drive endpoint not registered; /debug/drive.json will 404");
     }
 #endif
 #if TRUING_FAST_DEMO

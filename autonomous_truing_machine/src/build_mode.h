@@ -146,8 +146,11 @@
 /* The roller image turns a real wheel for every positioning, so its acquisition must be the fast
  * demo's automatic path. Self-play is excluded twice over: it is not a fast demo, and its
  * auto-operator would confirm a spoke-0 reference nobody placed -- a synthetic answer anchoring a
- * physical drive. The real front end is excluded because the acoustic front end now runs on its
- * own DevKit (orch_demo.c enforces the board); this image has no microphone or solenoid wiring. */
+ * physical drive. The real front end is excluded because roller NAVIGATION waits for the operator
+ * to confirm spoke 0 before the machine reaches READY, and the acoustic bench channel
+ * (MEASURE_ONCE) is admitted only in READY: the two would deadlock. A board wired for both mics and
+ * roller uses TRUING_BENCH_DRIVE below instead, which moves the roller in raw steps with no
+ * navigation and no reference. */
 #if TRUING_ROLLER_NAV && TRUING_SELF_PLAY
 #error "TRUING_ROLLER_NAV turns a real wheel from an operator-confirmed reference: not with TRUING_SELF_PLAY."
 #endif
@@ -155,7 +158,25 @@
 #error "TRUING_ROLLER_NAV is the fast-demo roller image: it needs TRUING_FAST_DEMO."
 #endif
 #if TRUING_ROLLER_NAV && TRUING_REAL_FRONT_END
-#error "TRUING_ROLLER_NAV is the DevKit roller image: not with TRUING_REAL_FRONT_END (the acoustic front end runs on its own DevKit; this image has no microphone or solenoid wiring)."
+#error "TRUING_ROLLER_NAV is the DevKit roller image: not with TRUING_REAL_FRONT_END (roller navigation waits for the operator to confirm spoke 0 before READY, and MEASURE_ONCE is admitted only in READY -- use TRUING_BENCH_DRIVE for a board wired for both)."
+#endif
+
+#ifndef TRUING_BENCH_DRIVE
+#define TRUING_BENCH_DRIVE 0
+#endif
+
+/* TRUING_BENCH_DRIVE wires the roller's TMC2209 to the debug channel (DRIVE_* codes, raw steps) on
+ * the campaign bench build, so one DevKit carrying both mics, both solenoids and the roller can run
+ * mic experiments and move the roller from one command set without a reflash. It is a bench tool:
+ * the drive is brought up DISABLED, navigation stays synthetic, the roller calibration is not
+ * consulted, and it is legal only where the debug channel is (TRUING_CAMPAIGN_DEBUG, which needs
+ * FAST_DEMO and REAL_FRONT_END). It is never the navigation drive, so it excludes ROLLER_NAV: two
+ * owners of one STEP pin. */
+#if TRUING_BENCH_DRIVE && !TRUING_CAMPAIGN_DEBUG
+#error "TRUING_BENCH_DRIVE is the campaign bench build only: it needs TRUING_CAMPAIGN_DEBUG."
+#endif
+#if TRUING_BENCH_DRIVE && TRUING_ROLLER_NAV
+#error "TRUING_BENCH_DRIVE and TRUING_ROLLER_NAV both claim the wheel drive: pick one owner."
 #endif
 
 #ifndef TRUING_DUAL_MIC
@@ -176,6 +197,10 @@
  * this" has a single answer no matter who asks. */
 #if TRUING_FAST_DEMO && TRUING_ROLLER_NAV
 #define TRUING_BUILD_MODE_STR "fastdemo+roller"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_DUAL_MIC && TRUING_BENCH_DRIVE
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+campaign+drive"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_BENCH_DRIVE
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441+campaign+drive"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_DUAL_MIC
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+campaign"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG

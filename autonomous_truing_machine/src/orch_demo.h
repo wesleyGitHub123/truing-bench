@@ -36,6 +36,21 @@ bool truing_demo_capture_pending(void);
 /* The other microphone's record of the last capture on a dual-mic build: same frames, never
  * analysed. Guard it with truing_demo_capture_seq() exactly like the capture. False otherwise. */
 bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *input);
+
+/* The lab image's bench drive (TRUING_BENCH_DRIVE), for GET /debug/drive.json. */
+typedef struct {
+    bool     enabled;          /* coils energised */
+    bool     moving;
+    bool     faulted;          /* latched */
+    bool     diag_high;        /* the DIAG pin right now, unfiltered */
+    bool     uart_ok;
+    uint32_t fault_detail;
+    int32_t  position_steps;   /* pulses actually emitted since the last zero: commanded, not evidence the wheel moved */
+    uint32_t max_step_hz;
+    uint32_t accel_steps_s2;
+} truing_demo_drive_state_t;
+/* False when this image has no bench drive (or it failed to initialise); `out` is then untouched. */
+bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out);
 truing_source_impl_t truing_demo_acoustic_source(void);
 
 /* The acoustic chain configuration the measurement ran under. Its digest is what lets a

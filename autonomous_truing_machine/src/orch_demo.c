@@ -54,6 +54,14 @@ static const char *TAG = "orch_demo";
 #if TRUING_ROLLER_NAV && !defined(BOARD_PROFILE_S3_DEVKIT)
 #error "TRUING_ROLLER_NAV is DevKit only (s3_devkit_fastdemo_roller)."
 #endif
+#if TRUING_BENCH_DRIVE && !defined(BOARD_PROFILE_S3_DEVKIT)
+#error "TRUING_BENCH_DRIVE is DevKit only (s3_devkit_lab): the Nano's pins carry no roller."
+#endif
+
+/* Bench drive ramp (TRUING_BENCH_DRIVE): roller_smoke's cautious first-spin knobs, not a measured
+ * calibration. `roll speed` (DRIVE_MOTION) changes them for the running image. */
+#define BENCH_DRIVE_CRUISE_HZ 800u
+#define BENCH_DRIVE_ACCEL_SS  1600u
 
 /* Everything static: the wheel state alone is ~7 KB and the rig must outlive app_main. */
 static struct {
@@ -154,7 +162,7 @@ static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke,
 /* ROLLER image: the TMC2209 drive, brought up once and left DISABLED. Its motion profile and the
  * microstep count it enforces come from the measured calibration; while that is empty the drive
  * refuses moves and navigation refuses positioning (CALIBRATION_MISSING), so nothing turns. */
-#if TRUING_ROLLER_NAV
+#if TRUING_ROLLER_NAV || TRUING_BENCH_DRIVE
 static void roller_drive_init_once(void)
 {
     if (s.drive_inited) {
@@ -171,6 +179,15 @@ static void roller_drive_init_once(void)
         .uart_rx_gpio = BOARD_WHEEL_DRIVE_UART_RX_GPIO,
         .node = 0u,
     };
+#if TRUING_BENCH_DRIVE
+    /* The bench drive never consults the roller calibration: raw steps, the bench sketch's ramp, and
+     * microsteps 0 so MRES stays as the part powers up (the bench found the UART unusable here). */
+    const truing_ramp_profile_t bench_prof = { 1000000u, BENCH_DRIVE_CRUISE_HZ, BENCH_DRIVE_ACCEL_SS };
+    s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &bench_prof, 0u);
+    ESP_LOGW(TAG, "BENCH DRIVE: the roller's TMC2209 answers the DRIVE_* debug codes in raw steps (%s); it starts "
+                  "DISABLED at %u steps/s, %u steps/s2. Navigation stays synthetic.",
+             s.drive_ok ? "initialised" : "INIT FAILED", (unsigned)BENCH_DRIVE_CRUISE_HZ, (unsigned)BENCH_DRIVE_ACCEL_SS);
+#else
     const truing_ramp_profile_t prof = { 1000000u, k_roller_calibration.max_step_hz, k_roller_calibration.accel_steps_s2 };
     s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &prof, k_roller_calibration.microsteps);
     if (!truing_roller_calibration_valid(&k_roller_calibration)) {
@@ -182,6 +199,7 @@ static void roller_drive_init_once(void)
                  (unsigned long)k_roller_calibration.max_step_hz, (unsigned long)k_roller_calibration.accel_steps_s2,
                  k_roller_calibration.evidence != NULL ? k_roller_calibration.evidence : "?");
     }
+#endif
 }
 #endif
 
@@ -225,10 +243,12 @@ static void wire_acquisition(bool automatic)
             }
         }
     } else {
+#if TRUING_ROLLER_NAV
         if (s.drive_ok) {
             /* Manual path on the roller image: a person turns the wheel, so the coils let go. */
             truing_wheel_drive_enable(&s.drive, false, NULL);
         }
+#endif
         truing_runout_manual_init(&s.runout, &s.rctx, s.clock);
         truing_navigation_manual_init(&s.nav, &s.nctx, s.clock, 32u, 32u, &s.machine);
     }
@@ -272,6 +292,31 @@ bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *
     (void)words;
     (void)n_words;
     (void)input;
+    return false;
+#endif
+}
+
+bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
+{
+#if TRUING_BENCH_DRIVE
+    if (out == NULL || !s.drive_ok) {
+        return false;
+    }
+    /* Plain reads of the driver's own fields: this runs on the HTTP task, so it must not call fault(),
+     * which samples DIAG and can latch a fault / halt pulses. DIAG is reported raw beside it. */
+    const truing_wheel_drive_tmc2209_ctx_t *c = &s.drive_ctx;
+    out->enabled = c->enabled;
+    out->moving = c->moving;
+    out->faulted = c->faulted;
+    out->fault_detail = c->fault_detail;
+    out->diag_high = truing_wheel_drive_tmc2209_diag_level(c);
+    out->uart_ok = c->uart_ok;
+    out->position_steps = c->position;
+    out->max_step_hz = c->profile.max_step_hz;
+    out->accel_steps_s2 = c->profile.accel_steps_s2;
+    return true;
+#else
+    (void)out;
     return false;
 #endif
 }
@@ -655,6 +700,12 @@ static void demo_task(void *arg)
         ESP_LOGW(TAG, "CAMPAIGN DEBUG BUILD: the debug channel is enabled (SPEC 12.5). Bench "
                       "characterization only, never the demonstration script.");
     }
+#if TRUING_BENCH_DRIVE
+    /* Brought up DISABLED and handed to the debug channel only: navigation stays synthetic, so nothing
+     * in a session can move it. A drive that failed to initialise is not handed over (DRIVE_* refused). */
+    roller_drive_init_once();
+    deps.bench_drive = s.drive_ok ? &s.drive : NULL;
+#endif
     /* The interface structs are re-initialised IN PLACE when the path changes, so these
      * pointers stay valid and keep pointing at whichever implementation is wired now. */
     s.deps = deps;
