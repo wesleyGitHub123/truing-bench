@@ -240,7 +240,8 @@ def roller_beat_line(d, hist):
     if d.get("diag_high"):
         warn.append("DIAG high")
     seen = ["%s x%d" % (f, n) for f, n in sorted(hist.items()) if not f.startswith("_")]
-    level = "!! CRITICAL" if severe else "!  WARN    " if warn else "OK         "
+    level = ("!! CRITICAL" if severe else "!  WARN    " if warn else
+             "no driver  " if cur == "UART silent" else "OK         ")   # never answered: nothing to call OK
     tail = ", ".join(severe + warn + notes)
     return "  roller  %s %s %s %s%s%s" % (level, state, pos, cur, "  <- " + tail if tail else "",
                                           "   (seen " + ", ".join(seen) + ")" if seen else "")

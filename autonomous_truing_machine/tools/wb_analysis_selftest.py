@@ -165,6 +165,7 @@ def check_roller_beat_line():
     # a driver that never answered is just "UART silent"; one that answered and stopped is critical news
     silent = dict(base, drv_ok=False)
     assert "UART silent" in wb.roller_beat_line(silent, {}) and "CRITICAL" not in wb.roller_beat_line(silent, {})
+    assert "no driver" in wb.roller_beat_line(silent, {}) and " OK " not in wb.roller_beat_line(silent, {})
     h = {}
     wb.roller_beat_line(dict(base), h)
     assert "CRITICAL" in wb.roller_beat_line(silent, h) and "UART lost" in wb.roller_beat_line(silent, h)
