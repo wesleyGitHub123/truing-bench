@@ -298,19 +298,74 @@ def truing_networks():
     return names
 
 
+def visible_board_keys():
+    """{ssid: passphrase} for the truing boards in range. The firmware derives both from the softAP MAC
+    (src/net_transport.c): ssid truing-<mac3..5>, passphrase truing-<mac2..5>, and the BSSID is that MAC."""
+    import re
+    import subprocess
+    try:
+        out = subprocess.run(["netsh", "wlan", "show", "networks", "mode=bssid"], capture_output=True, text=True,
+                             timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    keys = {}
+    for block in re.split(r"(?m)^SSID \d+ :", out)[1:]:
+        m = re.match(r"\s*(truing-[0-9a-f]{6})\b", block)
+        b = re.search(r"BSSID \d+\s*:\s*((?:[0-9a-f]{2}:){5}[0-9a-f]{2})", block, re.I)
+        if m and b:
+            mac = b.group(1).lower().split(":")
+            if "".join(mac[3:6]) == m.group(1)[-6:]:          # only when the BSSID really is the softAP MAC
+                keys[m.group(1)] = "truing-" + "".join(mac[2:6])
+    return keys
+
+
+def save_board_profile(ssid, passphrase):
+    """Add a Windows Wi-Fi profile for a board this PC has not met before. True if netsh took it."""
+    import os
+    import subprocess
+    import tempfile
+    from xml.sax.saxutils import escape
+    xml = ('<?xml version="1.0"?><WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">'
+           "<name>%s</name><SSIDConfig><SSID><name>%s</name></SSID></SSIDConfig><connectionType>ESS</connectionType>"
+           "<connectionMode>manual</connectionMode><MSM><security><authEncryption><authentication>WPA2PSK"
+           "</authentication><encryption>AES</encryption><useOneX>false</useOneX></authEncryption><sharedKey>"
+           "<keyType>passphrase</keyType><protected>false</protected><keyMaterial>%s</keyMaterial></sharedKey>"
+           "</security></MSM></WLANProfile>") % (escape(ssid), escape(ssid), escape(passphrase))
+    fd, path = tempfile.mkstemp(suffix=".xml")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(xml)
+        r = subprocess.run(["netsh", "wlan", "add", "profile", "filename=" + path], capture_output=True, text=True,
+                           timeout=20)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        os.unlink(path)
+
+
 def ensure_board(host, wait_s=90.0, say=print):
     """Get this PC talking to the board with no manual steps: if it does not answer, join its Wi-Fi
-    (truing-xxxxxx, a saved Windows profile) and wait for it to boot. True once /id answers."""
+    (truing-xxxxxx) and wait for it to boot. A board this PC has never joined gets its profile made from
+    the AP's own MAC. With several boards in range each is tried in turn. True once /id answers."""
     if board_answers(host):
         return True
     import subprocess
     t_end = time.time() + wait_s
     say("   the board is not answering: joining its Wi-Fi and waiting for it (a fresh boot takes ~30 s)")
-    last_join = 0.0
+    last_join, attempt = 0.0, 0
     while time.time() < t_end:
         if time.time() - last_join > 15.0:
             last_join = time.time()
-            for name in truing_networks()[:1]:
+            keys = visible_board_keys()
+            names = [n for n in truing_networks() if n in keys] or truing_networks()   # in range first
+            saved = subprocess.run(["netsh", "wlan", "show", "profiles"], capture_output=True, text=True).stdout
+            for n in keys:
+                if n not in saved and save_board_profile(n, keys[n]):
+                    say("   new board %s: saved its Wi-Fi profile" % n)
+            if names:
+                name = names[attempt % len(names)]
+                attempt += 1
                 try:
                     subprocess.run(["netsh", "wlan", "connect", "name=" + name], capture_output=True, timeout=20)
                 except (OSError, subprocess.SubprocessError):
