@@ -19,6 +19,7 @@
 #include "truing_fixtures/acoustic_golden.h"
 #include "truing_fixtures/fixtures.h"
 #include "truing_hal/acoustic_real.h"
+#include "truing_hal/audio_liveness.h"
 #include "truing_hal/audio_source_if.h"
 #include "truing_hal/clock_if.h"
 
@@ -126,13 +127,21 @@ void truing_bringup_acoustic_section(int *pass, int *fail, bool *ok_out)
                       "dc %.2e | rms %.2e (%.1f dBFS)",
                  mic_name, truing_audio_result_str(r), got, (long long)(dt / 1000), icfg.pre_trigger_words, nonzero, (long)vmin, (long)vmax,
                  mean, rms, rms > 0.0 ? 20.0 * log10(rms) : -999.0);
-        if (nonzero == 0u) {
-            ESP_LOGW(TAG, "  %s: every captured word is zero: no microphone signal on GPIO %d. The transducer is NOT verified by this run.",
-                     mic_name, BOARD_I2S_MIC_DIN_GPIO);
-        } else if (nonzero < got / 2u || vmin == vmax) {
-            ESP_LOGW(TAG, "  the capture is not a plausible microphone signal (constant or mostly zero). Transducer NOT verified.");
+        /* "Nonzero" is not "alive": a data line nobody drives sits at 0 or at -1 and picks up mains glitches
+         * that can reach full scale. The test is whether the samples scatter (truing_hal/audio_liveness.h). */
+        truing_audio_liveness_t lv;
+        truing_audio_liveness(buf, got, &lv);
+        if (lv.stuck) {
+            ESP_LOGW(TAG, "  %s: the data line sits on one value (%ld, %s) in %" PRIu32 " of %" PRIu32 " samples, %" PRIu32 " at full scale: "
+                          "nothing is driving GPIO %d (unpowered, unclocked or not wired). The transducer is NOT verified by this run.",
+                     mic_name, (long)lv.mode, lv.mode == 0 ? "line low" : (lv.mode == -1 ? "line high" : "a constant"),
+                     lv.mode_count, lv.n, lv.rails, BOARD_I2S_MIC_DIN_GPIO);
+        } else if (lv.rails != 0u) {
+            ESP_LOGW(TAG, "  %s: a live signal, but it hits full scale %" PRIu32 " times (clipping, or pickup); check the level.",
+                     mic_name, lv.rails);
         } else {
-            ESP_LOGI(TAG, "  a live signal is present; whether it is an INMP441 at a spoke is a matter of the bench, not this check.");
+            ESP_LOGI(TAG, "  %s: a live signal is present; whether it is an INMP441 at a spoke is a matter of the bench, not this check.",
+                     mic_name);
         }
         heap_caps_free(buf);
     }

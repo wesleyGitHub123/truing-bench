@@ -105,11 +105,14 @@ saved shot records whether the coils were energised. The roller demo's navigatio
 (`s3_devkit_fastdemo_roller`).
 
 The bring-up log prints a separate liveness line for the `LEFT-station mic` and the
-`RIGHT-station mic`. A line that is all zeros means that mic is dead or its L/R strap is wrong. **The
-bring-up check only tests "nonzero", which is not "alive"**: a data line that nobody drives can also sit at
-`-1` (every bit high), and the check calls that a live signal. Use the heartbeat below instead.
+`RIGHT-station mic`. Since the liveness fix it applies the same rule as the heartbeat below: a mic is
+alive when its samples scatter, and a data line stuck on one value (0 when low, -1 when high, with or
+without mains glitches on it) is reported as not driven, naming the value. A dead mic is a warning, not a
+bring-up failure. `truing_hal/audio_liveness.h` holds the rule, and the heartbeat's `mic_health()` in
+`tools/wb_analysis.py` is its host twin.
 
-`GET /id` should report `"mode":"fastdemo+inmp441x2+campaign"`. Join the board's AP, then:
+`GET /id` should report `"mode":"fastdemo+inmp441x2+campaign"` (`...+campaign+drive` on the lab image).
+Join the board's AP, then:
 
     python tools/workbench.py --heartbeat                 # live mic check, nothing saved; Ctrl+C stops
     python tools/workbench.py --session <tag>             # resumes a session with the same tag
@@ -133,6 +136,20 @@ mic to confirm it.
   its numbers.
 - **Both mics DEAD at once** points at something they share: the SD, SCK or WS wire, or 3.3V/GND. It is
   unlikely to be the two mics failing together.
+
+### Listening check (`listen`, inside a session)
+
+    listen                 # 10 s from the current spoke's mic, then plays it
+    listen 20 right        # 20 s (1..30) from the RIGHT mic
+
+A capture is only 1.2 s. `listen` streams the mic live from the board's ring for as long as you ask
+(`GET /debug/listen.pcm?s=<seconds>&station=<0|1>`) and saves one long `.norm.wav` and the raw `.pcm` as
+`listen_NN_<LEFT|RIGHT>` in the session folder. The wav is peak-normalised, so it sounds loud whatever the
+real level: for ears only. The verdict line says ALIVE/DEAD and the rms level. Use it to compare mics by ear
+on the same track at the same volume and distance. Nothing is analysed and nothing is added to the shots.
+The board serves nothing else while it streams (a ~20 s pause for the heartbeat and `/id`), and a second
+listener is refused. If the stream ends early it says so instead of splicing over a gap. The Wi-Fi is the
+limit: the PC may need `netsh wlan connect name=truing-xxxxxx` first if it dropped off the AP.
 
 This runs with the system `python` (numpy and matplotlib). Sessions are written to
 `test/fixtures/acoustic/captures/_explore/wb_<date>_<tag>/`, which is gitignored and exists only on
