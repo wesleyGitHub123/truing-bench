@@ -554,6 +554,7 @@ MENU = """
   ctrl [n]         n silent captures, saved        pluck [n]   cued hand pluck, saved
   fire [n]         solenoid strikes (needs solenoids wired and enabled in the firmware)
   roll [...]       the roller, lab image only: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`
+  listen [s]       record the mic live for s seconds (up to 30) and play it: the ear / wiring check
   play local|far   listen to the last shot         view        reopen its figure
   ls               shots so far                    report      write report.md for the session
   knobs            current set-up                  guide       the full experiment loop
@@ -718,6 +719,51 @@ class Workbench(cmd.Cmd):
 
     do_heartbeat = do_mic
     do_hb = do_mic
+
+    def do_listen(self, arg):
+        """listen [seconds] [left|right]: record the mic live for as long as you like (1..30 s, default 10) and
+        play it back. A capture is only 1.2 s; this streams the board's microphone ring instead. It is a
+        wiring/ear check: nothing is analysed and nothing is added to the shots. The .pcm and a
+        peak-normalised .wav (levels NOT real) land in the session folder."""
+        if self.offline:
+            raise ValueError("offline session: no board")
+        seconds, station = 10, cr.station_for_spoke(int(self.s.knobs["spoke"]))
+        for tok in arg.split():
+            if tok.lower() in ("left", "right"):
+                station = tok.upper()
+            else:
+                seconds = int(tok)
+        if not 1 <= seconds <= 30:
+            raise ValueError("seconds must be 1..30")
+        host = self.s.knobs["host"]
+        n = len(glob.glob(os.path.join(self.s.dir, "listen_*.pcm"))) + 1
+        base = os.path.join(self.s.dir, "listen_%02d_%s" % (n, station))
+        url = "http://%s/debug/listen.pcm?s=%d&station=%d" % (host, seconds, 0 if station == "LEFT" else 1)
+        self._drop_ws()
+        print("   recording the %s mic for %d s -- make your noise now (the board serves nothing else meanwhile)"
+              % (station, seconds))
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=seconds + 15) as r:
+                data = r.read()
+        except urllib.error.HTTPError as e:
+            raise ValueError("the board refused: %s %s" % (e.code, e.read().decode(errors="replace")[:120]))
+        except OSError as e:
+            raise ValueError(UNREACHABLE % (host,) + " (%s)" % e)
+        words = np.frombuffer(data[:len(data) // 4 * 4], dtype="<i4")
+        if words.size == 0:
+            raise ValueError("no samples came back -- is this the lab/dual-mic image? (`roll` should work too)")
+        with open(base + ".pcm", "wb") as f:
+            f.write(words.tobytes())
+        write_listening_wav(base + ".norm.wav", words)
+        h = wa.mic_health(words)
+        got = words.size / float(wa.FS)
+        print("   %s mic: %.1f of %d s recorded, %s%s" % (
+            station, got, seconds, h["state"], "" if h["rms_dbfs"] is None else "  %.1f dBFS rms" % h["rms_dbfs"]))
+        if got < seconds - 0.5:
+            print("   !! it ended early: the board could not keep the stream going (Wi-Fi too slow?); try again")
+        print("   file:", base + ".norm.wav")
+        play(base + ".norm.wav")
 
     def do_menu(self, arg):
         """The common commands."""
