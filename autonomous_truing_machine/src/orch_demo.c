@@ -32,6 +32,7 @@
 #include "truing_orch/auto_operator.h"
 #include "truing_orch/orchestrator.h"
 #include "roller_calibration.h"
+#include "truing_hal/tmc2209_frame.h"
 #include "wheel_drive_tmc2209.h"
 
 static const char *TAG = "orch_demo";
@@ -360,6 +361,25 @@ bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
     out->position_steps = c->position;
     out->max_step_hz = c->profile.max_step_hz;
     out->accel_steps_s2 = c->profile.accel_steps_s2;
+    /* The driver's own registers over the single-wire UART, on this HTTP task: two short reads (a few ms). The
+     * step pulses come from a timer ISR and do not use the UART, so a move is not disturbed. */
+    out->drv_ok = false;
+    out->drv_status = 0u;
+    out->gstat = 0u;
+    out->cs_actual = 0u;
+    out->drv_flags[0] = '\0';
+    if (c->uart_ok) {
+        uint32_t st = 0u, gs = 0u;
+        if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_DRV_STATUS, &st)) {
+            out->drv_ok = true;
+            out->drv_status = st;
+            out->cs_actual = truing_tmc2209_cs_actual(st);
+            /* STST (standstill) is a state, not a fault. */
+            truing_tmc2209_describe_drv_status(st & ~TRUING_TMC2209_DRV_STST, out->drv_flags, sizeof(out->drv_flags));
+            (void)truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_GSTAT, &gs);
+            out->gstat = gs;
+        }
+    }
     return true;
 #else
     (void)out;

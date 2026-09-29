@@ -192,9 +192,15 @@ def drive_line(d):
         flags.append("FAULT 0x%x" % d.get("fault_detail", 0))
     if d.get("diag_high"):
         flags.append("DIAG high")
-    return "  roller                 %-8s %-6s pos %7d steps  %5d steps/s  %6d steps/s2%s" % (
+    if d.get("drv_ok") and d.get("drv_flags", "ok") != "ok":
+        flags.append("driver: " + d["drv_flags"])
+    if d.get("drv_ok") and d.get("gstat", 0) & 0x6:
+        flags.append("GSTAT 0x%x" % d["gstat"])
+    drv = ("  driver I %2d/31 %s" % (d.get("cs_actual", 0), d.get("drv_flags", "ok"))) if d.get("drv_ok") else \
+          ("  driver UART silent" if "drv_ok" in d else "")
+    return "  roller                 %-8s %-6s pos %7d steps  %5d steps/s  %6d steps/s2%s%s" % (
         "ENERGISED" if d.get("enabled") else "off", "MOVING" if d.get("moving") else "idle", d.get("position_steps", 0),
-        d.get("max_step_hz", 0), d.get("accel_steps_s2", 0), "  !! " + ", ".join(flags) if flags else "")
+        d.get("max_step_hz", 0), d.get("accel_steps_s2", 0), drv, "  !! " + ", ".join(flags) if flags else "")
 
 
 ROLL_USAGE = ("roll [on | off | stop | zero | <+/-steps> | speed <steps/s> [accel]]  -- `roll` alone shows the state")

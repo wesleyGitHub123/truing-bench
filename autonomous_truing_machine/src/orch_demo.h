@@ -57,6 +57,12 @@ typedef struct {
     int32_t  position_steps;   /* pulses actually emitted since the last zero: commanded, not evidence the wheel moved */
     uint32_t max_step_hz;
     uint32_t accel_steps_s2;
+    /* The driver's own view over UART, read live when the request arrives (false: the UART did not answer). */
+    bool     drv_ok;
+    uint32_t drv_status;       /* DRV_STATUS register */
+    uint32_t gstat;            /* GSTAT register: reset / drv_err / uv_cp latches */
+    unsigned cs_actual;        /* motor current the driver is actually applying, 0..31 */
+    char     drv_flags[40];    /* the fault flags set in DRV_STATUS, or "ok" */
 } truing_demo_drive_state_t;
 /* False when this image has no bench drive (or it failed to initialise); `out` is then untouched. */
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out);

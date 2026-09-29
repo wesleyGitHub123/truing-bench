@@ -704,11 +704,16 @@ static esp_err_t drive_json_handler(httpd_req_t *req)
         httpd_resp_set_status(req, "404 Not Found");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no bench drive (init failed)\"}");
     }
-    char body[320];
+    char body[480];
     truing_json_writer_t w;
     truing_json_init(&w, body, sizeof(body));
     truing_json_obj_open(&w, NULL);
     truing_json_str(&w, "schema", "truing.bench.drive/1");
+    truing_json_bool(&w, "drv_ok", d.drv_ok);
+    truing_json_u32(&w, "drv_status", d.drv_status);
+    truing_json_u32(&w, "gstat", d.gstat);
+    truing_json_u32(&w, "cs_actual", d.cs_actual);
+    truing_json_str(&w, "drv_flags", d.drv_flags);
     truing_json_bool(&w, "enabled", d.enabled);
     truing_json_bool(&w, "moving", d.moving);
     truing_json_bool(&w, "faulted", d.faulted);
