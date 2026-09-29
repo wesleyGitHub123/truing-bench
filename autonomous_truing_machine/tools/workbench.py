@@ -349,6 +349,10 @@ def heartbeat(host, timeout=20.0, beats=None):
                 if ws is not None:
                     ws.close()
                     ws = None
+                if isinstance(e, urllib.error.HTTPError):      # it answered, it just is not ready yet
+                    say("%s  the board answered %s: not ready for a capture yet, retrying" % (time.strftime("%H:%M:%S"), e.code))
+                    time.sleep(2)
+                    continue
                 say("%s  lost the board (%s)" % (time.strftime("%H:%M:%S"), e.__class__.__name__))
                 if not ensure_board(host, say=say):
                     time.sleep(3)
