@@ -12,7 +12,7 @@
  * Wiring (board profile, BOARD_WHEEL_DRIVE_*): EN is active low and the driver is held
  * disabled from init until enable(true) -- an external pull-up on EN keeps it disabled through
  * reset as well. DIAG is read as the latched fault line; a pull-down keeps an unconnected DIAG
- * from reading as a fault. UART: TX through ~1 kohm into PDN_UART, RX straight to PDN_UART, so
+ * from reading as a fault. UART: TX through 10 kohm into PDN_UART (1 kohm did not answer on the BTT V1.3), RX straight to PDN_UART, so
  * every byte sent is also received and discarded.
  *
  * The driver never changes the motor CURRENT: that is set by the breakout's VREF (and IRUN,

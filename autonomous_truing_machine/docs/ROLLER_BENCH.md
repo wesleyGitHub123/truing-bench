@@ -45,7 +45,7 @@ Pins are `board_s3_devkit.h`'s `BOARD_WHEEL_DRIVE_*`; nothing else may use them.
 | STEP | GPIO16 | |
 | DIR | GPIO17 | |
 | EN | GPIO18 | active low; **10 kΩ pull-up to 3.3 V** so the driver stays off through boot and reset |
-| PDN_UART | GPIO8 via **1 kΩ**, and GPIO9 direct | single-wire UART; the board hears its own echo |
+| PDN_UART | GPIO8 via **10 kΩ**, joined with GPIO9 at the module's RX pad | single-wire UART; the board hears its own echo. 1 kΩ did not answer on this module; see docs/SUBSYSTEM_BENCH.md |
 | DIAG | GPIO10 | the firmware pulls it down, so unconnected reads "no fault" |
 | VIO | 3.3 V | |
 | GND | GND | **common** with VM's ground |

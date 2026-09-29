@@ -66,7 +66,7 @@ on the roller side moves when the mics and solenoids join it on the same board:
 | roller | GPIO |
 |---|---|
 | STEP / DIR / EN | 16 / 17 / 18 (EN has its 10 kΩ pull-up to 3.3 V) |
-| PDN_UART (optional, dead on the current driver) | 8 via 1 kΩ, and 9 direct |
+| PDN_UART (optional; gives driver status) | 8 via 10 kΩ, joined with 9 at the module's RX pad (docs/SUBSYSTEM_BENCH.md) |
 | DIAG | 10 |
 
 No pin is shared with the mics (4/5/6) or the solenoids (15/21).
