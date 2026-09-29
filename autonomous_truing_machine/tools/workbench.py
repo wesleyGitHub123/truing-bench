@@ -833,6 +833,19 @@ class Workbench(cmd.Cmd):
         n = len(glob.glob(os.path.join(self.s.dir, "burst_*_LEFT.pcm"))) + 1
         base = os.path.join(self.s.dir, "burst_%02d" % n)
         self._drop_ws()
+
+        def beats(label, count):
+            for _ in range(count):
+                try:
+                    lines = []
+                    for slot, raw in quick_channels(host, 20.0):
+                        lines.append(mic_line(SLOT_NAMES.get(slot, slot), wa.mic_health(np.frombuffer(raw, dtype="<i4")), False))
+                    print("   heartbeat %s  %s" % (label, time.strftime("%H:%M:%S")))
+                    print("\n".join(lines))
+                except OSError as e:
+                    print("   heartbeat %s: no answer (%s)" % (label, e.__class__.__name__))
+
+        beats("BEFORE", 3)
         print("   ==== BURST STARTING NOW: %d solenoid shots (%s), %d ms each, one every %d ms, over ~%.1f s ===="
               % (shots, which.upper(), pulse, gap, ms / 1000.0))
         print("   watch or listen: the first shot fires in about 0.4 s. Each one is announced below as it happens.")
@@ -897,6 +910,7 @@ class Workbench(cmd.Cmd):
         else:
             print("   !! a mic went DEAD during the burst: suspect the supply rail or the solenoid wiring")
         print("   files:", base + "_LEFT.norm.wav", "and", base + "_RIGHT.norm.wav")
+        beats("AFTER", 3)
 
     def do_listen(self, arg):
         """listen [seconds] [left|right]: record the mic live for as long as you like (1..30 s, default 10) and
