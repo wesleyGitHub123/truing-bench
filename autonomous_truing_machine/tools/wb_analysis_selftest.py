@@ -144,6 +144,34 @@ def check_roll_parsing():
             raise AssertionError("roll %r must be refused" % bad)
 
 
+def check_roller_beat_line():
+    base = {"enabled": False, "moving": False, "faulted": False, "diag_high": False, "position_steps": 0,
+            "drv_ok": True, "drv_flags": "ok", "gstat": 1, "cs_actual": 16}
+    h = {}
+    line = wb.roller_beat_line(dict(base), h)
+    assert "OK" in line and "!!" not in line and "seen" not in line and "I 16/31" in line
+    # a transient warning names itself, and is still remembered on the next healthy beat
+    line = wb.roller_beat_line(dict(base, drv_flags="OLB"), h)
+    assert "WARN" in line and "driver OLB" in line and "OLB x1" in line
+    line = wb.roller_beat_line(dict(base), h)
+    assert "OK" in line and "seen OLB x1" in line
+    # severe flags and latched conditions are critical
+    assert "CRITICAL" in wb.roller_beat_line(dict(base, drv_flags="OT,OTPW"), {})
+    assert "CRITICAL" in wb.roller_beat_line(dict(base, drv_flags="S2GA"), {})
+    assert "CRITICAL" in wb.roller_beat_line(dict(base, faulted=True, fault_detail=2), {})
+    assert "CRITICAL" in wb.roller_beat_line(dict(base, gstat=0x4), {})
+    assert "OK" in wb.roller_beat_line(dict(base, gstat=0x1), {})      # the power-up reset latch alone is normal
+    assert "WARN" in wb.roller_beat_line(dict(base, diag_high=True), {})
+    # a driver that never answered is just "UART silent"; one that answered and stopped is critical news
+    silent = dict(base, drv_ok=False)
+    assert "UART silent" in wb.roller_beat_line(silent, {}) and "CRITICAL" not in wb.roller_beat_line(silent, {})
+    h = {}
+    wb.roller_beat_line(dict(base), h)
+    assert "CRITICAL" in wb.roller_beat_line(silent, h) and "UART lost" in wb.roller_beat_line(silent, h)
+    assert "UART back" in wb.roller_beat_line(dict(base), h)
+    assert "UART back" not in wb.roller_beat_line(dict(base), h)
+
+
 def check_describe_reject():
     assert "no bench drive" in wb.describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "NOT_IMPLEMENTED"})
     assert "roll on" in wb.describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "SENSOR_TIMEOUT"})
@@ -203,7 +231,7 @@ def check_reference_resolution():
 
 def main():
     for fn in (check_line_level, check_localization, check_shared_lines, check_line_presence, check_mic_health,
-               check_drive_args, check_roll_parsing, check_describe_reject,
+               check_drive_args, check_roll_parsing, check_roller_beat_line, check_describe_reject,
                check_repeatability, check_far_fetch, check_reference_resolution):
         fn()
         print("  ok  %s" % fn.__name__)

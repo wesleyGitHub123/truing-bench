@@ -203,6 +203,49 @@ def drive_line(d):
         d.get("max_step_hz", 0), d.get("accel_steps_s2", 0), drv, "  !! " + ", ".join(flags) if flags else "")
 
 
+SEVERE_FLAGS = {"OT", "S2GA", "S2GB", "S2VSA", "S2VSB"}   # driver shut down or about to: stop and look
+WARN_FLAGS = {"OTPW", "OLA", "OLB"}                        # pre-warning / open load: watch, may be transient
+
+
+def roller_beat_line(d, hist):
+    """One short line for the mic heartbeat: what matters about the roller and nothing else. Healthy is quiet
+    (`OK`); a warning or a critical state says so first and names the cause. `hist` (a dict the caller keeps)
+    counts each driver flag seen so far, because the board reads them live and a transient between beats
+    would otherwise vanish: `seen OLB x2` stays on the line."""
+    import re
+    state = "%s %s" % ("ON " if d.get("enabled") else "off", "MOVING" if d.get("moving") else "idle")
+    pos = "pos %d" % d.get("position_steps", 0)
+    severe, warn, notes = [], [], []
+    if d.get("faulted"):
+        severe.append("FAULT LATCHED 0x%x" % d.get("fault_detail", 0))
+    if "drv_ok" not in d:
+        cur = ""
+    elif d["drv_ok"]:
+        cur = "I %d/31" % d.get("cs_actual", 0)
+        flags = set(re.findall(r"[A-Z0-9]+", d.get("drv_flags", "ok"))) - {"ok", "OK"}
+        for f in sorted(flags):
+            hist[f] = hist.get(f, 0) + 1
+        severe += ["driver " + f for f in sorted(flags & SEVERE_FLAGS)]
+        warn += ["driver " + f for f in sorted(flags & WARN_FLAGS)]
+        if d.get("gstat", 0) & 0x6:
+            severe.append("driver latched GSTAT 0x%x (drv_err/uv_cp)" % d["gstat"])
+        if hist.pop("_uart_lost", None):
+            notes.append("UART back")
+        hist["_uart_ok"] = True
+    else:
+        cur = "UART silent"
+        if hist.get("_uart_ok"):                         # it answered before and stopped: that is news
+            severe.append("driver UART lost")
+            hist["_uart_lost"] = True
+    if d.get("diag_high"):
+        warn.append("DIAG high")
+    seen = ["%s x%d" % (f, n) for f, n in sorted(hist.items()) if not f.startswith("_")]
+    level = "!! CRITICAL" if severe else "!  WARN    " if warn else "OK         "
+    tail = ", ".join(severe + warn + notes)
+    return "  roller  %s %s %s %s%s%s" % (level, state, pos, cur, "  <- " + tail if tail else "",
+                                          "   (seen " + ", ".join(seen) + ")" if seen else "")
+
+
 ROLL_USAGE = ("roll [on | off | stop | zero | <+/-steps> | speed <steps/s> [accel]]  -- `roll` alone shows the state")
 
 
@@ -411,7 +454,7 @@ def heartbeat(host, timeout=20.0, beats=None):
 
     say(HEARTBEAT_HELP)
     ensure_board(host, say=say)
-    ws, seq, beat, peaks, tap_run = None, 0, 0, {}, {}
+    ws, seq, beat, peaks, tap_run, roller_hist = None, 0, 0, {}, {}, {}
     quick = True                                          # the live stream; falls back to captures on an old image
     try:
         while beats is None or beat < beats:
@@ -473,7 +516,7 @@ def heartbeat(host, timeout=20.0, beats=None):
             except (OSError, ValueError):
                 drv = None
             if drv is not None:                           # the lab image: the roller's state beside the mics
-                say(drive_line(drv))
+                say(roller_beat_line(drv, roller_hist))
     except KeyboardInterrupt:
         say("\nheartbeat stopped")
     finally:
