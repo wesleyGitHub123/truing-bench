@@ -62,12 +62,34 @@ today.
     python tools/flash.py s3_devkit_fastdemo_mic_dualmic
 
 The bring-up log prints a separate liveness line for the `LEFT-station mic` and the
-`RIGHT-station mic`. A line that is all zeros means that mic is dead or its L/R strap is wrong.
+`RIGHT-station mic`. A line that is all zeros means that mic is dead or its L/R strap is wrong. **The
+bring-up check only tests "nonzero", which is not "alive"**: a data line that nobody drives can also sit at
+`-1` (every bit high), and the check calls that a live signal. Use the heartbeat below instead.
 
 `GET /id` should report `"mode":"fastdemo+inmp441x2+campaign"`. Join the board's AP, then:
 
+    python tools/workbench.py --heartbeat                 # live mic check, nothing saved; Ctrl+C stops
     python tools/workbench.py --session <tag>             # resumes a session with the same tag
     python tools/workbench.py --session <tag> --offline   # no board: references, import, analysis, report
+
+### Mic heartbeat (`--heartbeat`, or `mic` inside a session)
+
+This takes one silent capture every ~3 s and prints one line per mic. Run it while you wire, and tap each
+mic to confirm it.
+
+| state | meaning |
+|---|---|
+| `ALIVE` | The samples scatter the way a powered mic's self-noise does. A quiet room reads about −90 to −60 dBFS rms. |
+| `DEAD` | The data line sits on one value. That mic is unpowered, unclocked (SCK/WS not reaching it), or not on GPIO6. |
+| `CLIPPING` | The mic is live but hitting full scale: too loud or too close. |
+
+- **Tap test:** tap a mic. Its bar should jump and show `<< TAP`, and the other mic's line should not.
+- **Don't trust a spectrum on a DEAD channel.** A floating wire picks up mains hum and flips level now and
+  then. Those flips reach full scale and produce a comb of "lines" at multiples of ~120 Hz, and the
+  board's DSP will even report a peak on them. Every saved shot prints the same ALIVE/DEAD verdict above
+  its numbers.
+- **Both mics DEAD at once** points at something they share: the SD, SCK or WS wire, or 3.3V/GND. It is
+  unlikely to be the two mics failing together.
 
 This runs with the system `python` (numpy and matplotlib). Sessions are written to
 `test/fixtures/acoustic/captures/_explore/wb_<date>_<tag>/`, which is gitignored and exists only on
