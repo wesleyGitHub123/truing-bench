@@ -35,6 +35,11 @@
  * 4/5/6 and the solenoids on 15/21 share nothing with STEP/DIR/EN 16/17/18, UART 8/9 and DIAG 10.
  * Change a roller pin only with a bench entry; move the mics or solenoids instead.
  *
+ * FROZEN FOR THE DEMO (user, 2026-09-29): this whole map -- mics 4/5/6, solenoids 15/21, roller
+ * 16/17/18 + UART 8/9 + DIAG 10, index sensor 7 -- is expected to be the final deployed demo wiring.
+ * Do not move a pin without telling the user. Still unproven on this board: the solenoid pins (B0
+ * electrical check pending) and the roller UART (never answered on this driver).
+ *
  * Wheel Navigation subsystem (SPEC §10A) — owns these pins exclusively.
  * Index / reference sensor input. */
 #define BOARD_INDEX_SENSOR_GPIO        7
