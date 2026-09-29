@@ -92,8 +92,8 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "driver/usb_serial_jtag.h"
-#include "driver/usb_serial_jtag_vfs.h"
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
@@ -196,10 +196,20 @@ static void delay_ms_precise(uint32_t ms)
     }
 }
 
+/* Keys arrive on UART0 -- the DevKit's CH343 bridge port, the same single cable the roller sketch and the
+ * lab image use -- not on the native USB port (2026-09-29: the sketch used to read USB-Serial/JTAG, which
+ * needs a second cable and a second COM port). The Nano's native-USB-only console is gone with the Nano. */
+#define CONSOLE UART_NUM_0
+
+static bool key_read(uint8_t *c, TickType_t wait)
+{
+    return uart_read_bytes(CONSOLE, c, 1, wait) == 1;
+}
+
 static void flush_input(void)
 {
     uint8_t c;
-    while (usb_serial_jtag_read_bytes(&c, 1, 0) > 0) {
+    while (key_read(&c, 0)) {
     }
 }
 
@@ -376,7 +386,7 @@ static void alternating_run(void)
         ESP_LOGI(TAG, "run shot %d/%d -> %s", i, RUN_SHOTS, left ? "LEFT" : "RIGHT");
         fire(left ? &g_left : &g_right, &g_shot);
         uint8_t c;
-        if (i < RUN_SHOTS && usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(RUN_GAP_MS)) > 0) {
+        if (i < RUN_SHOTS && key_read(&c, pdMS_TO_TICKS(RUN_GAP_MS))) {
             ESP_LOGW(TAG, "run aborted after shot %d/%d", i, RUN_SHOTS);
             flush_input();
             return;
@@ -404,7 +414,7 @@ static void vds_check_run(void)
         ESP_LOGI(TAG, "%d/%d: get the meter on %s (GPIO %d) now -- hold starts in %u ms", i, total, ch->name,
                  ch->gpio, (unsigned)VDS_LEADIN_MS);
         uint8_t c;
-        if (usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(VDS_LEADIN_MS)) > 0) {
+        if (key_read(&c, pdMS_TO_TICKS(VDS_LEADIN_MS))) {
             ESP_LOGW(TAG, "V_DS check aborted during lead-in, %d/%d", i, total);
             flush_input();
             return;
@@ -498,9 +508,8 @@ void app_main(void)
 
     ledc_setup();
 
-    usb_serial_jtag_driver_config_t usj = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj));
-    usb_serial_jtag_vfs_use_driver();
+    uart_driver_install(CONSOLE, 256, 0, 0, NULL, 0);
+    uart_vfs_dev_use_driver(CONSOLE);
 
     ESP_LOGI(TAG, "solenoid bench, manual -- LEFT GPIO %d, RIGHT GPIO %d. Nothing fires until a key.",
              LEFT_GPIO, RIGHT_GPIO);
@@ -509,7 +518,7 @@ void app_main(void)
 
     while (1) {
         uint8_t c;
-        if (usb_serial_jtag_read_bytes(&c, 1, portMAX_DELAY) <= 0) {
+        if (!key_read(&c, portMAX_DELAY)) {
             continue;
         }
         switch (c) {
