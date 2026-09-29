@@ -60,9 +60,13 @@
  * SOLENOID_CAMPAIGN.md applied on the Nano: gpio_config() succeeding is not evidence of a
  * solenoid, and a bare pin makes gpio_fire() return true for nothing (SPEC 17.3). */
 #define BOARD_PLUCK_ACTUATOR_LEFT_GPIO     15
+#ifndef BOARD_PLUCK_ACTUATOR_LEFT_PRESENT      /* a one-off test build may pass -D...=1; the default is 0 */
 #define BOARD_PLUCK_ACTUATOR_LEFT_PRESENT  0
+#endif
 #define BOARD_PLUCK_ACTUATOR_RIGHT_GPIO    21
+#ifndef BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT
 #define BOARD_PLUCK_ACTUATOR_RIGHT_PRESENT 0
+#endif
 
 /* Status indication. The DevKitC-1 has only an addressable RGB LED (WS2812 on GPIO38). */
 #define BOARD_HAS_PLAIN_STATUS_LED     0
