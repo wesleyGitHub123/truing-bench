@@ -30,6 +30,7 @@
  *   u          TMC2209 register dump over UART
  *   a          scan UART node addresses 0..3
  *   w          raw UART probe: every byte that comes back after a read request, per node
+ *   M          one + jog while DRV_STATUS is read every ~100 ms (fault flags under moving current)
  *   X          the 'w' check with TX and RX swapped in software (no rewiring)
  *   l          internal loopback: the UART and this code with no wire, plus the RX pin's idle level
  *   m          next microstep setting (written and verified over UART)
@@ -368,6 +369,53 @@ static void move(int32_t steps)
            (double)(esp_timer_get_time() - t0) / 1e6, (long)p1, stop_sent ? " (cut short)" : "");
 }
 
+/* 'M': one forward jog while the driver is asked for DRV_STATUS every ~100 ms, so its fault flags are seen
+ * WHILE the coils carry moving current -- open load (OLA/OLB: a coil wire off or a pair crossed), shorts
+ * (S2GA/B, S2VSA/B), over-temperature (OT/OTPW) -- which a standstill read cannot show. Any key stops it. */
+static void monitored_move(void)
+{
+    truing_reason_t why = TRUING_REASON_NONE;
+    const int32_t p0 = truing_wheel_drive_position_steps(&g_drive);
+    if (truing_wheel_drive_move_relative(&g_drive, g_jog, &why) != TRUING_STATUS_VALID) {
+        printf("monitored move refused ('e' first?)\n");
+        return;
+    }
+    unsigned samples = 0u, flagged = 0u;
+    uint32_t seen = 0u;
+    const int64_t t0 = esp_timer_get_time();
+    int64_t next = t0;
+    while (truing_wheel_drive_is_moving(&g_drive)) {
+        if (esp_timer_get_time() >= next) {
+            next += 100000;
+            uint32_t v = 0u;
+            if (truing_wheel_drive_tmc2209_read(&g_ctx, TRUING_TMC2209_DRV_STATUS, &v)) {
+                char buf[64];
+                truing_tmc2209_describe_drv_status(v & ~TRUING_TMC2209_DRV_STST, buf, sizeof(buf));
+                printf("  t %4lld ms pos %6ld DRV_STATUS 0x%08lx CS_ACTUAL %2u %s\n", (long long)((esp_timer_get_time() - t0) / 1000),
+                       (long)truing_wheel_drive_position_steps(&g_drive), (unsigned long)v, truing_tmc2209_cs_actual(v), buf);
+                samples++;
+                const uint32_t faults = v & (TRUING_TMC2209_DRV_OT | TRUING_TMC2209_DRV_OTPW | TRUING_TMC2209_DRV_S2GA |
+                                             TRUING_TMC2209_DRV_S2GB | TRUING_TMC2209_DRV_S2VSA | TRUING_TMC2209_DRV_S2VSB |
+                                             TRUING_TMC2209_DRV_OLA | TRUING_TMC2209_DRV_OLB);
+                if (faults) {
+                    flagged++;
+                    seen |= faults;
+                }
+            } else {
+                printf("  (no reply mid-move)\n");
+            }
+        }
+        if (key(pdMS_TO_TICKS(5)) >= 0) {
+            truing_wheel_drive_stop(&g_drive);
+        }
+    }
+    char all[64];
+    truing_tmc2209_describe_drv_status(seen, all, sizeof(all));
+    printf("monitored move: %+ld steps, %u samples, %u with a fault flag -> %s\n",
+           (long)(truing_wheel_drive_position_steps(&g_drive) - p0), samples, flagged,
+           flagged ? all : "no fault flags while moving");
+}
+
 static void repeat_test(int32_t sign)
 {
     printf("repeat: %u x %+ld steps, 1 s apart; any key aborts\n", g_repeat, (long)(sign * g_jog));
@@ -477,6 +525,7 @@ void app_main(void)
         case 'w': raw_probe(); break;
         case 'l': loopback_probe(); break;
         case 'X': swapped_probe(); break;
+        case 'M': monitored_move(); break;
         case 'm': next_microsteps(); break;
         case 'i': if (g_irun > 0u) { set_irun(g_irun - 1u); } break;
         case 'I': set_irun(g_irun + 1u); break;
