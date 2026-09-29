@@ -151,3 +151,88 @@ UART probe duly reported `IOIN no reply`. STEP toggled an unconnected GPIO16.
 
 Establishes: the committed driver's pulse count and ramp timing on the real chip. Does **not**
 establish anything about the TMC2209, the motor, the roller or the wheel.
+
+### 2026-09-28 — R1 on a new TMC2209 board: UART dead, STEP/DIR/EN alive, 8 microsteps
+
+Fresh (unused) TMC2209 breakout, motor from a prior project. UART never answered on any of 4 node
+addresses despite verified continuity on every wire (VIO, GND, both data lines with the 1 kΩ
+resistor), MS1/MS2 tied to GND and power-cycled correctly, and both a jumpered and an unjumpered
+RX/TX topology tried. **UART is unresolved and not usable on this board as wired.**
+
+STEP/DIR/EN works: motor turns cleanly once a firmware fault-latch bug was fixed (`b38167a` --
+`enable(true)` wasn't clearing a latched DIAG fault unless the driver had been explicitly
+disabled first; an operator pressing enable again to recover never worked). Jog sizes 1-10 are
+imperceptible by design (a fraction of one microstep's worth of full-step angle); 100+ is visibly
+moving.
+
+**Microsteps confirmed empirically (no UART, so this is the only way): 3200 steps landed on
+exactly 1 full shaft revolution → 3200 / 200 full-steps-per-rev = 16 microsteps.** (Corrected
+from an initial reading of 8/1600 steps.) This is the number to carry forward into
+`roller_calibration.h`'s `microsteps` field, cited to this entry -- not UART-verified, since
+UART doesn't work on this board.
+
+DIAG behaviour was noisy/inconsistent across sessions (0 and 1 seen at various points, both with
+and without VM connected) and not yet understood; not blocking since our fault-latch only trusts
+DIAG while the driver is enabled, and a real fault did latch and correctly halt a move once.
+Revisit if faults start happening during normal operation with nothing actually wrong. One more
+DIAG-high-on-enable instance seen mid-session (2026-09-28 continued, handoff to a second
+operator); cleared on a second `e` press with nothing else touched -- consistent with a transient
+settling condition right after a reset, not a persistent fault. Position was 0 at that point
+(board had reset since the earlier 3200-step measurement), supporting that read.
+
+**DIR sign (R1) -- CONFIRMED: + (the `F`/`f` commands) turns the wheel CCW viewed from Side A**
+(this wheel: a front wheel, rotor side = Side A per SPEC §6.4.1; operator confirmed watching from
+the rotor side). This matches the spec's positive convention directly. **`steps_per_wheel_rev`
+(R3) is recorded positive, no sign flip.** Two repeated +F runs (4s each) landed on identical
++3282 steps every time with no fault -- also a first repeatability data point, informal, not a
+substitute for R4.
+
+**Heat check (R1) -- PASS.** 5 continuous minutes at 3818 steps/s (higher than the original 800
+steps/s default -- picked up somewhere during earlier informal speed exploration; if anything
+this is a more demanding test than R1's baseline asks for). Motor and driver both "decently
+warm" afterward by touch, nothing alarming. Confirmed stopped afterward with no fault
+(1,611,537 total steps this session, 46 moves, 0 refused).
+
+**R1 is now fully closed out:** motor/driver alive and repeatable, 16 microsteps confirmed, DIR
+sign confirmed positive, heat check passed. UART remains unresolved and deferred (not required
+for positioning; see the "let's continue without the UART fix" discussion). Not yet done:
+EN-polarity/DIAG-state table (minor, can fold into R2 notes).
+
+### R2 -- speed/accel envelope (same session, continued)
+
+Motor audibly whines above ~5000 steps/s -- a real signal (approaching torque ceiling or a
+resonance band), not chased further since we don't need top speed, just something that reliably
+finishes a move inside the D4 deadline. Settled on backing off with real margin rather than
+hugging the whine threshold.
+
+**Candidate: 3818 steps/s cruise, 1600 steps/s2 accel.** Confirmed with an 8000-step jog (~2.5
+shaft revs, enough to hold cruise for a real stretch, not just touch it): first attempt faulted
+at 985 steps (still in the acceleration ramp, well before reaching cruise) -- cleared and
+retried identically, and the retry completed the full 8000 steps exactly, no fault, cruise held
+clean throughout. Treating the first fault as another instance of the same intermittent
+transient DIAG behavior already noted above, not a real limitation of this speed/accel pair --
+but this is inference from one retry, not proof; R4 is where repeatability/fault-rate actually
+gets characterized properly.
+
+These are the values proposed for `roller_calibration.h`'s `max_step_hz` / `accel_steps_s2`,
+pending R4 confirming no lost steps over a full repeated-move campaign.
+
+### 2026-09-29 -- R3/R4 paused, motor detached for a mount redesign
+
+This wheel's radial runout leaves the roller out of contact with the rim over part of every
+revolution (dead spots) -- a real loss of drive, not measurement noise, and no amount of
+averaging fixes it. R3's step-per-revolution count would be corrupted by exactly this. The fix is
+mechanical: the roller mount needs compliance (spring-loaded/floating) to follow the rim's radial
+variation, being designed with a teammate. R3, R4 and Gate G1 are paused until that exists (or
+a rounder substitute wheel is found to calibrate against instead).
+
+The motor is now detached from the driver/breadboard for that redesign, so the planned hardware
+check of `navigation_roller` against the real TMC2209 driver (confirming `CALIBRATION_MISSING` is
+correctly refused end-to-end, through the actual orchestrator image rather than the bench sketch)
+did not happen this session -- it needs the motor wired to safely enable the drive. Still open;
+do it once the motor is back, before anything else touches this seam.
+
+R0/R1 remain valid (they characterize the driver/motor/microstep setting, not the wheel). R2's
+candidate speed/accel values remain valid for the same reason. Nothing about the architecture is
+in question -- see the plan file's 2026-09-29 entry for the distinction drawn between the
+software being validated and the mechanism being unproven.
