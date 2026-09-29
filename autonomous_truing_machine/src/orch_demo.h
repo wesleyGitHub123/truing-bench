@@ -36,6 +36,10 @@ bool truing_demo_capture_pending(void);
 /* The other microphone's record of the last capture on a dual-mic build: same frames, never
  * analysed. Guard it with truing_demo_capture_seq() exactly like the capture. False otherwise. */
 bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *input);
+/* Live listening for GET /debug/listen.pcm: start from now, then poll for the station's new samples.
+ * Follows the ring read-only, so it cannot disturb a measurement. False / 0 without a real front end. */
+bool truing_demo_listen_start(uint32_t *pos);
+uint32_t truing_demo_listen_read(uint32_t station, uint32_t *pos, int32_t *out, uint32_t max, uint32_t *lost);
 
 /* The lab image's bench drive (TRUING_BENCH_DRIVE), for GET /debug/drive.json. */
 typedef struct {

@@ -54,6 +54,13 @@ void truing_audio_i2s_capture_report(const truing_audio_source_if_t *self, truin
  * False on a single-input front end, or when the last capture kept none. */
 bool truing_audio_i2s_companion(const truing_audio_source_if_t *self, const int32_t **words, uint32_t *n_words,
                                 uint8_t *input);
+/* Live listening (the workbench's `listen`): follows the ring without touching a capture. Start from
+ * "now" with listen_start, then poll listen_read; it returns up to `max` samples of the station's
+ * microphone, in the same word format as a capture, and adds any samples it had to skip because the
+ * reader fell behind to `*lost`. Read-only on the ring, so a capture is never disturbed. */
+bool truing_audio_i2s_listen_start(const truing_audio_source_if_t *self, uint32_t *pos);
+uint32_t truing_audio_i2s_listen_read(const truing_audio_source_if_t *self, uint32_t station, uint32_t *pos,
+                                      int32_t *out, uint32_t max, uint32_t *lost);
 /* Stops the drain task and deletes the channel. */
 void truing_audio_i2s_deinit(truing_audio_source_if_t *self);
 

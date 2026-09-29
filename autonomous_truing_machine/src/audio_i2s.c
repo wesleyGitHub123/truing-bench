@@ -371,6 +371,24 @@ bool truing_audio_i2s_companion(const truing_audio_source_if_t *self, const int3
     return true;
 }
 
+bool truing_audio_i2s_listen_start(const truing_audio_source_if_t *self, uint32_t *pos)
+{
+    const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
+    if (c == NULL || pos == NULL || !c->open || !c->stats.running) return false;
+    *pos = c->ring.head;
+    return true;
+}
+
+uint32_t truing_audio_i2s_listen_read(const truing_audio_source_if_t *self, uint32_t station, uint32_t *pos,
+                                      int32_t *out, uint32_t max, uint32_t *lost)
+{
+    const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;
+    if (c == NULL || station > 1u || !c->open) return 0u;
+    /* Two inputs: the station's own slot. One input: the only ring there is. */
+    const uint32_t input = c->n_inputs == 2u ? c->cfg.station_input[station] : 0u;
+    return truing_audio_ring_read_since(&c->ring, input, pos, max, out, lost);
+}
+
 void truing_audio_i2s_stats(const truing_audio_source_if_t *self, truing_audio_i2s_stats_t *out)
 {
     const i2s_ctx_t *c = self != NULL ? (const i2s_ctx_t *)self->ctx : NULL;

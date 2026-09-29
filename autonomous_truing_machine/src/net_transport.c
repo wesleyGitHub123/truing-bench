@@ -2,6 +2,7 @@
 #include "net_transport.h"
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -20,6 +21,7 @@
 #include "esp_timer.h"
 #include "build_mode.h"
 #include "firmware_version.h"
+#include "truing/limits.h"
 #include "truing_proto/json.h"
 #include "truing_proto/wire.h"
 #include "web_ui.h"
@@ -584,6 +586,64 @@ static esp_err_t capture_far_pcm_handler(httpd_req_t *req)
 }
 #endif
 
+#if TRUING_CAMPAIGN_DEBUG && TRUING_REAL_FRONT_END
+#define LISTEN_MAX_SECONDS 30u
+/* GET /debug/listen.pcm?s=<seconds>&station=<0|1>: the station's microphone, live, for `s` seconds
+ * (1..30), as raw capture words (little-endian int32, 48 kHz) -- what the workbench's `listen` turns
+ * into one long listening wav. A capture is bounded to a 1.2 s window by the acoustic chain; this
+ * follows the ring instead, so it is as long as asked. Read-only on the ring, so it cannot disturb a
+ * measurement, but it occupies the server for its whole length: nothing else is served meanwhile,
+ * and a second listener is refused. Samples the reader could not keep up with are counted, not
+ * hidden: the response ends early rather than splicing across a gap. */
+static esp_err_t listen_pcm_handler(httpd_req_t *req)
+{
+    static bool busy;
+    static int32_t buf[1024];
+    char q[48], v[12];
+    uint32_t seconds = 5u, station = 0u;
+    no_store(req);
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        if (httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK) seconds = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "station", v, sizeof(v)) == ESP_OK) station = (uint32_t)strtoul(v, NULL, 10);
+    }
+    if (seconds < 1u || seconds > LISTEN_MAX_SECONDS || station > 1u) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"s must be 1..30 and station 0 or 1\"}");
+    }
+    uint32_t pos = 0u, lost = 0u;
+    if (busy || !truing_demo_listen_start(&pos)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, busy ? "{\"ok\":false,\"detail\":\"already listening\"}"
+                                            : "{\"ok\":false,\"detail\":\"no live front end\"}");
+    }
+    busy = true;
+    httpd_resp_set_type(req, "application/octet-stream");
+    const uint32_t want = seconds * TRUING_AUDIO_SAMPLE_RATE_HZ;
+    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)seconds + 3) * 1000000;
+    uint32_t sent = 0u;
+    esp_err_t rc = ESP_OK;
+    while (sent < want && rc == ESP_OK && lost == 0u && esp_timer_get_time() < deadline_us) {
+        const uint32_t room = want - sent;
+        const uint32_t n = truing_demo_listen_read(station, &pos, buf, room < 1024u ? room : 1024u, &lost);
+        if (n == 0u) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        rc = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)(n * sizeof(int32_t)));
+        sent += n;
+    }
+    busy = false;
+    if (lost != 0u) {
+        ESP_LOGW(TAG, "listen ended early at %" PRIu32 " of %" PRIu32 " samples: the reader fell %" PRIu32 " behind",
+                 sent, want, lost);
+    }
+    if (rc != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+#endif
+
 #if TRUING_BENCH_DRIVE
 /* GET /debug/drive.json: the lab image's bench drive, read-only (control is the DRIVE_* debug codes
  * over /ws). Plain reads of the driver's fields -- see truing_demo_bench_drive_state(). */
@@ -799,6 +859,13 @@ bool truing_net_start(void)
                                              .handler = capture_far_pcm_handler };
     if (httpd_register_uri_handler(s_server, &cap_far_uri) != ESP_OK) {
         ESP_LOGW(TAG, "far-mic dump endpoint not registered; /debug/capture_far.pcm will 404");
+    }
+#endif
+#if TRUING_CAMPAIGN_DEBUG && TRUING_REAL_FRONT_END
+    static const httpd_uri_t listen_uri = { .uri = "/debug/listen.pcm", .method = HTTP_GET,
+                                            .handler = listen_pcm_handler };
+    if (httpd_register_uri_handler(s_server, &listen_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "listen endpoint not registered; /debug/listen.pcm will 404");
     }
 #endif
 #if TRUING_BENCH_DRIVE

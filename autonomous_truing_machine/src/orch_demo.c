@@ -296,6 +296,30 @@ bool truing_demo_far_capture(const int32_t **words, uint32_t *n_words, uint8_t *
 #endif
 }
 
+bool truing_demo_listen_start(uint32_t *pos)
+{
+#if TRUING_REAL_FRONT_END
+    return truing_audio_i2s_listen_start(&s.audio, pos);
+#else
+    (void)pos;
+    return false;
+#endif
+}
+
+uint32_t truing_demo_listen_read(uint32_t station, uint32_t *pos, int32_t *out, uint32_t max, uint32_t *lost)
+{
+#if TRUING_REAL_FRONT_END
+    return truing_audio_i2s_listen_read(&s.audio, station, pos, out, max, lost);
+#else
+    (void)station;
+    (void)pos;
+    (void)out;
+    (void)max;
+    (void)lost;
+    return 0u;
+#endif
+}
+
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
 {
 #if TRUING_BENCH_DRIVE
