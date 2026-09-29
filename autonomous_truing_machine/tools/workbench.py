@@ -6,6 +6,7 @@ without a later registered run. Operator manual: tools/WORKBENCH.md.
 
     python tools/workbench.py --session micpos1            # against the board (join its AP first)
     python tools/workbench.py --session micpos1 --offline  # analysis, references and report only
+    python tools/workbench.py --heartbeat                  # live check of both mics, nothing saved
 
 Image: nano_esp32_fastdemo_mic_dualmic (both mics). The single-mic campaign image also works; shots then
 have no far channel and localization is unavailable.
@@ -28,9 +29,13 @@ import sys
 import threading
 import time
 import urllib.error
+import warnings
 import wave
 
 import numpy as np
+
+# a dead channel is all zeros, and matplotlib's spectrogram takes log10 of it
+warnings.filterwarnings("ignore", message="divide by zero encountered in log10", category=RuntimeWarning)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import campaign_runner as cr                     # noqa: E402  WS, arg packing, ack wait, station convention
@@ -136,6 +141,119 @@ def beep():
         threading.Thread(target=winsound.Beep, args=(2000, 90), daemon=True).start()
     except ImportError:
         print("\a", end="", flush=True)
+
+
+# ------------------------------------------------------------------ talking to the board
+
+SLOT_NAMES = {"left_slot": "LEFT mic  (L/R->GND)", "right_slot": "RIGHT mic (L/R->3V3)"}
+TAP_DB = 12.0                   # a beat this far over the mic's recent peaks is flagged as a tap
+UNREACHABLE = ("can't reach the board at %s -- is this PC on the board's Wi-Fi (truing-xxxxxx)? "
+               "The board may also have rebooted from a bumped wire; give it ~30 s.")
+
+
+def describe_reject(ack):
+    v = (ack or {}).get("verdict")
+    if v == "REJECT_STATE":
+        return "board is busy (booting, or running its start-up self-play): wait ~30 s and try again"
+    if v == "REJECT_DEBUG_DISABLED":
+        return "this firmware has the debug channel off: flash s3_devkit_fastdemo_mic_dualmic"
+    return "board refused the capture: %s" % (ack or "no answer")
+
+
+def board_seq(host, timeout):
+    """The board's current capture sequence number (0 before its first capture)."""
+    try:
+        raw, _ = cf.get("http://%s/debug/capture.json" % host, timeout)
+        return int(json.loads(raw.decode("utf-8")).get("seq", 0))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return 0
+        raise
+
+
+def level_bar(level_db, lo=-100.0, hi=0.0, width=24):
+    if level_db is None or not np.isfinite(level_db):
+        return "." * width
+    n = int(round((min(max(level_db, lo), hi) - lo) / (hi - lo) * width))
+    return "#" * n + "." * (width - n)
+
+
+def mic_line(name, h, tap=False):
+    if h["state"] in ("DEAD", "NO DATA"):
+        return "  %-21s %-8s %s" % (name, h["state"], h["why"])
+    return "  %-21s %-8s |%s| %6.1f dBFS rms  peak %6.1f%s%s" % (
+        name, h["state"], level_bar(h["rms_dbfs"]), h["rms_dbfs"], h["peak_dbfs"],
+        "  rails %d" % h["rails"] if h["rails"] else "", "   << TAP" if tap else "")
+
+
+def slot_channels(meta, local_raw, far_raw):
+    """[(slot name, raw words)] LEFT first, whichever of them the board called local."""
+    ch = [(meta.get("mic_input") or "mic", local_raw)]
+    if far_raw is not None:
+        ch.append((meta.get("far_input") or "far", far_raw))
+    return sorted(ch, key=lambda c: c[0])
+
+
+HEARTBEAT_HELP = """
+MIC HEARTBEAT -- one silent 1.2 s capture per beat (~3 s), both mics every beat, nothing saved.
+  ALIVE     the samples scatter the way a powered mic's self-noise does (quiet room: about -90..-60 dBFS)
+  DEAD      the data line sits on one value: that mic is unpowered, unclocked, or not on GPIO6
+  CLIPPING  live but hitting full scale: too loud / too close
+Tap a mic: its bar should jump and show << TAP. Ctrl+C stops.
+"""
+
+
+def heartbeat(host, timeout=20.0, beats=None):
+    """Repeated no-fire captures on spoke 0 (LEFT local, RIGHT far), one status line per mic per beat."""
+    def say(text):
+        print(text, flush=True)                           # a live monitor: never sit in a pipe's buffer
+
+    say(HEARTBEAT_HELP)
+    ws, seq, beat, peaks = None, 0, 0, {}
+    try:
+        while beats is None or beat < beats:
+            try:
+                if ws is None:
+                    ws = cr.WS(host, 80, "/ws")
+                before = board_seq(host, timeout)
+                seq += 1
+                ws.send_text({"cmd": "DEBUG", "code": cr.MEASURE_ONCE_CODE,
+                              "arg": cr.measure_once_arg(0, True, 0), "seq": seq})
+                ack = cr.wait_for_ack(ws, seq, timeout)
+                if ack is None:
+                    raise TimeoutError("no answer to the capture request")
+                if ack.get("verdict") != "ACCEPT":
+                    say("%s  %s" % (time.strftime("%H:%M:%S"), describe_reject(ack)))
+                    time.sleep(3)
+                    continue
+                meta, pcm, far = cf.fetch_bundle(host, timeout, with_far=True)
+                if int(meta.get("seq", -1)) == before:
+                    say("%s  no new capture came back; retrying" % time.strftime("%H:%M:%S"))
+                    continue
+            except OSError as e:                          # timeouts, refused, URLError: Wi-Fi or a reboot
+                if ws is not None:
+                    ws.close()
+                    ws = None
+                say("%s  %s (%s)" % (time.strftime("%H:%M:%S"), UNREACHABLE % host, e.__class__.__name__))
+                time.sleep(3)
+                continue
+            except SystemExit as e:                       # fetch_bundle's refusals, e.g. seq moved mid-download
+                say("%s  %s; retrying" % (time.strftime("%H:%M:%S"), e))
+                continue
+            beat += 1
+            say("%s  beat %d" % (time.strftime("%H:%M:%S"), beat))
+            for slot, raw in slot_channels(meta, pcm, far):
+                h = wa.mic_health(np.frombuffer(raw, dtype="<i4"))
+                recent = peaks.setdefault(slot, [])
+                tap = h["state"] != "DEAD" and len(recent) >= 3 and h["peak_dbfs"] > np.median(recent[-5:]) + TAP_DB
+                if h["state"] != "DEAD":
+                    recent.append(h["peak_dbfs"])
+                say(mic_line(SLOT_NAMES.get(slot, slot), h, tap))
+    except KeyboardInterrupt:
+        say("\nheartbeat stopped")
+    finally:
+        if ws is not None:
+            ws.close()
 
 
 # ------------------------------------------------------------------ figures
@@ -358,30 +476,43 @@ def resolve_reference(token):
 
 # ------------------------------------------------------------------ the REPL
 
-class Workbench(cmd.Cmd):
-    intro = ("dual-mic workbench -- EXPLORATORY, not campaign data. `guide` for the loop, `help <cmd>` for a "
-             "command, `knobs` for the current set-up.")
+MENU = """
+ dual-mic workbench -- EXPLORATORY, not campaign data                        session: %s
+ ---------------------------------------------------------------------------------------------
+  mic [n]          live heartbeat of both mics (Ctrl+C stops). Start here after any wiring change.
+  left | right     which station's mic the board analyses (LEFT = spoke 0, RIGHT = spoke 1)
+  ctrl [n]         n silent captures, saved        pluck [n]   cued hand pluck, saved
+  fire [n]         solenoid strikes (needs solenoids wired and enabled in the firmware)
+  play local|far   listen to the last shot         view        reopen its figure
+  ls               shots so far                    report      write report.md for the session
+  knobs            current set-up                  guide       the full experiment loop
+  menu             this list                       help <cmd>  details on one command      quit
+"""
 
+
+class Workbench(cmd.Cmd):
     def __init__(self, session, offline):
         super().__init__()
         self.s = session
         self.offline = offline
         self.ws = None
         self.seq_counter = [0]
+        self.intro = MENU % session.tag
         self._update_prompt()
 
     # ---- plumbing
     def _update_prompt(self):
         k = self.s.knobs
         st = cr.station_for_spoke(int(k["spoke"]))
-        self.prompt = "[%s sp%s %s %sms%s] wb> " % (self.s.epoch["id"], k["spoke"], st, k["pulse"] or "prof",
-                                                    " OFFLINE" if self.offline else "")
+        pulse = ", pulse %s ms" % k["pulse"] if k["pulse"] else ""
+        self.prompt = "[%s | %s mic, spoke %s%s%s] wb> " % (self.s.epoch["id"], st, k["spoke"], pulse,
+                                                           " | OFFLINE" if self.offline else "")
 
     def emptyline(self):
         pass
 
     def default(self, line):
-        print("unknown command %r -- `help`" % line)
+        print("unknown command %r -- `menu` lists the common ones, `help` all of them" % line.split()[0])
 
     def postcmd(self, stop, line):
         self._update_prompt()
@@ -394,6 +525,11 @@ class Workbench(cmd.Cmd):
             print("!! %s" % e)
         except SystemExit as e:
             print("!! %s" % e)
+        except KeyboardInterrupt:
+            print("\n   stopped")
+        except OSError as e:                              # timeouts, refused, URLError: Wi-Fi or a reboot
+            self._drop_ws()
+            print("!! " + UNREACHABLE % self.s.knobs["host"] + " (%s)" % e.__class__.__name__)
         return False
 
     def _ws(self):
@@ -401,14 +537,39 @@ class Workbench(cmd.Cmd):
             self.ws = cr.WS(self.s.knobs["host"], 80, "/ws")
         return self.ws
 
+    def _drop_ws(self):
+        if self.ws is not None:
+            self.ws.close()
+            self.ws = None
+
     def _seq_now(self):
-        try:
-            raw, _ = cf.get("http://%s/debug/capture.json" % self.s.knobs["host"], float(self.s.knobs["timeout"]))
-            return int(json.loads(raw.decode("utf-8")).get("seq", 0))
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return 0
-            raise
+        return board_seq(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+
+    # ---- 0 is anything listening
+    def do_mic(self, arg):
+        """mic [n]: heartbeat -- a silent capture every few seconds, printing whether each mic is ALIVE, DEAD or
+        CLIPPING, with a level bar. Nothing is saved. Runs until Ctrl+C, or for n beats."""
+        if self.offline:
+            raise ValueError("offline session: no board")
+        self._drop_ws()                                   # the heartbeat opens its own connection
+        heartbeat(self.s.knobs["host"], float(self.s.knobs["timeout"]), int(arg) if arg.strip() else None)
+
+    do_heartbeat = do_mic
+    do_hb = do_mic
+
+    def do_menu(self, arg):
+        """The common commands."""
+        print(MENU % self.s.tag)
+
+    def do_left(self, arg):
+        """left: analyse the LEFT station's mic (spoke 0)."""
+        self.do_set("spoke 0")
+        print("   the board now analyses the LEFT mic; RIGHT is recorded alongside as `far`")
+
+    def do_right(self, arg):
+        """right: analyse the RIGHT station's mic (spoke 1)."""
+        self.do_set("spoke 1")
+        print("   the board now analyses the RIGHT mic; LEFT is recorded alongside as `far`")
 
     # ---- 1 experiment
     def do_guide(self, arg):
@@ -494,11 +655,11 @@ class Workbench(cmd.Cmd):
             if kind == "pluck":
                 beep()
                 time.sleep(float(self.s.knobs["lead"]))
-            self._one(kind, i, n)
+            self._one(kind, i, n, show=i + 1 == n)
             if i + 1 < n:
                 time.sleep(float(self.s.knobs["interval"]))
 
-    def _one(self, kind, i, n):
+    def _one(self, kind, i, n, show=True):
         k = self.s.knobs
         spoke = int(k["spoke"])
         station = cr.station_for_spoke(spoke)
@@ -510,11 +671,14 @@ class Workbench(cmd.Cmd):
         ws.send_text({"cmd": "DEBUG", "code": cr.MEASURE_ONCE_CODE,
                       "arg": cr.measure_once_arg(spoke, no_fire, pulse), "seq": self.seq_counter[0]})
         ack = cr.wait_for_ack(ws, self.seq_counter[0], float(k["timeout"]))
-        if ack is None or ack.get("verdict") != "ACCEPT":
-            raise ValueError("board did not accept the shot: %s" % (ack or "no ack"))
+        if ack is None:
+            raise TimeoutError("no answer to the shot")
+        if ack.get("verdict") != "ACCEPT":
+            raise ValueError(describe_reject(ack))
         meta, pcm, far = cf.fetch_bundle(k["host"], float(k["timeout"]), with_far=True)
         if int(meta.get("seq", -1)) == seq_before:
-            raise ValueError("no new capture (excitation unavailable?)")
+            raise ValueError("no new capture came back%s" % (
+                " -- `fire`/`air` need a solenoid wired and enabled in the firmware" if not no_fire else ""))
         fw_note = self.s.firmware_check(meta)
         if fw_note:
             print("   " + fw_note)
@@ -544,7 +708,7 @@ class Workbench(cmd.Cmd):
         rec = {"id": sid, "t": now(), "epoch": self.s.epoch["id"], "kind": kind, "spoke": spoke, "station": station,
                "pulse_req": pulse, "name": name, "json": os.path.join(self.s.dir, name + ".json"),
                "physical": dict(self.s.physical), "flags": flags}
-        self._observe(rec, header="[%d/%d] #%d %s sp%d %s" % (i + 1, n, sid, kind, spoke, station))
+        self._observe(rec, header="[%d/%d] #%d %s sp%d %s" % (i + 1, n, sid, kind, spoke, station), show=show)
         self.s.append_shot(rec)
         if kind == "strike":
             self._refresh_rig(quiet=True)
@@ -575,6 +739,15 @@ class Workbench(cmd.Cmd):
         rec["loc"] = m["loc"]
         if header:
             print(header + "  -> " + rec["name"])
+        dead = False
+        for slot, raw in slot_channels(meta, local, far):
+            role = "local" if slot == meta.get("mic_input") else "far"
+            h = wa.mic_health(raw)
+            dead = dead or h["state"] == "DEAD"
+            print(mic_line("%s %s" % (SLOT_NAMES.get(slot, slot).split("(")[0].strip(), role), h))
+        if dead:
+            print("   !! a DEAD channel's numbers below describe a floating wire, not sound -- fix the wiring first "
+                  "(`mic` watches it live)")
         for ch in ("local", "far"):
             if ch not in m:
                 print("   %-5s  (no far channel on this image)" % ch)
@@ -1013,11 +1186,18 @@ def write_report(wb):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--session", required=True, help="session tag; an existing session with this tag is resumed")
+    ap.add_argument("--session", help="session tag; an existing session with this tag is resumed")
+    ap.add_argument("--heartbeat", nargs="?", const=0, type=int, metavar="N",
+                    help="live check of both mics and exit (N beats; default: until Ctrl+C). Needs no session.")
     ap.add_argument("--offline", action="store_true", help="no board: references, import, analysis and report only")
     ap.add_argument("--host", default=cr.DEFAULT_HOST)
     ap.add_argument("-c", "--command", action="append", help="run these commands and exit (scripting/tests)")
     a = ap.parse_args(argv)
+    if a.heartbeat is not None:
+        heartbeat(a.host, SHOT_KEYS["timeout"], a.heartbeat or None)
+        return 0
+    if not a.session:
+        ap.error("give --session <tag> for the workbench, or --heartbeat for a quick mic check")
     s = Session(a.session)
     s.knobs["host"] = a.host
     wb = Workbench(s, a.offline)

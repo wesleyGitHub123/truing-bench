@@ -91,6 +91,19 @@ def check_line_presence():
     assert not ok2
 
 
+def check_mic_health():
+    live = wa.mic_health(words(noise(4.5e-5)))                    # INMP441 self-noise, about -87 dBFS
+    assert live["state"] == "ALIVE" and -95 < live["rms_dbfs"] < -80, live
+    assert wa.mic_health(np.zeros(N, dtype="<i4"))["state"] == "DEAD"
+    # the 2026-09-27 DevKit capture: line held high, isolated full-scale spikes every ~401 samples
+    stuck = np.full(N, -1 << 8, dtype="<i4")
+    stuck[::401] = 0x7FFFFF << 8
+    h = wa.mic_health(stuck)
+    assert h["state"] == "DEAD" and h["rails"] > 0 and "line high" in h["why"], h
+    loud = wa.mic_health(words(np.clip(1.5 * np.sin(2 * np.pi * 406.0 * np.arange(N) / FS), -1, 1) + noise()))
+    assert loud["state"] == "CLIPPING", loud
+
+
 def check_repeatability():
     r = wa.repeatability([406.1, 406.3, 406.2, 406.2, 397.6])
     assert r["n"] == 5 and r["within_tol"] == 4 and abs(r["median_hz"] - 406.2) < 1e-9
@@ -141,8 +154,8 @@ def check_reference_resolution():
 
 
 def main():
-    for fn in (check_line_level, check_localization, check_shared_lines, check_line_presence, check_repeatability,
-               check_far_fetch, check_reference_resolution):
+    for fn in (check_line_level, check_localization, check_shared_lines, check_line_presence, check_mic_health,
+               check_repeatability, check_far_fetch, check_reference_resolution):
         fn()
         print("  ok  %s" % fn.__name__)
     print("selftest ok")
