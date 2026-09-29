@@ -46,6 +46,12 @@ struct truing_wheel_drive_if {
     int32_t (*position_steps)(const truing_wheel_drive_if_t *self);
     /* Latched driver fault; optional (NULL = the implementation cannot detect one). */
     bool (*fault)(const truing_wheel_drive_if_t *self, uint32_t *detail_out);
+    /* Bench controls, optional (NULL = unsupported). Both are refused while a move is in progress.
+     * set_motion changes the ramp the NEXT moves use: navigation never calls it, it takes its
+     * profile from the measured calibration. zero resets the odometry. */
+    truing_status_t (*set_motion)(truing_wheel_drive_if_t *self, uint32_t max_step_hz, uint32_t accel_steps_s2,
+                                  truing_reason_t *reason_out);
+    truing_status_t (*zero)(truing_wheel_drive_if_t *self, truing_reason_t *reason_out);
     void *ctx;
 };
 
@@ -55,6 +61,9 @@ void            truing_wheel_drive_stop(truing_wheel_drive_if_t *self);
 bool            truing_wheel_drive_is_moving(const truing_wheel_drive_if_t *self);
 int32_t         truing_wheel_drive_position_steps(const truing_wheel_drive_if_t *self);
 bool            truing_wheel_drive_fault(const truing_wheel_drive_if_t *self, uint32_t *detail_out);
+truing_status_t truing_wheel_drive_set_motion(truing_wheel_drive_if_t *self, uint32_t max_step_hz,
+                                              uint32_t accel_steps_s2, truing_reason_t *reason_out);
+truing_status_t truing_wheel_drive_zero(truing_wheel_drive_if_t *self, truing_reason_t *reason_out);
 
 /* ---- Stub: no drive hardware (Stage 1) ---------------------------------------- */
 typedef struct {
@@ -80,6 +89,10 @@ typedef struct {
     bool     stall;
     bool     fault_next;
     uint32_t fault_detail;
+    /* the ramp the bench controls last set (0 until set_motion is called), and how often zero ran */
+    uint32_t motion_max_step_hz;
+    uint32_t motion_accel_steps_s2;
+    uint32_t zeroed;
     /* state */
     bool     faulted;
     bool     moving;

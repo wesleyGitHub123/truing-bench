@@ -210,11 +210,50 @@ static void test_measure_once_unpack_refuses_what_cannot_be_meant(void)
     TEST_ASSERT_EQUAL_UINT16(77u, a.pulse_ms);
 }
 
+/* ---- DRIVE_MOTION arg layout: cruise steps/s in bits 0..15, accel in units of 100 steps/s^2 in
+ * bits 16..30. tools/workbench.py packs the same bits, so the layout is pinned here. */
+static void test_drive_motion_pack_layout_and_round_trip(void)
+{
+    const truing_drive_motion_args_t bench = {800u, 1600u};          /* roller_smoke's cautious first-spin knobs */
+    TEST_ASSERT_EQUAL_INT32((16 << 16) | 800, truing_drive_motion_pack(&bench));
+    const truing_drive_motion_args_t cases[] = { {1u, 100u}, {800u, 1600u}, {3818u, 1600u}, {65535u, 3276700u} };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        truing_drive_motion_args_t back;
+        TEST_ASSERT_TRUE(truing_drive_motion_unpack(truing_drive_motion_pack(&cases[i]), &back));
+        TEST_ASSERT_EQUAL_UINT16(cases[i].max_step_hz, back.max_step_hz);
+        TEST_ASSERT_EQUAL_UINT32(cases[i].accel_steps_s2, back.accel_steps_s2);
+    }
+}
+
+static void test_drive_motion_unpack_refuses_what_cannot_be_meant(void)
+{
+    truing_drive_motion_args_t a = {77u, 700u};   /* must be left alone on refusal */
+    TEST_ASSERT_FALSE(truing_drive_motion_unpack(-1, &a));                  /* bit 31 */
+    TEST_ASSERT_FALSE(truing_drive_motion_unpack(16 << 16, &a));            /* zero rate */
+    TEST_ASSERT_FALSE(truing_drive_motion_unpack(800, &a));                 /* zero acceleration */
+    TEST_ASSERT_FALSE(truing_drive_motion_unpack(800 | (16 << 16), NULL));
+    TEST_ASSERT_EQUAL_UINT16(77u, a.max_step_hz);
+    TEST_ASSERT_EQUAL_UINT32(700u, a.accel_steps_s2);
+}
+
+static void test_drive_debug_codes_have_names(void)
+{
+    TEST_ASSERT_EQUAL_STRING("DRIVE_ENABLE", truing_debug_code_str(TRUING_DEBUG_CODE_DRIVE_ENABLE));
+    TEST_ASSERT_EQUAL_STRING("DRIVE_MOVE", truing_debug_code_str(TRUING_DEBUG_CODE_DRIVE_MOVE));
+    TEST_ASSERT_EQUAL_STRING("DRIVE_STOP", truing_debug_code_str(TRUING_DEBUG_CODE_DRIVE_STOP));
+    TEST_ASSERT_EQUAL_STRING("DRIVE_MOTION", truing_debug_code_str(TRUING_DEBUG_CODE_DRIVE_MOTION));
+    TEST_ASSERT_EQUAL_STRING("DRIVE_ZERO", truing_debug_code_str(TRUING_DEBUG_CODE_DRIVE_ZERO));
+    TEST_ASSERT_EQUAL_STRING("?", truing_debug_code_str(TRUING_DEBUG_CODE__COUNT));
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     UNITY_BEGIN();
+    RUN_TEST(test_drive_motion_pack_layout_and_round_trip);
+    RUN_TEST(test_drive_motion_unpack_refuses_what_cannot_be_meant);
+    RUN_TEST(test_drive_debug_codes_have_names);
     RUN_TEST(test_measure_once_bare_spoke_id_is_unchanged);
     RUN_TEST(test_measure_once_pack_and_unpack_round_trip);
     RUN_TEST(test_measure_once_unpack_refuses_what_cannot_be_meant);

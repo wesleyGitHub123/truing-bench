@@ -5,6 +5,11 @@
 static const char *const k_debug_code_str[TRUING_DEBUG_CODE__COUNT] = {
     "UNSET",
     "MEASURE_ONCE",
+    "DRIVE_ENABLE",
+    "DRIVE_MOVE",
+    "DRIVE_STOP",
+    "DRIVE_MOTION",
+    "DRIVE_ZERO",
 };
 
 const char *truing_debug_code_str(truing_debug_code_t c)
@@ -46,5 +51,30 @@ bool truing_measure_once_unpack(int32_t arg, truing_measure_once_args_t *out)
     out->spoke_id = (uint8_t)(v & 0xFFu);
     out->no_fire = no_fire;
     out->pulse_ms = pulse_ms;
+    return true;
+}
+
+#define DRIVE_MOTION_ACCEL_SHIFT 16u
+#define DRIVE_MOTION_ACCEL_UNIT  100u
+
+int32_t truing_drive_motion_pack(const truing_drive_motion_args_t *a)
+{
+    const uint32_t accel_units = a->accel_steps_s2 / DRIVE_MOTION_ACCEL_UNIT;
+    return (int32_t)((uint32_t)a->max_step_hz | (accel_units << DRIVE_MOTION_ACCEL_SHIFT));
+}
+
+bool truing_drive_motion_unpack(int32_t arg, truing_drive_motion_args_t *out)
+{
+    if (arg < 0 || out == NULL) {
+        return false;
+    }
+    const uint32_t v = (uint32_t)arg;
+    const uint32_t hz = v & 0xFFFFu;
+    const uint32_t accel_units = v >> DRIVE_MOTION_ACCEL_SHIFT;
+    if (hz == 0u || accel_units == 0u) {
+        return false;
+    }
+    out->max_step_hz = (uint16_t)hz;
+    out->accel_steps_s2 = accel_units * DRIVE_MOTION_ACCEL_UNIT;
     return true;
 }

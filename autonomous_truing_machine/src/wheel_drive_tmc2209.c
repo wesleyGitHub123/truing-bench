@@ -277,6 +277,27 @@ bool truing_wheel_drive_tmc2209_zero(truing_wheel_drive_tmc2209_ctx_t *ctx)
     return true;
 }
 
+static truing_status_t tmc_set_motion(truing_wheel_drive_if_t *self, uint32_t max_step_hz, uint32_t accel_steps_s2,
+                                      truing_reason_t *reason_out)
+{
+    truing_wheel_drive_tmc2209_ctx_t *c = (truing_wheel_drive_tmc2209_ctx_t *)self->ctx;
+    const truing_ramp_profile_t p = { TICK_HZ, max_step_hz, accel_steps_s2 };
+    const bool ok = max_step_hz != 0u && accel_steps_s2 != 0u && truing_wheel_drive_tmc2209_set_profile(c, &p);
+    if (reason_out != NULL) {
+        *reason_out = ok ? TRUING_REASON_NONE : TRUING_REASON_VALUE_OUT_OF_RANGE;
+    }
+    return ok ? TRUING_STATUS_VALID : TRUING_STATUS_UNAVAILABLE;
+}
+
+static truing_status_t tmc_zero(truing_wheel_drive_if_t *self, truing_reason_t *reason_out)
+{
+    const bool ok = truing_wheel_drive_tmc2209_zero((truing_wheel_drive_tmc2209_ctx_t *)self->ctx);
+    if (reason_out != NULL) {
+        *reason_out = ok ? TRUING_REASON_NONE : TRUING_REASON_VALUE_OUT_OF_RANGE;
+    }
+    return ok ? TRUING_STATUS_VALID : TRUING_STATUS_UNAVAILABLE;
+}
+
 static bool gpio_out(int gpio, int level)
 {
     /* Level first, then direction: the pin never drives the opposite level, not even briefly. */
@@ -391,6 +412,8 @@ bool truing_wheel_drive_tmc2209_init(truing_wheel_drive_if_t *self, truing_wheel
     self->is_moving = tmc_moving;
     self->position_steps = tmc_position;
     self->fault = tmc_fault;
+    self->set_motion = tmc_set_motion;
+    self->zero = tmc_zero;
     self->ctx = ctx;
     return ok;
 }

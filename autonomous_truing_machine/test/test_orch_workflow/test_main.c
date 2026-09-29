@@ -1232,11 +1232,151 @@ static void test_measure_once_is_refused_once_a_session_is_running(void)
     TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
 }
 
+/* ---- Lab image: the bench drive on the debug channel. The DRIVE_* codes reach a drive that is NOT
+ * the navigation drive, move it in raw steps, and never touch wheel state or the acoustic call. */
+static truing_wheel_drive_if_t g_bench;
+static truing_wheel_drive_fake_ctx_t g_bctx;
+
+static truing_reason_t drive_code(truing_debug_code_t code, int32_t arg, truing_intent_verdict_t *verdict)
+{
+    truing_reason_t reason = TRUING_REASON_NONE;
+    truing_intent_t i = debug_intent(code, arg);
+    *verdict = truing_orch_submit_intent(&g.orch, &i, &reason);
+    return reason;
+}
+
+static void bench_ready(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    g.orch.deps.debug_channel_enabled = true;
+    truing_wheel_drive_fake_init(&g_bench, &g_bctx);
+    g.orch.deps.bench_drive = &g_bench;
+}
+
+static void test_drive_codes_move_the_bench_drive_and_leave_wheel_state_alone(void)
+{
+    bench_ready();
+    const truing_wheel_state_t before = g.orch.wheel_state;
+    const uint32_t calls_before = g.actx.calls;
+    truing_intent_verdict_t v;
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_SENSOR_TIMEOUT, drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, 1600, &v));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, v);   /* coils off: refused, nothing moved */
+    TEST_ASSERT_EQUAL_INT32(0, g_bctx.position_steps);
+
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 1, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_TRUE(g_bctx.enabled);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, 1600, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_EQUAL_INT32(1600, g_bctx.position_steps);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, -1600, &v);
+    TEST_ASSERT_EQUAL_INT32(0, g_bctx.position_steps);
+
+    const truing_drive_motion_args_t m = {3818u, 1600u};
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOTION, truing_drive_motion_pack(&m), &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_EQUAL_UINT32(3818u, g_bctx.motion_max_step_hz);
+    TEST_ASSERT_EQUAL_UINT32(1600u, g_bctx.motion_accel_steps_s2);
+
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, 400, &v);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ZERO, 0, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_EQUAL_INT32(0, g_bctx.position_steps);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_STOP, 0, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 0, &v);
+    TEST_ASSERT_FALSE(g_bctx.enabled);
+
+    TEST_ASSERT_EQUAL_MEMORY(&before, &g.orch.wheel_state, sizeof(before));
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);   /* no acoustic call rode along */
+}
+
+static void test_drive_codes_refuse_malformed_args_before_touching_the_drive(void)
+{
+    bench_ready();
+    truing_intent_verdict_t v;
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 1, &v);
+    const struct { truing_debug_code_t code; int32_t arg; } bad[] = {
+        { TRUING_DEBUG_CODE_DRIVE_ENABLE, 2 },
+        { TRUING_DEBUG_CODE_DRIVE_ENABLE, -1 },
+        { TRUING_DEBUG_CODE_DRIVE_MOVE, TRUING_DRIVE_MOVE_MAX_STEPS + 1 },
+        { TRUING_DEBUG_CODE_DRIVE_MOVE, -TRUING_DRIVE_MOVE_MAX_STEPS - 1 },
+        { TRUING_DEBUG_CODE_DRIVE_MOTION, 0 },
+        { TRUING_DEBUG_CODE_DRIVE_MOTION, -1 },
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, drive_code(bad[i].code, bad[i].arg, &v));
+        TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, v);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0u, g_bctx.moves);
+    TEST_ASSERT_EQUAL_UINT32(0u, g_bctx.motion_max_step_hz);
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, TRUING_DRIVE_MOVE_MAX_STEPS, &v);   /* the bound itself is legal */
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+}
+
+static void test_drive_codes_are_refused_without_a_bench_drive(void)
+{
+    rig_build(&g, NULL, 1.0f);
+    bring_to_ready(&g);
+    g.orch.deps.debug_channel_enabled = true;   /* the acoustic campaign image: debug on, no bench drive */
+    TEST_ASSERT_NULL(g.orch.deps.bench_drive);
+    truing_intent_verdict_t v;
+    for (truing_debug_code_t c = TRUING_DEBUG_CODE_DRIVE_ENABLE; c <= TRUING_DEBUG_CODE_DRIVE_ZERO; c++) {
+        TEST_ASSERT_EQUAL_INT(TRUING_REASON_NOT_IMPLEMENTED, drive_code(c, 1, &v));
+        TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, v);
+    }
+}
+
+static void test_drive_codes_are_refused_outside_ready_and_with_the_channel_off(void)
+{
+    bench_ready();
+    truing_intent_verdict_t v;
+    g.orch.deps.debug_channel_enabled = false;
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 1, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_DEBUG_DISABLED, v);
+    TEST_ASSERT_FALSE(g_bctx.enabled);
+
+    g.orch.deps.debug_channel_enabled = true;
+    truing_reason_t reason = TRUING_REASON_NONE;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, &reason));   /* a session is now running */
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 1, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_STATE, v);
+    TEST_ASSERT_FALSE(g_bctx.enabled);
+}
+
+static void test_a_capture_is_refused_while_the_bench_drive_moves(void)
+{
+    bench_ready();
+    truing_intent_verdict_t v;
+    drive_code(TRUING_DEBUG_CODE_DRIVE_ENABLE, 1, &v);
+    g_bctx.polls_per_move = 3u;   /* the move stays in progress for three polls */
+    drive_code(TRUING_DEBUG_CODE_DRIVE_MOVE, 20000, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_TRUE(g_bctx.moving);
+
+    const uint32_t calls_before = g.actx.calls;
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_VALUE_OUT_OF_RANGE, drive_code(TRUING_DEBUG_CODE_MEASURE_ONCE, 0, &v));
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_REJECT_SESSION_ADMISSION, v);
+    TEST_ASSERT_EQUAL_UINT32(calls_before, g.actx.calls);   /* never reached the acoustic call */
+
+    drive_code(TRUING_DEBUG_CODE_DRIVE_STOP, 0, &v);         /* stop lands the move */
+    TEST_ASSERT_FALSE(g_bctx.moving);
+    drive_code(TRUING_DEBUG_CODE_MEASURE_ONCE, 0, &v);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, v);
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1u, g.actx.calls);
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     UNITY_BEGIN();
+    RUN_TEST(test_drive_codes_move_the_bench_drive_and_leave_wheel_state_alone);
+    RUN_TEST(test_drive_codes_refuse_malformed_args_before_touching_the_drive);
+    RUN_TEST(test_drive_codes_are_refused_without_a_bench_drive);
+    RUN_TEST(test_drive_codes_are_refused_outside_ready_and_with_the_channel_off);
+    RUN_TEST(test_a_capture_is_refused_while_the_bench_drive_moves);
     RUN_TEST(test_fastdemo_automates_acquisition_without_skipping_states);
     RUN_TEST(test_roller_navigation_runs_a_whole_session_by_polling);
     RUN_TEST(test_roller_navigation_abort_mid_move_stops_the_drive);

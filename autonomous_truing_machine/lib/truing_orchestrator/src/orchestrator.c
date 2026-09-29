@@ -771,6 +771,65 @@ truing_orch_step_t truing_orch_step(truing_orchestrator_t *o)
 }
 
 /* ---- intents ---------------------------------------------------------------------------- */
+/* The DRIVE_* debug codes (truing/debug_code.h). Returns ACCEPT, or REJECT_SESSION_ADMISSION with
+ * the reason set -- the same shape MEASURE_ONCE uses for "a known code whose precondition failed". */
+static truing_intent_verdict_t dispatch_drive_code(truing_wheel_drive_if_t *drive, truing_debug_code_t code, int32_t arg,
+                                                   truing_reason_t *reason_out)
+{
+    truing_reason_t reason = TRUING_REASON_NONE;
+    truing_status_t st = TRUING_STATUS_VALID;
+    if (drive == NULL) {
+        reason = TRUING_REASON_NOT_IMPLEMENTED;
+        st = TRUING_STATUS_UNAVAILABLE;
+    } else {
+        switch (code) {
+        case TRUING_DEBUG_CODE_DRIVE_ENABLE:
+            if (arg != 0 && arg != 1) {
+                reason = TRUING_REASON_VALUE_OUT_OF_RANGE;
+                st = TRUING_STATUS_UNAVAILABLE;
+            } else {
+                st = truing_wheel_drive_enable(drive, arg == 1, &reason);
+            }
+            break;
+        case TRUING_DEBUG_CODE_DRIVE_MOVE:
+            if (arg > TRUING_DRIVE_MOVE_MAX_STEPS || arg < -TRUING_DRIVE_MOVE_MAX_STEPS) {
+                reason = TRUING_REASON_VALUE_OUT_OF_RANGE;
+                st = TRUING_STATUS_UNAVAILABLE;
+            } else {
+                st = truing_wheel_drive_move_relative(drive, arg, &reason);
+            }
+            break;
+        case TRUING_DEBUG_CODE_DRIVE_STOP:
+            truing_wheel_drive_stop(drive);
+            break;
+        case TRUING_DEBUG_CODE_DRIVE_MOTION: {
+            truing_drive_motion_args_t m;
+            if (!truing_drive_motion_unpack(arg, &m)) {
+                reason = TRUING_REASON_VALUE_OUT_OF_RANGE;
+                st = TRUING_STATUS_UNAVAILABLE;
+            } else {
+                st = truing_wheel_drive_set_motion(drive, m.max_step_hz, m.accel_steps_s2, &reason);
+            }
+            break;
+        }
+        case TRUING_DEBUG_CODE_DRIVE_ZERO:
+            st = truing_wheel_drive_zero(drive, &reason);
+            break;
+        default:
+            reason = TRUING_REASON_NOT_IMPLEMENTED;
+            st = TRUING_STATUS_UNAVAILABLE;
+            break;
+        }
+    }
+    if (st == TRUING_STATUS_VALID) {
+        return TRUING_INTENT_ADMIT_ACCEPT;
+    }
+    if (reason_out != NULL) {
+        *reason_out = reason != TRUING_REASON_NONE ? reason : TRUING_REASON_NOT_IMPLEMENTED;
+    }
+    return TRUING_INTENT_REJECT_SESSION_ADMISSION;
+}
+
 truing_intent_verdict_t truing_orch_submit_intent(truing_orchestrator_t *o, const truing_intent_t *intent,
                                                   truing_reason_t *reason_out)
 {
@@ -856,10 +915,21 @@ truing_intent_verdict_t truing_orch_submit_intent(truing_orchestrator_t *o, cons
                     }
                     break;
                 }
+                if (o->deps.bench_drive != NULL && truing_wheel_drive_is_moving(o->deps.bench_drive)) {
+                    /* A capture never overlaps motion: the step ISR and the roller's own noise would
+                     * land in the recording. Same reason the drive itself gives for "busy". */
+                    v = TRUING_INTENT_REJECT_SESSION_ADMISSION;
+                    if (reason_out != NULL) {
+                        *reason_out = TRUING_REASON_VALUE_OUT_OF_RANGE;
+                    }
+                    break;
+                }
                 truing_tension_estimate_t scratch;
                 truing_acoustic_real_mark_debug_measurement(o->deps.acoustic);
                 truing_acoustic_real_set_debug_override(o->deps.acoustic, args.no_fire, (float)args.pulse_ms);
                 truing_acoustic_measure(o->deps.acoustic, args.spoke_id, o->deps.wheel, 0u, &scratch);
+            } else if (code >= TRUING_DEBUG_CODE_DRIVE_ENABLE && code <= TRUING_DEBUG_CODE_DRIVE_ZERO) {
+                v = dispatch_drive_code(o->deps.bench_drive, code, intent->payload.debug.arg, reason_out);
             } else {
                 /* Same reasoning as above: the intent is a recognized DEBUG intent, only the
                  * code value inside it isn't implemented yet. */

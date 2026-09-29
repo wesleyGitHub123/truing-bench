@@ -51,6 +51,29 @@ bool truing_wheel_drive_fault(const truing_wheel_drive_if_t *self, uint32_t *det
     return (self != NULL && self->fault != NULL) ? self->fault(self, detail_out) : false;
 }
 
+truing_status_t truing_wheel_drive_set_motion(truing_wheel_drive_if_t *self, uint32_t max_step_hz,
+                                              uint32_t accel_steps_s2, truing_reason_t *reason_out)
+{
+    if (self == NULL || self->set_motion == NULL) {
+        if (reason_out != NULL) {
+            *reason_out = TRUING_REASON_NOT_IMPLEMENTED;
+        }
+        return TRUING_STATUS_UNAVAILABLE;
+    }
+    return self->set_motion(self, max_step_hz, accel_steps_s2, reason_out);
+}
+
+truing_status_t truing_wheel_drive_zero(truing_wheel_drive_if_t *self, truing_reason_t *reason_out)
+{
+    if (self == NULL || self->zero == NULL) {
+        if (reason_out != NULL) {
+            *reason_out = TRUING_REASON_NOT_IMPLEMENTED;
+        }
+        return TRUING_STATUS_UNAVAILABLE;
+    }
+    return self->zero(self, reason_out);
+}
+
 /* ---- stub -------------------------------------------------------------------------- */
 static truing_status_t stub_enable(truing_wheel_drive_if_t *self, bool on, truing_reason_t *reason_out)
 {
@@ -209,6 +232,41 @@ static bool fake_fault(const truing_wheel_drive_if_t *self, uint32_t *detail_out
     return ctx->faulted;
 }
 
+static truing_status_t fake_set_motion(truing_wheel_drive_if_t *self, uint32_t max_step_hz, uint32_t accel_steps_s2,
+                                       truing_reason_t *reason_out)
+{
+    truing_wheel_drive_fake_ctx_t *ctx = (truing_wheel_drive_fake_ctx_t *)self->ctx;
+    if (ctx->moving || max_step_hz == 0u || accel_steps_s2 == 0u) {
+        if (reason_out != NULL) {
+            *reason_out = TRUING_REASON_VALUE_OUT_OF_RANGE;
+        }
+        return TRUING_STATUS_UNAVAILABLE;
+    }
+    ctx->motion_max_step_hz = max_step_hz;
+    ctx->motion_accel_steps_s2 = accel_steps_s2;
+    if (reason_out != NULL) {
+        *reason_out = TRUING_REASON_NONE;
+    }
+    return TRUING_STATUS_VALID;
+}
+
+static truing_status_t fake_zero(truing_wheel_drive_if_t *self, truing_reason_t *reason_out)
+{
+    truing_wheel_drive_fake_ctx_t *ctx = (truing_wheel_drive_fake_ctx_t *)self->ctx;
+    if (ctx->moving) {
+        if (reason_out != NULL) {
+            *reason_out = TRUING_REASON_VALUE_OUT_OF_RANGE;
+        }
+        return TRUING_STATUS_UNAVAILABLE;
+    }
+    ctx->position_steps = 0;
+    ctx->zeroed++;
+    if (reason_out != NULL) {
+        *reason_out = TRUING_REASON_NONE;
+    }
+    return TRUING_STATUS_VALID;
+}
+
 void truing_wheel_drive_fake_init(truing_wheel_drive_if_t *self, truing_wheel_drive_fake_ctx_t *ctx)
 {
     if (self == NULL || ctx == NULL) {
@@ -224,5 +282,7 @@ void truing_wheel_drive_fake_init(truing_wheel_drive_if_t *self, truing_wheel_dr
     self->is_moving = fake_moving;
     self->position_steps = fake_position;
     self->fault = fake_fault;
+    self->set_motion = fake_set_motion;
+    self->zero = fake_zero;
     self->ctx = ctx;
 }

@@ -35,6 +35,7 @@
 #include "truing_hal/navigation_if.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
+#include "truing_hal/wheel_drive_if.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,6 +65,10 @@ typedef struct {
     const char             *firmware_version;
     bool                    geometry_only_policy;   /* SPEC §8.11 sanctioned policy exclusion of the tension channel */
     bool                    debug_channel_enabled;  /* SPEC §12.5: development only */
+    /* Lab-image bench drive (TRUING_BENCH_DRIVE), driven only by the DRIVE_* debug codes. NULL in
+     * every other image, where those codes are refused NOT_IMPLEMENTED. It is not the navigation
+     * drive: a bench-driven wheel has no reference, and nothing here becomes wheel state. */
+    truing_wheel_drive_if_t *bench_drive;
     /* 0 = collect every spoke, which is what the machine does and what every interactive image
      * sets. A demonstration image may bound the acoustic pass, and the orchestrator honours the
      * bound ONLY while the selected layout is TENSION_ABSENT, i.e. while those rows are not in
