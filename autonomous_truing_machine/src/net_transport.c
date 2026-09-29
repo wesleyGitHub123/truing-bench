@@ -588,28 +588,31 @@ static esp_err_t capture_far_pcm_handler(httpd_req_t *req)
 
 #if TRUING_CAMPAIGN_DEBUG && TRUING_REAL_FRONT_END
 #define LISTEN_MAX_SECONDS 30u
-/* GET /debug/listen.pcm?s=<seconds>&station=<0|1>: the station's microphone, live, for `s` seconds
- * (1..30), as raw capture words (little-endian int32, 48 kHz) -- what the workbench's `listen` turns
- * into one long listening wav. A capture is bounded to a 1.2 s window by the acoustic chain; this
- * follows the ring instead, so it is as long as asked. Read-only on the ring, so it cannot disturb a
- * measurement, but it occupies the server for its whole length: nothing else is served meanwhile,
- * and a second listener is refused. Samples the reader could not keep up with are counted, not
- * hidden: the response ends early rather than splicing across a gap. */
+/* GET /debug/listen.pcm?s=<seconds>|ms=<milliseconds>&station=<0|1|2>: a microphone live, as raw capture
+ * words (little-endian int32, 48 kHz) -- what the workbench's `listen` turns into one long listening wav.
+ * s is 1..30, or ms is 100..30000. station 0/1 is that station's mic; station 2 is BOTH, interleaved
+ * (station 0's word, then station 1's, per frame), which is what the heartbeat uses: a fraction of a
+ * second of both mics with none of the acoustic analysis a capture drags along. A capture is bounded to a
+ * 1.2 s window by the acoustic chain; this follows the ring instead, so it is as long as asked.
+ * Read-only on the ring, so it cannot disturb a measurement, but it occupies the server for its whole
+ * length: nothing else is served meanwhile, and a second listener is refused. Samples the reader could
+ * not keep up with are counted, not hidden: the response ends early rather than splicing across a gap. */
 static esp_err_t listen_pcm_handler(httpd_req_t *req)
 {
     static bool busy;
-    static int32_t buf[1024];
-    char q[48], v[12];
-    uint32_t seconds = 5u, station = 0u;
+    static int32_t a[512], b[512], out[1024];
+    char q[64], v[12];
+    uint32_t ms = 5000u, station = 0u;
     no_store(req);
     if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-        if (httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK) seconds = (uint32_t)strtoul(v, NULL, 10);
+        if (httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK) ms = (uint32_t)strtoul(v, NULL, 10) * 1000u;
+        if (httpd_query_key_value(q, "ms", v, sizeof(v)) == ESP_OK) ms = (uint32_t)strtoul(v, NULL, 10);
         if (httpd_query_key_value(q, "station", v, sizeof(v)) == ESP_OK) station = (uint32_t)strtoul(v, NULL, 10);
     }
-    if (seconds < 1u || seconds > LISTEN_MAX_SECONDS || station > 1u) {
+    if (ms < 100u || ms > LISTEN_MAX_SECONDS * 1000u || station > 2u) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"s must be 1..30 and station 0 or 1\"}");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"s 1..30 or ms 100..30000, station 0, 1 or 2 (both)\"}");
     }
     uint32_t pos = 0u, lost = 0u;
     if (busy || !truing_demo_listen_start(&pos)) {
@@ -618,20 +621,39 @@ static esp_err_t listen_pcm_handler(httpd_req_t *req)
         return httpd_resp_sendstr(req, busy ? "{\"ok\":false,\"detail\":\"already listening\"}"
                                             : "{\"ok\":false,\"detail\":\"no live front end\"}");
     }
+    uint32_t pos_b = pos;   /* station 2 reads the second mic's ring from the same instant */
     busy = true;
     httpd_resp_set_type(req, "application/octet-stream");
-    const uint32_t want = seconds * TRUING_AUDIO_SAMPLE_RATE_HZ;
-    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)seconds + 3) * 1000000;
+    const uint32_t want = ms * (TRUING_AUDIO_SAMPLE_RATE_HZ / 1000u);   /* frames */
+    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)ms + 3000) * 1000;
     uint32_t sent = 0u;
     esp_err_t rc = ESP_OK;
     while (sent < want && rc == ESP_OK && lost == 0u && esp_timer_get_time() < deadline_us) {
         const uint32_t room = want - sent;
-        const uint32_t n = truing_demo_listen_read(station, &pos, buf, room < 1024u ? room : 1024u, &lost);
+        const uint32_t take = room < 512u ? room : 512u;
+        uint32_t n;
+        if (station < 2u) {
+            n = truing_demo_listen_read(station, &pos, a, take, &lost);
+            if (n != 0u) rc = httpd_resp_send_chunk(req, (const char *)a, (ssize_t)(n * sizeof(int32_t)));
+        } else {
+            n = truing_demo_listen_read(0u, &pos, a, take, &lost);
+            if (n != 0u) {
+                /* Same head, same count: the second ring has at least the n frames the first just gave. */
+                if (truing_demo_listen_read(1u, &pos_b, b, n, &lost) != n) {
+                    lost += 1u;
+                    break;
+                }
+                for (uint32_t i = 0; i < n; ++i) {
+                    out[2u * i] = a[i];
+                    out[2u * i + 1u] = b[i];
+                }
+                rc = httpd_resp_send_chunk(req, (const char *)out, (ssize_t)(n * 2u * sizeof(int32_t)));
+            }
+        }
         if (n == 0u) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
-        rc = httpd_resp_send_chunk(req, (const char *)buf, (ssize_t)(n * sizeof(int32_t)));
         sent += n;
     }
     busy = false;
