@@ -30,9 +30,10 @@ exactly this reason; pass `--upload-port` explicitly once you know it.
 | SD | GPIO6, shared | GPIO6, shared |
 | **L/R** | **GND → left slot** | **3.3V → right slot** |
 
-- **SD pull-down:** fit one 100 kΩ from GPIO6 to GND. SD floats between the two mics' slots. This
-  is the usual multi-mic INMP441 arrangement, but it has not been checked against the datasheet
-  here, so read the datasheet first.
+- **SD pull-down (two mics):** one 100 kΩ from GPIO6 to GND keeps SD at a clean 0 while it floats
+  between the two mics' slots. This is the usual multi-mic INMP441 arrangement, but it has not been
+  checked against the datasheet here. **Not needed with one mic**: a lone LEFT mic read ALIVE
+  without it (2026-09-28). Add it once both mics share the bus if a dead slot or the padding bits look noisy.
 - **L/R:** never leave it floating.
 - **Lead length:** BCLK is 3.07 MHz, so keep leads short and twist each signal with a ground.
 - **Mount trap:** a mic on a solenoid tower hears the tower through its mount. Coupling is a knob to
@@ -57,9 +58,51 @@ B0 electrical check** (`tools/bench/solenoid_smoke`'s `s3_bench_solenoid` env, `
 `fire`/`air` correctly reject `EXCITATION_UNAVAILABLE`; `ctrl` and `pluck` need no actuator and work
 today.
 
+### Roller (lab image only)
+
+The roller keeps the pins its bench wiring already uses (`docs/ROLLER_BENCH.md` R0), so nothing
+on the roller side moves when the mics and solenoids join it on the same board:
+
+| roller | GPIO |
+|---|---|
+| STEP / DIR / EN | 16 / 17 / 18 (EN has its 10 kΩ pull-up to 3.3 V) |
+| PDN_UART (optional, dead on the current driver) | 8 via 1 kΩ, and 9 direct |
+| DIAG | 10 |
+
+No pin is shared with the mics (4/5/6) or the solenoids (15/21).
+
+**One breadboard, one supply.** The DevKit runs from USB. The TMC2209's VM and the solenoids can share one
+12 V supply if its current rating covers a solenoid pulse *and* the motor; otherwise use two. Either way,
+join grounds at **one** point at the supply's negative terminal and bring the DevKit's GND to it once. The
+mic grounds return to the DevKit's GND only. Twist each motor phase pair, keep the motor and solenoid wires
+away from the mic wires, and keep the mic leads short. The stepper's chopping noise is real: the workbench
+opens a new epoch when you energise the coils, so a `ctrl 3` with the roller on and one with it off give
+two floors.
+
 ## 2. Image and first run
 
+For the mics alone:
+
     python tools/flash.py s3_devkit_fastdemo_mic_dualmic
+
+For the mics, solenoids **and** roller on one board (no reflash to switch between them):
+
+    python tools/flash.py s3_devkit_lab --port COMx       # COMx from `pio device list`
+
+The lab image is the same firmware plus the roller as a bench drive, and `GET /id` reports
+`"mode":"fastdemo+inmp441x2+campaign+drive"`. In the workbench:
+
+    roll                # state: energised or off, moving or idle, position, speed, faults
+    roll on             # energise the coils (opens a new epoch; the board keeps holding until `roll off`)
+    roll 1600           # move +1600 steps at the current ramp; Ctrl+C decelerates it to a stop
+    roll -1600          # and back (position returns to 0)
+    roll speed 3818 1600  # cruise steps/s and acceleration steps/s2 for the next moves
+    roll zero / roll stop / roll off
+
+The roller moves in raw steps: there is no spoke, no reference and no calibration in this image, and
+`position` counts pulses sent, not proof the wheel followed. A capture is refused while it moves, and every
+saved shot records whether the coils were energised. The roller demo's navigation is a different image
+(`s3_devkit_fastdemo_roller`).
 
 The bring-up log prints a separate liveness line for the `LEFT-station mic` and the
 `RIGHT-station mic`. A line that is all zeros means that mic is dead or its L/R strap is wrong. **The

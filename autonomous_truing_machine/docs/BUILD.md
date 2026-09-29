@@ -339,6 +339,38 @@ which every positioning turns the real wheel, open loop. Positioning is refused
 development image on a separate wheel stand, not a release image and not part of the Stage 1
 claims. The drive alone is exercised by `tools/bench/roller_smoke` (same driver source).
 
+### The lab image (`s3_devkit_lab`)
+
+For a bench with **one** DevKit and one breadboard: both INMP441s, both solenoid stations and the
+roller's TMC2209 wired at once and driven from one firmware, so a mic experiment and a roller move
+need no rewiring and no reflashing. It is the dual-mic campaign variant plus
+`-DTRUING_BENCH_DRIVE=1`; `build_mode.h` makes the flag illegal without `TRUING_CAMPAIGN_DEBUG` and
+illegal together with `TRUING_ROLLER_NAV` (one owner of the STEP pin). `GET /id` reports
+`"mode":"fastdemo+inmp441x2+campaign+drive"`.
+
+- **The roller is a bench drive here, not navigation.** At boot the TMC2209 is brought up DISABLED at
+  roller_smoke's cautious ramp (800 steps/s, 1600 steps/s²), microsteps left as the part powers up, and
+  handed to the debug channel only. Five new debug codes (`truing/debug_code.h`) drive it in raw
+  steps: `DRIVE_ENABLE`, `DRIVE_MOVE` (|steps| ≤ 200000, returns at once), `DRIVE_STOP`,
+  `DRIVE_MOTION` (cruise rate + acceleration), `DRIVE_ZERO`. Admission is the debug channel's own: on,
+  READY, no session. Nothing here touches wheel state, and `src/roller_calibration.h` is not consulted
+  (it stays empty until `docs/ROLLER_BENCH.md` R3/R4 measure it).
+- **A capture never overlaps motion.** `MEASURE_ONCE` is refused while the drive moves, so the step
+  interrupt and the roller's noise never land in a recording. `GET /debug/drive.json` reports enabled,
+  moving, position (pulses emitted: commanded, not evidence the wheel followed), fault and DIAG.
+- **Why not navigation.** Roller navigation waits for the operator to confirm spoke 0 before the machine
+  reaches READY, and `MEASURE_ONCE` is admitted only in READY, so the two would deadlock. The roller
+  demo stays `s3_devkit_fastdemo_roller`.
+- **Timers.** The S3 has four general-purpose timers: one per solenoid station, one for the roller's step
+  generator. Bring-up's throw-away actuators now hand theirs back (`truing_pluck_gpio_deinit`) before the
+  orchestrator builds its own pair.
+- **Driven from `tools/workbench.py`**: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`,
+  `roll speed <steps/s> [accel]`. Energising the coils opens a new workbench epoch (holding current is a
+  noise source beside the mics), and every saved shot records the roller state.
+- **Still needs a reflash:** the formal solenoid electrical check (`tools/bench/solenoid_smoke`), the
+  roller's R3/R4 bench stages (`tools/bench/roller_smoke`), and flipping a `PRESENT` flag once a station
+  has passed its check.
+
 ```bash
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_selfplay -t upload   # unattended evidence
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo -t upload   # accelerated demonstration
@@ -349,6 +381,7 @@ pio run -d "$env:USERPROFILE\truing_ws" -e nano_esp32_fastdemo_mic_campaign -t u
 python tools/flash.py nano_esp32_fastdemo_mic_dualmic                                     # dual-mic bench variant (Nano; dead)
 pio run -d "$env:USERPROFILE\truing_ws" -e s3_devkit_fastdemo_mic_campaign -t upload      # campaign bench variant, DevKit
 python tools/flash.py s3_devkit_fastdemo_mic_dualmic                                       # dual-mic bench variant, DevKit
+python tools/flash.py s3_devkit_lab --port COMx                                            # mics + solenoids + roller on one DevKit
 ```
 
 The Nano commands above are kept as a record of what ran there; that board is dead (2026-09-27) and

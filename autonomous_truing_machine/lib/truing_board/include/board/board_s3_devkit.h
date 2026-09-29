@@ -30,7 +30,12 @@
 #define BOARD_I2S_MIC_INPUT_LEFT_STATION   0
 #define BOARD_I2S_MIC_INPUT_RIGHT_STATION  1
 
-/* Wheel Navigation subsystem (SPEC §10A) — owns these pins exclusively.
+/* Pin rule for a board carrying everything at once (s3_devkit_lab): the roller's pins below are FIXED by
+ * its bench wiring (docs/ROLLER_BENCH.md R0) and everything else was placed around them -- the mics on
+ * 4/5/6 and the solenoids on 15/21 share nothing with STEP/DIR/EN 16/17/18, UART 8/9 and DIAG 10.
+ * Change a roller pin only with a bench entry; move the mics or solenoids instead.
+ *
+ * Wheel Navigation subsystem (SPEC §10A) — owns these pins exclusively.
  * Index / reference sensor input. */
 #define BOARD_INDEX_SENSOR_GPIO        7
 /* Wheel-drive actuator, RESERVED for the Stage 2 development motor driver (expected
