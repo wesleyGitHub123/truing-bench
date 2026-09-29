@@ -94,6 +94,34 @@ def measure_once_arg(spoke_id, no_fire=False, pulse_ms=0):
     return spoke_id | (MEASURE_ONCE_NO_FIRE_BIT if no_fire else 0) | (pulse_ms << MEASURE_ONCE_PULSE_SHIFT)
 
 
+# Bench drive (lab image, TRUING_BENCH_DRIVE): truing/debug_code.h TRUING_DEBUG_CODE_DRIVE_*.
+DRIVE_ENABLE_CODE = 2   # arg 0 = coils off, 1 = on
+DRIVE_MOVE_CODE = 3     # arg signed relative steps
+DRIVE_STOP_CODE = 4
+DRIVE_MOTION_CODE = 5   # arg = drive_motion_arg()
+DRIVE_ZERO_CODE = 6
+DRIVE_MOVE_MAX_STEPS = 200000     # TRUING_DRIVE_MOVE_MAX_STEPS
+DRIVE_ACCEL_UNIT = 100            # DRIVE_MOTION carries acceleration in units of 100 steps/s^2
+
+
+def drive_move_arg(steps):
+    if steps == 0 or abs(steps) > DRIVE_MOVE_MAX_STEPS:
+        raise ValueError("a move is 1..%d steps either way (got %d)" % (DRIVE_MOVE_MAX_STEPS, steps))
+    return int(steps)
+
+
+def drive_motion_arg(max_step_hz, accel_steps_s2):
+    """cruise steps/s in bits 0..15, acceleration in units of 100 steps/s^2 in bits 16..30. The
+    acceleration is rounded to the nearest 100, so what the board applies is `units * 100`."""
+    hz = int(max_step_hz)
+    units = int(round(float(accel_steps_s2) / DRIVE_ACCEL_UNIT))
+    if not 1 <= hz <= 0xFFFF:
+        raise ValueError("cruise rate is 1..65535 steps/s (got %d)" % hz)
+    if not 1 <= units <= 0x7FFF:
+        raise ValueError("acceleration is 100..3276700 steps/s2 (got %s)" % accel_steps_s2)
+    return hz | (units << 16)
+
+
 def ts():
     return time.strftime("%H:%M:%S")
 

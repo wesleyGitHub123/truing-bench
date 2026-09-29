@@ -104,6 +104,54 @@ def check_mic_health():
     assert loud["state"] == "CLIPPING", loud
 
 
+def check_drive_args():
+    # the layout test_core_intent pins on the C side: 800 steps/s and 1600 steps/s2 (16 units)
+    assert wb.cr.drive_motion_arg(800, 1600) == (16 << 16) | 800
+    assert wb.cr.drive_motion_arg(3818, 1640) == (16 << 16) | 3818      # rounds to the nearest 100
+    for bad in ((0, 1600), (65536, 1600), (800, 0), (800, 40), (800, 3276800)):
+        try:
+            wb.cr.drive_motion_arg(*bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("drive_motion_arg%r must be refused" % (bad,))
+    assert wb.cr.drive_move_arg(-1600) == -1600 and wb.cr.drive_move_arg(200000) == 200000
+    for bad in (0, 200001, -200001):
+        try:
+            wb.cr.drive_move_arg(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("drive_move_arg(%d) must be refused" % bad)
+    assert (wb.cr.DRIVE_ENABLE_CODE, wb.cr.DRIVE_MOVE_CODE, wb.cr.DRIVE_STOP_CODE, wb.cr.DRIVE_MOTION_CODE,
+            wb.cr.DRIVE_ZERO_CODE) == (2, 3, 4, 5, 6)
+
+
+def check_roll_parsing():
+    assert wb.parse_roll("") == ("status",)
+    assert wb.parse_roll("on") == ("on",) and wb.parse_roll("OFF") == ("off",)
+    assert wb.parse_roll("stop") == ("stop",) and wb.parse_roll("zero") == ("zero",)
+    assert wb.parse_roll("1600") == ("move", 1600) and wb.parse_roll("-400") == ("move", -400)
+    assert wb.parse_roll("+250") == ("move", 250)
+    assert wb.parse_roll("speed 3818") == ("speed", 3818, None)
+    assert wb.parse_roll("speed 3818 1600") == ("speed", 3818, 1600)
+    for bad in ("0", "sideways", "speed", "speed x", "1 2", "300000"):
+        try:
+            wb.parse_roll(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("roll %r must be refused" % bad)
+
+
+def check_describe_reject():
+    assert "no bench drive" in wb.describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "NOT_IMPLEMENTED"})
+    assert "roll on" in wb.describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "SENSOR_TIMEOUT"})
+    assert "busy" in wb.describe_reject({"verdict": "REJECT_STATE", "reason": "NONE"})
+    assert "moving" in wb.describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "VALUE_OUT_OF_RANGE"})
+    assert "debug channel" in wb.describe_reject({"verdict": "REJECT_DEBUG_DISABLED", "reason": "NONE"})
+
+
 def check_repeatability():
     r = wa.repeatability([406.1, 406.3, 406.2, 406.2, 397.6])
     assert r["n"] == 5 and r["within_tol"] == 4 and abs(r["median_hz"] - 406.2) < 1e-9
@@ -155,6 +203,7 @@ def check_reference_resolution():
 
 def main():
     for fn in (check_line_level, check_localization, check_shared_lines, check_line_presence, check_mic_health,
+               check_drive_args, check_roll_parsing, check_describe_reject,
                check_repeatability, check_far_fetch, check_reference_resolution):
         fn()
         print("  ok  %s" % fn.__name__)

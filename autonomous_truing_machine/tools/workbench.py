@@ -76,6 +76,9 @@ THE LOOP
 
 SETUP EACH EPOCH   ctrl 3 (room floor for both mics; the floor is per epoch because moving a mic moves it)
 TAP TEST           ctrl while someone taps the LEFT mic: the LEFT station's channel must spike; then RIGHT
+ROLLER (lab image) roll on | roll <+/-steps> | roll stop | roll off. Energising the coils opens a new epoch (holding
+                   current is a noise source beside the mics), so `ctrl 3` with the roller on and off gives two
+                   floors. A capture is refused while the roller moves. Every saved shot records the roller state.
 
 READING GUIDES (not thresholds)
   promising  a local line repeating within +-2 Hz across a spoke's strikes; NOT in the rig list; moves when
@@ -152,12 +155,73 @@ UNREACHABLE = ("can't reach the board at %s -- is this PC on the board's Wi-Fi (
 
 
 def describe_reject(ack):
-    v = (ack or {}).get("verdict")
+    """Plain words for a refused debug command (a capture or a roller command)."""
+    v, why = (ack or {}).get("verdict"), (ack or {}).get("reason")
     if v == "REJECT_STATE":
         return "board is busy (booting, or running its start-up self-play): wait ~30 s and try again"
     if v == "REJECT_DEBUG_DISABLED":
-        return "this firmware has the debug channel off: flash s3_devkit_fastdemo_mic_dualmic"
-    return "board refused the capture: %s" % (ack or "no answer")
+        return "this firmware has the debug channel off: flash s3_devkit_lab or s3_devkit_fastdemo_mic_dualmic"
+    if v == "REJECT_SESSION_ADMISSION":
+        if why == "NOT_IMPLEMENTED":
+            return "this firmware has no bench drive for the roller: flash s3_devkit_lab"
+        if why == "SENSOR_TIMEOUT":
+            return "the roller is off or faulted: `roll on` first (that also clears a latched fault)"
+        if why == "VALUE_OUT_OF_RANGE":
+            return "refused: the roller is moving (`roll stop` or wait), or an argument is out of range"
+        if why == "CALIBRATION_MISSING":
+            return "the roller has no usable speed/acceleration: `roll speed <steps/s> <accel>`"
+    return "board refused the command: %s" % (ack or "no answer")
+
+
+def board_drive_state(host, timeout):
+    """The lab image's bench drive as a dict (GET /debug/drive.json), or None when this image has none."""
+    try:
+        raw, _ = cf.get("http://%s/debug/drive.json" % host, timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return json.loads(raw.decode("utf-8"))
+
+
+def drive_line(d):
+    if d is None:
+        return "  roller                 (no bench drive in this image)"
+    flags = []
+    if d.get("faulted"):
+        flags.append("FAULT 0x%x" % d.get("fault_detail", 0))
+    if d.get("diag_high"):
+        flags.append("DIAG high")
+    return "  roller                 %-8s %-6s pos %7d steps  %5d steps/s  %6d steps/s2%s" % (
+        "ENERGISED" if d.get("enabled") else "off", "MOVING" if d.get("moving") else "idle", d.get("position_steps", 0),
+        d.get("max_step_hz", 0), d.get("accel_steps_s2", 0), "  !! " + ", ".join(flags) if flags else "")
+
+
+ROLL_USAGE = ("roll [on | off | stop | zero | <+/-steps> | speed <steps/s> [accel]]  -- `roll` alone shows the state")
+
+
+def parse_roll(arg):
+    """('status',) | ('on',) | ('off',) | ('stop',) | ('zero',) | ('move', steps) | ('speed', hz, accel|None)."""
+    t = arg.split()
+    if not t:
+        return ("status",)
+    head = t[0].lower()
+    if len(t) == 1 and head in ("on", "off", "stop", "zero"):
+        return (head,)
+    if head == "speed":
+        if len(t) not in (2, 3):
+            raise ValueError("roll speed <steps/s> [accel steps/s2]")
+        try:
+            return ("speed", int(t[1]), int(t[2]) if len(t) == 3 else None)
+        except ValueError:
+            raise ValueError("roll speed <steps/s> [accel steps/s2] -- whole numbers") from None
+    if len(t) == 1:
+        try:
+            steps = int(head)
+        except ValueError:
+            raise ValueError(ROLL_USAGE) from None
+        return ("move", cr.drive_move_arg(steps))
+    raise ValueError(ROLL_USAGE)
 
 
 def board_seq(host, timeout):
@@ -249,6 +313,12 @@ def heartbeat(host, timeout=20.0, beats=None):
                 if h["state"] != "DEAD":
                     recent.append(h["peak_dbfs"])
                 say(mic_line(SLOT_NAMES.get(slot, slot), h, tap))
+            try:
+                drv = board_drive_state(host, timeout)
+            except (OSError, ValueError):
+                drv = None
+            if drv is not None:                           # the lab image: the roller's state beside the mics
+                say(drive_line(drv))
     except KeyboardInterrupt:
         say("\nheartbeat stopped")
     finally:
@@ -483,6 +553,7 @@ MENU = """
   left | right     which station's mic the board analyses (LEFT = spoke 0, RIGHT = spoke 1)
   ctrl [n]         n silent captures, saved        pluck [n]   cued hand pluck, saved
   fire [n]         solenoid strikes (needs solenoids wired and enabled in the firmware)
+  roll [...]       the roller, lab image only: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`
   play local|far   listen to the last shot         view        reopen its figure
   ls               shots so far                    report      write report.md for the session
   knobs            current set-up                  guide       the full experiment loop
@@ -544,6 +615,97 @@ class Workbench(cmd.Cmd):
 
     def _seq_now(self):
         return board_seq(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+
+    # ---- the roller (lab image)
+    def _drive_cmd(self, code, arg=0):
+        """One DRIVE_* debug code; refusals come back as plain words."""
+        self.seq_counter[0] += 1
+        ws = self._ws()
+        ws.send_text({"cmd": "DEBUG", "code": code, "arg": int(arg), "seq": self.seq_counter[0]})
+        ack = cr.wait_for_ack(ws, self.seq_counter[0], float(self.s.knobs["timeout"]))
+        if ack is None:
+            raise TimeoutError("no answer to the roller command")
+        if ack.get("verdict") != "ACCEPT":
+            raise ValueError(describe_reject(ack))
+
+    def _drive_state(self):
+        d = board_drive_state(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+        if d is None:
+            raise ValueError(describe_reject({"verdict": "REJECT_SESSION_ADMISSION", "reason": "NOT_IMPLEMENTED"}))
+        return d
+
+    def _sync_roller(self, drv):
+        """Energised coils are part of the physical set-up (holding current is a noise source next to the
+        mics), so a change opens a new epoch and the floor is taken again for it."""
+        want = "energised" if drv["enabled"] else "off"
+        if self.s.physical.get("roller", "off") != want:
+            self.s.physical["roller"] = want
+            e = self.s.new_epoch("roller %s" % want, self.s.epoch["firmware"])
+            print("   roller is %s: new epoch %s. Take `ctrl 3` for this epoch's floor." % (want, e["id"]))
+
+    def _await_roller(self, steps):
+        """Poll until the move ends. Ctrl+C sends STOP (a controlled deceleration) and keeps waiting."""
+        d = self._drive_state()
+        hz = max(1, int(d.get("max_step_hz") or 1))
+        deadline = time.time() + abs(steps) / hz * 2.0 + 5.0
+        stopping = False
+        while time.time() < deadline:
+            try:
+                time.sleep(0.25)
+                d = self._drive_state()
+                if not d["moving"]:
+                    break
+            except KeyboardInterrupt:
+                if not stopping:
+                    self._drive_cmd(cr.DRIVE_STOP_CODE)
+                    print("   stop requested: decelerating")
+                    stopping = True
+                    deadline = time.time() + 5.0
+        else:
+            print("   !! still moving after the expected time: `roll stop`")
+        print(drive_line(self._drive_state()))
+
+    def do_roll(self, arg):
+        """roll [on | off | stop | zero | <+/-steps> | speed <steps/s> [accel]]: the roller on the lab image (s3_devkit_lab).
+        `roll` alone shows its state. `roll on` energises the coils (and opens a new epoch: holding current is a
+        noise source); a move is raw steps at the ramp shown, and Ctrl+C during one decelerates it to a stop.
+        `roll off` releases the coils. Position counts pulses sent, not proof the wheel followed."""
+        if self.offline:
+            raise ValueError("offline session: no board")
+        op = parse_roll(arg)
+        if op[0] == "status":
+            print(drive_line(self._drive_state()))
+        elif op[0] in ("on", "off"):
+            self._drive_cmd(cr.DRIVE_ENABLE_CODE, 1 if op[0] == "on" else 0)
+            d = self._drive_state()
+            self._sync_roller(d)
+            print(drive_line(d))
+        elif op[0] == "stop":
+            self._drive_cmd(cr.DRIVE_STOP_CODE)
+            time.sleep(0.3)
+            print(drive_line(self._drive_state()))
+        elif op[0] == "zero":
+            self._drive_cmd(cr.DRIVE_ZERO_CODE)
+            print(drive_line(self._drive_state()))
+        elif op[0] == "speed":
+            _, hz, accel = op
+            accel = accel if accel is not None else int(self._drive_state().get("accel_steps_s2") or 1600)
+            self._drive_cmd(cr.DRIVE_MOTION_CODE, cr.drive_motion_arg(hz, accel))
+            print(drive_line(self._drive_state()))
+        else:
+            self._drive_cmd(cr.DRIVE_MOVE_CODE, op[1])
+            self._await_roller(op[1])
+
+    def _roller_before_shot(self):
+        """The roller's state at the moment of a shot, or None on an image with no bench drive. The firmware
+        refuses a capture while it moves, so this cannot change during one."""
+        drv = board_drive_state(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+        if drv is None:
+            return None
+        if drv["moving"]:
+            raise ValueError("the roller is moving: `roll stop`, or wait for it to finish")
+        self._sync_roller(drv)
+        return drv
 
     # ---- 0 is anything listening
     def do_mic(self, arg):
@@ -665,6 +827,7 @@ class Workbench(cmd.Cmd):
         station = cr.station_for_spoke(spoke)
         no_fire = kind in ("ctrl", "pluck")
         pulse = 0 if no_fire else int(k["pulse"] or 0)
+        drv = self._roller_before_shot()
         seq_before = self._seq_now()
         self.seq_counter[0] += 1
         ws = self._ws()
@@ -691,6 +854,9 @@ class Workbench(cmd.Cmd):
                  "wb_session": self.s.tag, "wb_epoch": self.s.epoch["id"], "wb_excitation": kind}
         for key, val in self.s.physical.items():
             extra["wb_phys_" + key.replace(".", "_")] = str(val)
+        roller = None if drv is None else ("energised" if drv["enabled"] else "off")
+        if roller is not None:
+            extra["wb_roller"] = roller
         doc = cf.write_bundle(name, dict(meta, **extra), pcm, NOTE, self.s.dir, far_pcm=far)
         cf.add_to_index(name, self.s.dir)
         flags = []
@@ -707,7 +873,7 @@ class Workbench(cmd.Cmd):
             flags.append("capture_result=%s" % doc.get("capture_result"))
         rec = {"id": sid, "t": now(), "epoch": self.s.epoch["id"], "kind": kind, "spoke": spoke, "station": station,
                "pulse_req": pulse, "name": name, "json": os.path.join(self.s.dir, name + ".json"),
-               "physical": dict(self.s.physical), "flags": flags}
+               "physical": dict(self.s.physical), "flags": flags, "roller": roller}
         self._observe(rec, header="[%d/%d] #%d %s sp%d %s" % (i + 1, n, sid, kind, spoke, station), show=show)
         self.s.append_shot(rec)
         if kind == "strike":
@@ -738,7 +904,7 @@ class Workbench(cmd.Cmd):
         rec["focus_hz"], rec["focus_source"] = m["focus_hz"], m["focus_source"]
         rec["loc"] = m["loc"]
         if header:
-            print(header + "  -> " + rec["name"])
+            print(header + "  -> " + rec["name"] + ("   [roller %s]" % rec["roller"] if rec.get("roller") else ""))
         dead = False
         for slot, raw in slot_channels(meta, local, far):
             role = "local" if slot == meta.get("mic_input") else "far"
@@ -1024,6 +1190,13 @@ class Workbench(cmd.Cmd):
 
     def do_quit(self, arg):
         """quit"""
+        if not self.offline:
+            try:                                          # leaving the coils energised is a choice, not an accident
+                d = board_drive_state(self.s.knobs["host"], 3.0)
+                if d is not None and d["enabled"]:
+                    print("   note: the roller is still ENERGISED (`roll off` releases it; the board keeps holding).")
+            except (OSError, ValueError):
+                pass
         if self.ws is not None:
             self.ws.close()
         self.s.save()
@@ -1039,7 +1212,7 @@ def write_report(wb):
     s = wb.s
     d = s.dir
     shots_csv = os.path.join(d, "shots.csv")
-    cols = ["id", "t", "epoch", "kind", "spoke", "station", "pulse_req", "status", "reason", "f1_hz", "snr_db",
+    cols = ["id", "t", "epoch", "kind", "spoke", "station", "roller", "pulse_req", "status", "reason", "f1_hz", "snr_db",
             "pulse_ms", "mic_input", "local_peak_dbfs", "local_rail", "local_in_band_over_floor_db",
             "local_wide_over_floor_db", "far_in_band_over_floor_db", "focus_hz", "focus_source", "delta_db",
             "delta_rig_db", "loc_index_db", "loc_reference", "top_local_lines", "flags", "name"]
@@ -1048,7 +1221,7 @@ def write_report(wb):
         w.writerow(cols)
         for r in s.shots:
             b, m, L = r.get("board", {}), r.get("m", {}), r.get("loc") or {}
-            w.writerow([r["id"], r["t"], r["epoch"], r["kind"], r["spoke"], r["station"], r.get("pulse_req"),
+            w.writerow([r["id"], r["t"], r["epoch"], r["kind"], r["spoke"], r["station"], r.get("roller"), r.get("pulse_req"),
                         b.get("status"), b.get("reason"), b.get("expect_f1_hz"), b.get("expect_snr_db"), b.get("pulse_ms"),
                         b.get("mic_input"), m.get("local", {}).get("peak_dbfs"), m.get("local", {}).get("rail_hits"),
                         m.get("local", {}).get("in_band_over_floor_db"), m.get("local", {}).get("wide_over_floor_db"),
