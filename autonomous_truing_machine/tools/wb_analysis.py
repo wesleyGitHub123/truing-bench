@@ -50,6 +50,37 @@ def rail_hits(raw_words):
     return int(np.count_nonzero((s >= FULL_SCALE - 1) | (s <= -FULL_SCALE)))
 
 
+STUCK_FRACTION = 0.5         # a live INMP441's self-noise (~-87 dBFS, hundreds of LSB) never repeats a value this often
+
+
+def mic_health(raw_words):
+    """What one channel of a quiet capture says about the mic behind it.
+
+    "Nonzero" is not "alive": a data line nobody drives reads one constant (0 when it sits low, -1 when
+    it sits high), and pickup on the floating wire adds isolated glitches that can reach full scale and
+    fake spectral lines. So the test is whether the samples scatter, not whether they are nonzero."""
+    s = np.asarray(raw_words, dtype="<i4") >> 8
+    if s.size == 0:
+        return {"state": "NO DATA", "why": "empty capture", "rms_dbfs": None, "peak_dbfs": None, "rails": 0}
+    vals, counts = np.unique(s, return_counts=True)
+    i = int(counts.argmax())
+    mode, mode_frac = int(vals[i]), float(counts[i]) / s.size
+    x = words_to_float(raw_words)
+    h = {"rms_dbfs": float(db(np.sqrt(np.mean(x * x)))), "peak_dbfs": float(db(np.abs(x).max())),
+         "rails": rail_hits(raw_words), "mode": mode, "mode_frac": mode_frac}
+    if mode_frac >= STUCK_FRACTION:
+        level = {0: "0 (line low)", -1: "-1 (line high)"}.get(mode, str(mode))
+        glitches = s.size - int(counts[i])
+        h["state"] = "DEAD"
+        h["why"] = "stuck at %s in %.0f%% of samples: nothing is driving the data line%s" % (
+            level, 100 * mode_frac, ", %d glitch samples (pickup on a floating wire)" % glitches if glitches else "")
+    elif h["rails"]:
+        h["state"], h["why"] = "CLIPPING", "live, but hitting full scale %d times" % h["rails"]
+    else:
+        h["state"], h["why"] = "ALIVE", "live signal"
+    return h
+
+
 def load_bundle(json_path):
     """(meta, local_words, far_words_or_None) as raw int32 arrays."""
     with open(json_path, "r", encoding="utf-8") as f:
