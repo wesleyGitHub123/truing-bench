@@ -181,10 +181,11 @@ static void roller_drive_init_once(void)
         .node = 0u,
     };
 #if TRUING_BENCH_DRIVE
-    /* The bench drive never consults the roller calibration: raw steps, the bench sketch's ramp, and
-     * microsteps 0 so MRES stays as the part powers up (the bench found the UART unusable here). */
+    /* The bench drive never consults the roller calibration: raw steps and the bench sketch's ramp. It asks
+     * for 16 microsteps -- the count measured on this motor (ROLLER_BENCH: 3200 steps = 1 revolution) -- and
+     * the driver verifies it over the UART; without the UART it leaves MRES to the MS1/MS2 pins. */
     const truing_ramp_profile_t bench_prof = { 1000000u, BENCH_DRIVE_CRUISE_HZ, BENCH_DRIVE_ACCEL_SS };
-    s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &bench_prof, 0u);
+    s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &bench_prof, 16u);
     ESP_LOGW(TAG, "BENCH DRIVE: the roller's TMC2209 answers the DRIVE_* debug codes in raw steps (%s); it starts "
                   "DISABLED at %u steps/s, %u steps/s2. Navigation stays synthetic.",
              s.drive_ok ? "initialised" : "INIT FAILED", (unsigned)BENCH_DRIVE_CRUISE_HZ, (unsigned)BENCH_DRIVE_ACCEL_SS);
