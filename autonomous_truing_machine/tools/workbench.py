@@ -833,8 +833,13 @@ class Workbench(cmd.Cmd):
         n = len(glob.glob(os.path.join(self.s.dir, "burst_*_LEFT.pcm"))) + 1
         base = os.path.join(self.s.dir, "burst_%02d" % n)
         self._drop_ws()
-        print("   %d shots of %d ms every %d ms on %s, both mics watched live (~%.1f s) ..." % (
-            shots, pulse, gap, which.upper(), ms / 1000.0))
+        print("   ==== BURST STARTING NOW: %d solenoid shots (%s), %d ms each, one every %d ms, over ~%.1f s ===="
+              % (shots, which.upper(), pulse, gap, ms / 1000.0))
+        print("   watch or listen: the first shot fires in about 0.4 s. Each one is announced below as it happens.")
+        # When each shot is due (the firmware fires the first 0.4 s into the stream, then every `gap`), so the
+        # printout can say out loud that a solenoid is firing right now and you can check it by ear or eye.
+        sched = [(0.4 + k * gap / 1000.0, "LEFT" if fs == 0 or (fs == 2 and k % 2 == 0) else "RIGHT", k + 1)
+                 for k in range(shots)]
         blk = 9600                                            # 0.2 s of frames; two words each
         need = blk * 2 * 4
         chans = {"left_slot": [], "right_slot": []}
@@ -871,7 +876,10 @@ class Workbench(cmd.Cmd):
                         row.append("%s %-8s %6.1f rms %6.1f pk" % ("L" if slot == "left_slot" else "R", h["state"], rms, pk))
                     hits += 1 if hit else 0
                     t += blk / 48000.0
-                    print("  %4.1fs  %s  |  %s%s" % (t, row[0], row[1], "   << HIT" if hit else ""))
+                    win = int(round(t * 5.0)) - 1                     # 0-based 0.2 s window number, no float drift
+                    due = [x for x in sched if int(x[0] * 5.0 + 1e-6) == win]
+                    tag = "".join("   >>> FIRING %s SOLENOID: shot %d of %d <<<" % (x[1], x[2], shots) for x in due)
+                    print("  %4.1fs  %s  |  %s%s%s" % (t, row[0], row[1], "   << HIT" if hit else "", tag))
         except urllib.error.HTTPError as e:
             raise ValueError("the board refused: %s %s" % (e.code, e.read().decode(errors="replace")[:160]))
         except OSError as e:
@@ -881,6 +889,7 @@ class Workbench(cmd.Cmd):
         for slot, tag in (("left_slot", "LEFT"), ("right_slot", "RIGHT")):
             write_listening_wav(base + "_%s.norm.wav" % tag, np.concatenate(chans[slot]))
         total = len(chans["left_slot"])
+        print("   ==== BURST FINISHED: %d shots were commanded (the board's own count is in its serial log) ====" % shots)
         print("   summary: %d windows, %d with a hit  |  LEFT dead in %d, RIGHT dead in %d" % (
             total, hits, dead["left_slot"], dead["right_slot"]))
         if dead["left_slot"] == 0 and dead["right_slot"] == 0:
