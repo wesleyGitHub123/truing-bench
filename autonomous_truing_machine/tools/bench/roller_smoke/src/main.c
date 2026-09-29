@@ -29,6 +29,8 @@
  *   p / s      position / full status
  *   u          TMC2209 register dump over UART
  *   a          scan UART node addresses 0..3
+ *   w          raw UART probe: every byte that comes back after a read request, per node
+ *   l          internal loopback: the UART and this code with no wire, plus the RX pin's idle level
  *   m          next microstep setting (written and verified over UART)
  *   i / I      IRUN -1 / +1 (writes IHOLD_IRUN; IHOLD = IRUN/2) -- changes motor current
  *   c          clear GSTAT
@@ -39,6 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
 #include "esp_log.h"
@@ -164,6 +167,108 @@ static void scan_nodes(void)
     }
     g_ctx.pins.node = keep;
     printf("(node stays %u; the MS1/MS2 pins set it)\n", keep);
+}
+
+/* 'w': the UART wire itself, below the frame parser. Sends one IOIN read request per node and prints every
+ * byte that comes back within 50 ms, so "no valid reply" can be told apart: nothing at all (RX not
+ * connected / line not driven), only our own 4-byte echo (the line works, the driver is not answering:
+ * power, VIO, address), or something else (garbled: level, baud or a fight on the line). */
+/* One pass over nodes 0..3. Returns the best outcome: 0 nothing, 1 garbled, 2 echo only, 3 echo + reply. */
+static int raw_pass(uart_port_t port)
+{
+    int best = 0;
+    for (uint8_t n = 0u; n < 4u; ++n) {
+        uint8_t req[TRUING_TMC2209_READ_REQ_LEN];
+        truing_tmc2209_read_request(req, n, TRUING_TMC2209_IOIN);
+        uart_flush_input(port);
+        uart_write_bytes(port, req, sizeof(req));
+        uart_wait_tx_done(port, pdMS_TO_TICKS(20));
+        uint8_t buf[32];
+        const int got = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(50));
+        printf("    node %u sent %02x %02x %02x %02x | got %d byte%s:", n, req[0], req[1], req[2], req[3], got < 0 ? 0 : got,
+               got == 1 ? "" : "s");
+        for (int i = 0; i < got; ++i) {
+            printf(" %02x", buf[i]);
+        }
+        const bool echo = got >= 4 && memcmp(buf, req, 4) == 0;
+        const int r = got <= 0 ? 0 : (echo && got >= 12 ? 3 : (echo && got == 4 ? 2 : 1));
+        static const char *const k_what[] = { "nothing", "unexpected bytes", "echo only", "echo + reply" };
+        printf("  [%s]\n", k_what[r]);
+        if (r > best) best = r;
+    }
+    return best;
+}
+
+/* The single-wire wiring check (TMC2209 datasheet, and what fixed the BigTreeTech V1.3 for others): the
+ * board's TX reaches the driver's one UART pin THROUGH a resistor and its RX joins that same pin directly,
+ * so an idle line reads high and every request comes back as an echo. The driver's logic runs from its own
+ * regulator off VM, so VM must be powered; the probe runs once disabled and once with EN low. */
+static void raw_probe(void)
+{
+    if (g_ctx.pins.uart_num < 0) {
+        printf("UART not set up in this build\n");
+        return;
+    }
+    const uart_port_t port = (uart_port_t)g_ctx.pins.uart_num;
+    printf("UART%d TX GPIO %d RX GPIO %d, 115200 8N1\n", g_ctx.pins.uart_num, g_ctx.pins.uart_tx_gpio, g_ctx.pins.uart_rx_gpio);
+    const int idle = gpio_get_level((gpio_num_t)g_ctx.pins.uart_rx_gpio);
+    /* The UART driver pulls RX up internally, so high proves nothing; low means something holds the line down
+     * (the TMC2209's PDN_UART pull-down, with TX not reaching it). Only the echo below is conclusive. */
+    printf("  RX idle level %d %s\n", idle, idle ? "(high: inconclusive, RX has an internal pull-up)"
+                                                : "(LOW: the driver's pin is on RX but TX is not reaching it)");
+    printf("  pass 1, driver disabled (EN high):\n");
+    int best = raw_pass(port);
+    if (best < 3) {
+        truing_wheel_drive_enable(&g_drive, true, NULL);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        printf("  pass 2, driver ENABLED (EN low, coils energised, nothing moves):\n");
+        const int b2 = raw_pass(port);
+        truing_wheel_drive_enable(&g_drive, false, NULL);
+        if (b2 > best) best = b2;
+    }
+    printf("  VERDICT: ");
+    if (best == 3) {
+        printf("the driver answers. UART works.\n");
+    } else if (best == 2) {
+        printf("the line works (echo) but the driver never answers: VM not powered, VIO/GND missing, or the joined\n"
+               "           node is not the driver's UART pin. Try a 10k in place of the 1k (fixed the BTT V1.3 for others).\n");
+    } else if (best == 1) {
+        printf("bytes come back garbled: two outputs fighting on the line -- the TX resistor is missing or too small.\n");
+    } else {
+        printf("nothing comes back, not even the echo: GPIO %d and GPIO %d are not on one node. Wire\n"
+               "           GPIO %d -> 1k (or 10k) -> driver UART pin, and GPIO %d -> that SAME pin, direct.\n",
+               g_ctx.pins.uart_tx_gpio, g_ctx.pins.uart_rx_gpio, g_ctx.pins.uart_tx_gpio, g_ctx.pins.uart_rx_gpio);
+    }
+}
+
+/* 'l': the UART peripheral and this code, with no wire involved -- the chip's internal loopback routes TX
+ * straight to RX. Four bytes back means the driver, the port and the read path work, so a silent 'w' is
+ * the wiring or the TMC2209; nothing back here means the software/peripheral setup itself is wrong. Also
+ * reports the RX pin's level: an idle UART line sits high. */
+static void loopback_probe(void)
+{
+    if (g_ctx.pins.uart_num < 0) {
+        printf("UART not set up in this build\n");
+        return;
+    }
+    const uart_port_t port = (uart_port_t)g_ctx.pins.uart_num;
+    printf("RX GPIO %d level now: %d (an idle UART line reads 1)\n", g_ctx.pins.uart_rx_gpio,
+           gpio_get_level((gpio_num_t)g_ctx.pins.uart_rx_gpio));
+    uart_set_loop_back(port, true);
+    uint8_t req[TRUING_TMC2209_READ_REQ_LEN];
+    truing_tmc2209_read_request(req, 0u, TRUING_TMC2209_IOIN);
+    uart_flush_input(port);
+    uart_write_bytes(port, req, sizeof(req));
+    uart_wait_tx_done(port, pdMS_TO_TICKS(20));
+    uint8_t buf[16];
+    const int got = uart_read_bytes(port, buf, sizeof(buf), pdMS_TO_TICKS(50));
+    uart_set_loop_back(port, false);
+    printf("internal loopback: sent 4, got %d:", got < 0 ? 0 : got);
+    for (int i = 0; i < got; ++i) {
+        printf(" %02x", buf[i]);
+    }
+    printf("  [%s]\n", got == 4 && memcmp(buf, req, 4) == 0 ? "software + UART peripheral OK"
+                                                            : "FAILED: the UART setup itself is wrong");
 }
 
 static void next_microsteps(void)
@@ -340,6 +445,8 @@ void app_main(void)
         case 's': print_status(); break;
         case 'u': reg_dump(); break;
         case 'a': scan_nodes(); break;
+        case 'w': raw_probe(); break;
+        case 'l': loopback_probe(); break;
         case 'm': next_microsteps(); break;
         case 'i': if (g_irun > 0u) { set_irun(g_irun - 1u); } break;
         case 'I': set_irun(g_irun + 1u); break;
