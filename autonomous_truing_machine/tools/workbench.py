@@ -356,7 +356,7 @@ def heartbeat(host, timeout=20.0, beats=None):
 
     say(HEARTBEAT_HELP)
     ensure_board(host, say=say)
-    ws, seq, beat, peaks = None, 0, 0, {}
+    ws, seq, beat, peaks, tap_run = None, 0, 0, {}, {}
     quick = True                                          # the live stream; falls back to captures on an old image
     try:
         while beats is None or beat < beats:
@@ -405,8 +405,12 @@ def heartbeat(host, timeout=20.0, beats=None):
             for slot, raw in chans:
                 h = wa.mic_health(np.frombuffer(raw, dtype="<i4"))
                 recent = peaks.setdefault(slot, [])
-                tap = h["state"] != "DEAD" and len(recent) >= 3 and h["peak_dbfs"] > np.median(recent[-5:]) + TAP_DB
-                if h["state"] != "DEAD":
+                tap = h["state"] != "DEAD" and len(recent) >= 3 and h["peak_dbfs"] > np.median(recent[-8:]) + TAP_DB
+                # The baseline is the quiet level, so taps stay out of it: otherwise sustained tapping raises
+                # the median until the tap stops registering. If a mic stays "tapped" for 20 beats in a row
+                # the room really got louder, so let it in and the baseline follows.
+                run = tap_run[slot] = (tap_run.get(slot, 0) + 1) if tap else 0
+                if h["state"] != "DEAD" and (not tap or run > 20):
                     recent.append(h["peak_dbfs"])
                 say(mic_line(SLOT_NAMES.get(slot, slot), h, tap))
             try:
