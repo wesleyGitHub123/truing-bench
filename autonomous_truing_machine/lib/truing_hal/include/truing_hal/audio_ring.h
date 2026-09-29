@@ -36,6 +36,14 @@ uint32_t truing_audio_ring_append(truing_audio_ring_t *r, const int32_t *words, 
  * the producer moving on does not slide the tail). n must not exceed r->filled. */
 void truing_audio_ring_tail(const truing_audio_ring_t *r, uint32_t input, uint32_t head, uint32_t n, int32_t *out);
 
+/* Live read for a listener that follows the writer (the workbench's listening stream). `*pos` is the
+ * reader's own ring index: start it at r->head to hear from now on. Copies up to `max` samples of
+ * `input` that the writer has appended since `*pos` and advances it. A reader that has fallen so far
+ * behind that the writer is about to lap it is moved up to half a ring behind the head; the samples
+ * skipped are added to `*lost` (may be NULL) so a gap is counted, never spliced in silently. */
+uint32_t truing_audio_ring_read_since(const truing_audio_ring_t *r, uint32_t input, uint32_t *pos, uint32_t max,
+                                      int32_t *out, uint32_t *lost);
+
 /* Copies `input`'s samples from n_frames interleaved frames into out (mono). */
 void truing_audio_frames_extract(const int32_t *words, uint32_t n_frames, uint32_t n_inputs, uint32_t input,
                                  int32_t *out);

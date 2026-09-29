@@ -33,6 +33,29 @@ void truing_audio_ring_tail(const truing_audio_ring_t *r, uint32_t input, uint32
     }
 }
 
+uint32_t truing_audio_ring_read_since(const truing_audio_ring_t *r, uint32_t input, uint32_t *pos, uint32_t max,
+                                      int32_t *out, uint32_t *lost)
+{
+    if (r == NULL || pos == NULL || out == NULL || input >= r->n_inputs || r->cap == 0u || *pos >= r->cap) {
+        return 0u;
+    }
+    const uint32_t head = r->head;   /* sampled once: the writer moves on while this copies */
+    uint32_t avail = (head + r->cap - *pos) % r->cap;
+    if (avail > r->cap - r->cap / 4u) {
+        const uint32_t skip = avail - r->cap / 2u;
+        *pos = (*pos + skip) % r->cap;
+        avail = r->cap / 2u;
+        if (lost != NULL) *lost += skip;
+    }
+    const uint32_t n = avail < max ? avail : max;
+    const int32_t *ring = r->ring[input];
+    for (uint32_t i = 0; i < n; ++i) {
+        out[i] = ring[(*pos + i) % r->cap];
+    }
+    *pos = (*pos + n) % r->cap;
+    return n;
+}
+
 void truing_audio_frames_extract(const int32_t *words, uint32_t n_frames, uint32_t n_inputs, uint32_t input,
                                  int32_t *out)
 {

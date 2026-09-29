@@ -71,9 +71,68 @@ static void test_frames_extract_picks_one_input_and_copies_mono_unchanged(void)
     TEST_ASSERT_EQUAL_MEMORY(frames, mono, sizeof(frames));
 }
 
+static void test_read_since_counts_a_gap_instead_of_splicing_it(void)
+{
+    int32_t left[8], right[8];
+    truing_audio_ring_t r = { .ring = { left, right }, .cap = 8u, .n_inputs = 2u, .head = 0u, .filled = 0u };
+    int32_t in[20];
+    for (int f = 0; f < 10; ++f) {
+        in[2 * f] = 500 + f;
+        in[2 * f + 1] = -(500 + f);
+    }
+    uint32_t pos = r.head, lost = 0u;
+    int32_t out[8];
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_audio_ring_read_since(&r, 1u, &pos, 8u, out, &lost));   /* nothing yet */
+    truing_audio_ring_append(&r, in, 10u);   /* frames 0..4 */
+    TEST_ASSERT_EQUAL_UINT32(3u, truing_audio_ring_read_since(&r, 1u, &pos, 3u, out, &lost));   /* max honoured */
+    for (int i = 0; i < 3; ++i) TEST_ASSERT_EQUAL_INT32(-(500 + i), out[i]);
+    truing_audio_ring_append(&r, in + 10, 10u);   /* frames 5..9, the head wraps */
+    /* 7 frames outstanding is past the lap margin (cap 8 -> 6): the reader is moved up to 4 behind the
+     * head and the 3 skipped frames (3, 4, 5) are reported */
+    TEST_ASSERT_EQUAL_UINT32(4u, truing_audio_ring_read_since(&r, 1u, &pos, 4u, out, &lost));
+    TEST_ASSERT_EQUAL_UINT32(3u, lost);
+    TEST_ASSERT_EQUAL_INT32(-(500 + 6), out[0]);
+    TEST_ASSERT_EQUAL_INT32(-(500 + 9), out[3]);
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_audio_ring_read_since(&r, 1u, &pos, 4u, out, &lost));   /* caught up */
+    TEST_ASSERT_EQUAL_UINT32(3u, lost);
+}
+
+static void test_read_since_keeps_up_when_polled_often_and_lists_no_loss(void)
+{
+    int32_t mem[8];
+    truing_audio_ring_t r = { .ring = { mem, NULL }, .cap = 8u, .n_inputs = 1u, .head = 0u, .filled = 0u };
+    uint32_t pos = r.head, lost = 0u, next = 0u;
+    int32_t out[8];
+    for (int round = 0; round < 10; ++round) {
+        int32_t in[3];
+        for (int i = 0; i < 3; ++i) in[i] = (int32_t)(next + (uint32_t)i);
+        truing_audio_ring_append(&r, in, 3u);
+        const uint32_t n = truing_audio_ring_read_since(&r, 0u, &pos, 8u, out, &lost);
+        TEST_ASSERT_EQUAL_UINT32(3u, n);
+        for (uint32_t i = 0; i < n; ++i) TEST_ASSERT_EQUAL_INT32((int32_t)(next + i), out[i]);
+        next += 3u;
+    }
+    TEST_ASSERT_EQUAL_UINT32(0u, lost);
+}
+
+static void test_read_since_refuses_bad_arguments(void)
+{
+    int32_t mem[4];
+    truing_audio_ring_t r = { .ring = { mem, NULL }, .cap = 4u, .n_inputs = 1u, .head = 0u, .filled = 0u };
+    uint32_t pos = 9u;   /* outside the ring */
+    int32_t out[4];
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_audio_ring_read_since(&r, 0u, &pos, 4u, out, NULL));
+    pos = 0u;
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_audio_ring_read_since(&r, 1u, &pos, 4u, out, NULL));   /* no such input */
+    TEST_ASSERT_EQUAL_UINT32(0u, truing_audio_ring_read_since(NULL, 0u, &pos, 4u, out, NULL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_read_since_counts_a_gap_instead_of_splicing_it);
+    RUN_TEST(test_read_since_keeps_up_when_polled_often_and_lists_no_loss);
+    RUN_TEST(test_read_since_refuses_bad_arguments);
     RUN_TEST(test_one_input_ring_is_the_stream_as_delivered_across_wraparound);
     RUN_TEST(test_two_inputs_split_into_aligned_rings);
     RUN_TEST(test_a_trailing_partial_frame_is_not_appended);
