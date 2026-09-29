@@ -259,7 +259,7 @@ def slot_channels(meta, local_raw, far_raw):
 
 
 HEARTBEAT_HELP = """
-MIC HEARTBEAT -- one silent 1.2 s capture per beat (~3 s), both mics every beat, nothing saved.
+MIC HEARTBEAT -- half a second of both mics from the live stream every ~1 s, nothing saved.
   ALIVE     the samples scatter the way a powered mic's self-noise does (quiet room: about -90..-60 dBFS)
   DEAD      the data line sits on one value: that mic is unpowered, unclocked, or not on GPIO6
   CLIPPING  live but hitting full scale: too loud / too close
@@ -317,6 +317,32 @@ def ensure_board(host, wait_s=90.0, say=print):
     return False
 
 
+def until_settled(fn, limit=25.0):
+    """Call fn(), and while the board answers 409 (a capture it took has not finished settling) keep asking the
+    SAME question every 0.15 s instead of starting over: the result is ready as soon as the board is."""
+    t_end = time.time() + limit
+    while True:
+        try:
+            return fn()
+        except urllib.error.HTTPError as e:
+            if e.code != 409 or time.time() > t_end:
+                raise
+            time.sleep(0.15)
+
+
+def quick_channels(host, timeout, ms=500):
+    """Both mics from the board's live stream: [(slot, raw int32 words)] for `ms` of audio, with none of the
+    acoustic analysis a capture drags along (~1 s a beat instead of ~7). The stream interleaves the LEFT
+    station's mic (left slot) and the RIGHT station's (right slot) per frame."""
+    import urllib.request
+    with urllib.request.urlopen("http://%s/debug/listen.pcm?ms=%d&station=2" % (host, ms), timeout=timeout) as r:
+        data = r.read()
+    w = np.frombuffer(data[:len(data) // 8 * 8], dtype="<i4")
+    if w.size < 2 * 48 * 100:
+        raise urllib.error.HTTPError("listen", 502, "the stream ended early", None, None)
+    return [("left_slot", w[0::2].tobytes()), ("right_slot", w[1::2].tobytes())]
+
+
 def heartbeat(host, timeout=20.0, beats=None):
     """Repeated no-fire captures on spoke 0 (LEFT local, RIGHT far), one status line per mic per beat."""
     def say(text):
@@ -325,33 +351,41 @@ def heartbeat(host, timeout=20.0, beats=None):
     say(HEARTBEAT_HELP)
     ensure_board(host, say=say)
     ws, seq, beat, peaks = None, 0, 0, {}
+    quick = True                                          # the live stream; falls back to captures on an old image
     try:
         while beats is None or beat < beats:
             try:
-                if ws is None:
-                    ws = cr.WS(host, 80, "/ws")
-                before = board_seq(host, timeout)
-                seq += 1
-                ws.send_text({"cmd": "DEBUG", "code": cr.MEASURE_ONCE_CODE,
-                              "arg": cr.measure_once_arg(0, True, 0), "seq": seq})
-                ack = cr.wait_for_ack(ws, seq, timeout)
-                if ack is None:
-                    raise TimeoutError("no answer to the capture request")
-                if ack.get("verdict") != "ACCEPT":
-                    say("%s  %s" % (time.strftime("%H:%M:%S"), describe_reject(ack)))
-                    time.sleep(3)
-                    continue
-                meta, pcm, far = cf.fetch_bundle(host, timeout, with_far=True)
-                if int(meta.get("seq", -1)) == before:
-                    say("%s  no new capture came back; retrying" % time.strftime("%H:%M:%S"))
-                    continue
+                if quick:
+                    chans = quick_channels(host, timeout)
+                else:
+                    if ws is None:
+                        ws = cr.WS(host, 80, "/ws")
+                    before = until_settled(lambda: board_seq(host, timeout))
+                    seq += 1
+                    ws.send_text({"cmd": "DEBUG", "code": cr.MEASURE_ONCE_CODE,
+                                  "arg": cr.measure_once_arg(0, True, 0), "seq": seq})
+                    ack = cr.wait_for_ack(ws, seq, timeout)
+                    if ack is None:
+                        raise TimeoutError("no answer to the capture request")
+                    if ack.get("verdict") != "ACCEPT":
+                        say("%s  %s" % (time.strftime("%H:%M:%S"), describe_reject(ack)))
+                        time.sleep(3)
+                        continue
+                    meta, pcm, far = until_settled(lambda: cf.fetch_bundle(host, timeout, with_far=True))
+                    if int(meta.get("seq", -1)) == before:
+                        say("%s  no new capture came back; retrying" % time.strftime("%H:%M:%S"))
+                        continue
+                    chans = slot_channels(meta, pcm, far)
             except OSError as e:                          # timeouts, refused, URLError: Wi-Fi or a reboot
                 if ws is not None:
                     ws.close()
                     ws = None
                 if isinstance(e, urllib.error.HTTPError):      # it answered, it just is not ready yet
-                    say("%s  the board answered %s: not ready for a capture yet, retrying" % (time.strftime("%H:%M:%S"), e.code))
-                    time.sleep(2)
+                    if quick and e.code in (400, 404):
+                        quick = False
+                        say("   (this image has no live stream: checking with full captures, ~7 s a beat)")
+                        continue
+                    time.sleep(0.5 if quick else 2)       # 409: another listener, or a capture still settling
                     continue
                 say("%s  lost the board (%s)" % (time.strftime("%H:%M:%S"), e.__class__.__name__))
                 if not ensure_board(host, say=say):
@@ -362,7 +396,7 @@ def heartbeat(host, timeout=20.0, beats=None):
                 continue
             beat += 1
             say("%s  beat %d" % (time.strftime("%H:%M:%S"), beat))
-            for slot, raw in slot_channels(meta, pcm, far):
+            for slot, raw in chans:
                 h = wa.mic_health(np.frombuffer(raw, dtype="<i4"))
                 recent = peaks.setdefault(slot, [])
                 tap = h["state"] != "DEAD" and len(recent) >= 3 and h["peak_dbfs"] > np.median(recent[-5:]) + TAP_DB
