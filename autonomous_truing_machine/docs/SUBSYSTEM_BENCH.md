@@ -80,3 +80,17 @@ acoustic (nothing here says a pluck is detected, only that the front end is aliv
 Each solenoid now has a microphone station beside it. Profiling starts from the ALIVE heartbeat, one
 mic per solenoid station, using the workbench (`tools/WORKBENCH.md`). Bench work above is the
 baseline it builds on; profile results belong in their own entry, not here.
+
+## Roller perfboard (board 5A84006975, 2026-09-29)
+
+A perfboard with the TMC2209 in a removable female header, on the second DevKit with both mics. Stages 0-3 of the
+bring-up passed: mics ALIVE with the perfboard connected; driver module in and VM on with the motor unplugged reads
+`OK`, current 16/31, no flags, DIAG low; motor connected, `roll 1600` then `roll -1600` returned the position to 0 and
+the operator saw the shaft move.
+
+- **The driver needs VM to answer.** Its logic runs from VM, not VIO, so a module with VM off reads "no driver" (UART
+  silent). The board probes the driver only at boot, so power VM first and then reset the board.
+- **One unexplained silence:** after the motor was connected the driver stayed silent with DIAG high until the ESP32's USB
+  was replugged. Cause not established (VM may have come up after the board booted).
+- **Never** insert or remove the module or the motor with VM live.
+- Not done: the mic noise floor against motor off / enabled-idle / moving, and solenoids on this board.
