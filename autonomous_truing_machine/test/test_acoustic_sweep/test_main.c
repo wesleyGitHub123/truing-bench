@@ -31,6 +31,7 @@
  * the only override -- to expose what the detector would have seen.
  */
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -203,6 +204,8 @@ static void run_one(const char *name, const char *axis, double value, const trui
     run_one_s(name, axis, label, chain, words, n_words);
 }
 
+static bool use_far(void);
+
 /* One bundle's samples, or NULL with *err naming why (the caller prints its own CSV row). */
 static int32_t *load_words(const char *dir, const char *name, uint32_t *n_words_out, const char **err)
 {
@@ -220,14 +223,15 @@ static int32_t *load_words(const char *dir, const char *name, uint32_t *n_words_
         *err = "METADATA_BAD";
         return NULL;
     }
+    const bool far = use_far();
     uint32_t n_words = 0u;
-    if (!json_u32(&doc, "n_words", &n_words) || n_words == 0u) {
-        *err = "N_WORDS_MISSING";
+    if (!json_u32(&doc, far ? "far_n_words" : "n_words", &n_words) || n_words == 0u) {
+        *err = far ? "NO_FAR_CHANNEL" : "N_WORDS_MISSING";
         return NULL;
     }
     char pcm_name[MAX_NAME_LEN] = { 0 };
-    if (!json_str(&doc, "pcm", pcm_name, sizeof(pcm_name))) {
-        (void)snprintf(pcm_name, sizeof(pcm_name), "%s.pcm", name);
+    if (!json_str(&doc, far ? "far_pcm" : "pcm", pcm_name, sizeof(pcm_name))) {
+        (void)snprintf(pcm_name, sizeof(pcm_name), far ? "%s.far.pcm" : "%s.pcm", name);
     }
     (void)snprintf(path, sizeof(path), "%s/%s", dir, pcm_name);
     int32_t *words = (int32_t *)malloc((size_t)n_words * sizeof(int32_t));
@@ -240,6 +244,157 @@ static int32_t *load_words(const char *dir, const char *name, uint32_t *n_words_
     }
     *n_words_out = n_words;
     return words;
+}
+
+/* ---- variant file (TRUING_SWEEP_VARIANTS) ------------------------------------------------------
+ *
+ * Instead of the fixed grid, sweep named variants read from a file, one per line:
+ *
+ *     hp_gate200: gate_start_ms=200, prominence_db=9
+ *
+ * '#' starts a comment. Every field not named keeps the fixture profile's value. Only the analysis
+ * fields below can be named: capture_ms / pre_trigger_ms size the board's audio ring (a reflash and a
+ * new capture, not a replay), and the identity fields are not analysis. Each row prints with axis
+ * "variant" and value = the variant's name, so a CSV row still names exactly one setting. A line
+ * that does not parse fails the run: a typo must not silently sweep the baseline under another name. */
+typedef struct {
+    const char *name;
+    size_t      offset;
+} sweep_field_t;
+
+#define SWEEP_FIELD(f) { #f, offsetof(truing_chain_profile_t, f) }
+static const sweep_field_t k_fields[] = {
+    SWEEP_FIELD(f1_band_lo_hz),        SWEEP_FIELD(f1_band_hi_hz),        SWEEP_FIELD(window_ms),
+    SWEEP_FIELD(gate_start_ms),        SWEEP_FIELD(measurement_min_snr_db), SWEEP_FIELD(onset_frame_ms),
+    SWEEP_FIELD(onset_hop_ms),         SWEEP_FIELD(onset_threshold_rel),  SWEEP_FIELD(onset_threshold_abs),
+    SWEEP_FIELD(onset_refractory_s),   SWEEP_FIELD(decay_floor_db),       SWEEP_FIELD(decay_smoothing_ms),
+    SWEEP_FIELD(next_onset_margin_ms), SWEEP_FIELD(min_window_ms),        SWEEP_FIELD(zero_pad_factor),
+    SWEEP_FIELD(search_band_lo_hz),    SWEEP_FIELD(search_band_hi_hz),    SWEEP_FIELD(prominence_db),
+    SWEEP_FIELD(max_peak_depth_db),    SWEEP_FIELD(f2_ratio_lo),          SWEEP_FIELD(f2_ratio_hi),
+    SWEEP_FIELD(snr_noise_offset_lo_hz), SWEEP_FIELD(snr_noise_offset_hi_hz),
+};
+
+#define MAX_VARIANTS 64u
+typedef struct {
+    char                   name[MAX_NAME_LEN];
+    truing_chain_profile_t chain;
+} sweep_variant_t;
+
+static sweep_variant_t g_variants[MAX_VARIANTS];
+static unsigned g_n_variants;
+
+static char *trim(char *s)
+{
+    while (*s == ' ' || *s == '\t') s++;
+    char *end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n' || end[-1] == '\r')) *--end = '\0';
+    return s;
+}
+
+/* Parses one variant line into `out` (starting from `base`). False with `err` naming what is wrong;
+ * true with out->name empty for a blank or comment line. */
+static bool parse_variant(const char *line_in, const truing_chain_profile_t *base, sweep_variant_t *out,
+                          char *err, size_t err_cap)
+{
+    char line[512];
+    (void)snprintf(line, sizeof(line), "%s", line_in);
+    char *hash = strchr(line, '#');
+    if (hash != NULL) *hash = '\0';
+    char *s = trim(line);
+    out->name[0] = '\0';
+    out->chain = *base;
+    if (*s == '\0') {
+        return true;
+    }
+    char *colon = strchr(s, ':');
+    if (colon == NULL) {
+        (void)snprintf(err, err_cap, "no ':' after the variant name");
+        return false;
+    }
+    *colon = '\0';
+    char *name = trim(s);
+    if (*name == '\0' || strchr(name, ',') != NULL) {
+        (void)snprintf(err, err_cap, "empty name, or a comma in it");
+        return false;
+    }
+    (void)snprintf(out->name, sizeof(out->name), "%s", name);
+    char *rest = colon + 1;
+    unsigned n_set = 0u;
+    for (char *tok = strtok(rest, ","); tok != NULL; tok = strtok(NULL, ",")) {
+        char *eq = strchr(tok, '=');
+        if (eq == NULL) {
+            (void)snprintf(err, err_cap, "'%s' is not field=value", trim(tok));
+            return false;
+        }
+        *eq = '\0';
+        const char *field = trim(tok);
+        char *vs = trim(eq + 1);
+        char *endp = NULL;
+        const double v = strtod(vs, &endp);
+        if (endp == vs || *endp != '\0' || !isfinite(v)) {
+            (void)snprintf(err, err_cap, "'%s' is not a number", vs);
+            return false;
+        }
+        size_t i = 0u;
+        for (; i < sizeof(k_fields) / sizeof(k_fields[0]); ++i) {
+            if (strcmp(k_fields[i].name, field) == 0) {
+                *(float *)((char *)&out->chain + k_fields[i].offset) = (float)v;
+                break;
+            }
+        }
+        if (i == sizeof(k_fields) / sizeof(k_fields[0])) {
+            (void)snprintf(err, err_cap, "'%s' is not a sweepable field", field);
+            return false;
+        }
+        n_set++;
+    }
+    if (n_set == 0u) {
+        (void)snprintf(err, err_cap, "no field=value after the name");
+        return false;
+    }
+    return true;
+}
+
+/* Loads TRUING_SWEEP_VARIANTS if set. Returns false when it is not set (use the grid). */
+static bool load_variants(void)
+{
+    const char *path = getenv("TRUING_SWEEP_VARIANTS");
+    if (path == NULL || path[0] == '\0') {
+        return false;
+    }
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        TEST_FAIL_MESSAGE("TRUING_SWEEP_VARIANTS names a file that cannot be opened");
+    }
+    char line[512], err[160];
+    unsigned lineno = 0u;
+    g_n_variants = 0u;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        lineno++;
+        sweep_variant_t v;
+        if (!parse_variant(line, &g_base, &v, err, sizeof(err))) {
+            fclose(f);
+            printf("variant file line %u: %s\n", lineno, err);
+            TEST_FAIL_MESSAGE("variant file does not parse");
+        }
+        if (v.name[0] == '\0') {
+            continue;
+        }
+        if (g_n_variants == MAX_VARIANTS) {
+            fclose(f);
+            TEST_FAIL_MESSAGE("too many variants in one file");
+        }
+        g_variants[g_n_variants++] = v;
+    }
+    fclose(f);
+    return true;
+}
+
+/* TRUING_SWEEP_CHANNEL=far analyses the other microphone's record (<name>.far.pcm) instead. */
+static bool use_far(void)
+{
+    const char *ch = getenv("TRUING_SWEEP_CHANNEL");
+    return ch != NULL && strcmp(ch, "far") == 0;
 }
 
 /* The grid: field name, and the values to try. Each list is swept with every other field held
@@ -256,6 +411,14 @@ static void sweep_bundle(const char *dir, const char *name)
 
     /* baseline */
     run_one(name, "baseline", 0, &g_base, words, n_words);
+
+    if (g_n_variants > 0u) {
+        for (unsigned i = 0u; i < g_n_variants; ++i) {
+            run_one_s(name, "variant", g_variants[i].name, &g_variants[i].chain, words, n_words);
+        }
+        free(words);
+        return;
+    }
 
     const float gate[]  = { 100.0f, 200.0f, 300.0f, 500.0f, 800.0f };
     const float win[]   = { 250.0f, 750.0f };
@@ -480,11 +643,39 @@ static void test_lines(void)
     printf("lines complete: %u bundle(s)\n", n);
 }
 
+/* The variant parser, on its own: runs before any data is touched, in every mode. */
+static void test_variant_parser(void)
+{
+    sweep_variant_t v;
+    char err[160];
+    TEST_ASSERT_TRUE(parse_variant("hp: gate_start_ms=200, prominence_db=9  # a comment\n", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_EQUAL_STRING("hp", v.name);
+    TEST_ASSERT_EQUAL_FLOAT(200.0f, v.chain.gate_start_ms);
+    TEST_ASSERT_EQUAL_FLOAT(9.0f, v.chain.prominence_db);
+    TEST_ASSERT_EQUAL_FLOAT(g_base.window_ms, v.chain.window_ms);          /* untouched fields keep the base */
+    TEST_ASSERT_TRUE(parse_variant("   # only a comment\n", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_EQUAL_STRING("", v.name);
+    TEST_ASSERT_TRUE(parse_variant("\n", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_EQUAL_STRING("", v.name);
+    TEST_ASSERT_TRUE(parse_variant("x: onset_threshold_abs=0.0005", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_EQUAL_FLOAT(0.0005f, v.chain.onset_threshold_abs);
+    /* refused: capture sizing is not replayable, typos, junk values, a name with nothing set */
+    TEST_ASSERT_FALSE(parse_variant("a: capture_ms=2000", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("a: gate_strat_ms=200", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("a: gate_start_ms=2o0", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("a: gate_start_ms", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("a:", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("gate_start_ms=200", &g_base, &v, err, sizeof(err)));
+    TEST_ASSERT_FALSE(parse_variant("a,b: gate_start_ms=200", &g_base, &v, err, sizeof(err)));
+}
+
 static void test_sweep(void)
 {
     static char names[MAX_CAPTURES][MAX_NAME_LEN];
     const unsigned n = read_index(names);
-    printf("\nsweep dir: %s   bundles: %u\n", g_dir, n);
+    const bool variants = load_variants();
+    printf("\nsweep dir: %s   bundles: %u   channel: %s   rows: %s\n", g_dir, n, use_far() ? "far" : "local",
+           variants ? "baseline + variant file" : "baseline + fixed grid");
     printf("bundle,axis,value,status,reason,n_strong_peaks,n_peaks_in_band,f1_hz,f2_hz,snr_db,clears_min_snr\n");
     for (unsigned i = 0u; i < n; ++i) {
         sweep_bundle(g_dir, names[i]);
@@ -495,6 +686,7 @@ static void test_sweep(void)
 int main(void)
 {
     UNITY_BEGIN();
+    RUN_TEST(test_variant_parser);
     const char *mode = getenv("TRUING_SWEEP_MODE");
     if (mode != NULL && strcmp(mode, "lines") == 0) {
         RUN_TEST(test_lines);
