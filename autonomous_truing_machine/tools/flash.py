@@ -247,13 +247,13 @@ def verify_boot(board, python, esptool, port, seconds):
                  "see the full log below, not a flashing problem")
         if log.strip():
             print("--- serial log " + "-" * 50)
-            print(log.strip())
+            print(log.strip().encode("ascii", "replace").decode("ascii"))
         return ok
 
     print("FAIL  no BRINGUP SUMMARY seen in %.0fs of silence-or-noise on %s" % (seconds, port))
     if log.strip():
         print("--- what was on the wire " + "-" * 40)
-        print(log.strip())
+        print(log.strip().encode("ascii", "replace").decode("ascii"))
     else:
         print("  (nothing at all was read - not even boot noise)")
     if board == "nano":

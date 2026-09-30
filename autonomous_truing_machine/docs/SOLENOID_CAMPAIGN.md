@@ -1693,3 +1693,40 @@ roller worktree (`feat/roller-nav`, `truing_roller`) or its schedule.
 
 **Not yet done.** Nothing has been wired to the new board. This entry records the plan and the code/doc changes that make
 it possible; the mic wiring, the tap test, and (separately, later) the solenoid B0 check are still ahead.
+
+### DevKit bring-up: mics wired and alive, solenoids fired without B0, roller alongside (2026-09-29)
+
+Exploratory and outside every registration: no plan, no trial numbers, no fixed n. Nothing here selects anything, changes a
+constant, or is campaign evidence. It updates what the "Not yet done" paragraph above says is still ahead. Full pinout and
+the roller/driver results are in `docs/SUBSYSTEM_BENCH.md`.
+
+**Boards.** Two DevKitC-1 boards are in use, told apart by serial (`pio device list`), never by port: `5C4C213858`
+(AP `truing-xxxxxx`) carried both mics, both solenoids and the roller on one breadboard; `5A84006975` (AP `truing-xxxxxx`)
+carries the mics and a roller perfboard with a socketed TMC2209, and no solenoids. Image `s3_devkit_lab`
+(`fastdemo+inmp441x2+campaign+drive`), pins as `board_s3_devkit.h`: mics 4/5/6, solenoids 15/21, roller 16/17/18, driver
+UART 8/9, DIAG 10. The Nano is not used.
+
+**Done: mic wiring and the tap test.** Both INMP441s on the shared bus (LEFT L/R to GND, RIGHT L/R to 3V3) read ALIVE
+in the workbench heartbeat: LEFT about -40 dBFS, RIGHT about -32 dBFS in a quiet room, and a tap on either mic shows
+`<< TAP`. Listening recordings were judged by the operator by ear (no analysis). A spare LEFT module measured 0 ohms across
+its supply and took the shared rail down; it was removed and a second spare works. The cause is not known.
+
+**Solenoids fired WITHOUT B0.** Both stations were fired from test images built with
+`-DBOARD_PLUCK_ACTUATOR_LEFT_PRESENT=1 -DBOARD_PLUCK_ACTUATOR_RIGHT_PRESENT=1` (the flags default to 0 and the checked-in
+header is unchanged), through the workbench burst with duty caps. Each shot was announced and the operator heard and saw
+both fire, singly, alternating and together, and with the roller running. That is a bench observation that the outputs
+switch. It is **not** the B0 validation the Board change entry requires before `PRESENT` is flipped: channel isolation
+and cross-talk were not checked on this board, **V_DS is unmeasured** (it needs a meter), the `rig-2` registry blocks
+do not exist, and the B2-M3 pulse brackets (LEFT [40,85] ms, RIGHT [60,95] ms) are Nano numbers not verified here. The
+`PRESENT` flags stay 0 in the tree.
+
+**Alongside.** The roller ran at the same time as a 40-shot burst and both mics; both stayed ALIVE and the board did not
+reset. ALIVE means powered and clocked, not that the noise floor is unchanged: the mic noise floor against the motor off,
+enabled-idle and moving has **not** been measured. The lab image records whether the drive is enabled with each capture
+so that comparison is possible.
+
+**Still ahead, in order.** Choose the board that carries the acoustic stations; B0 for both solenoids on the DevKit
+(`s3_bench_solenoid`; isolation, cross-talk, V_DS), then flip `PRESENT`; `LEFT/rig-2` and `RIGHT/rig-2` registry blocks
+when the solenoids and mics are mounted together; a fresh pulse-width sweep on the new mounts; then mic profiling.
+The B3.2 excitation finding is unchanged: nothing here changes the conclusion that the solenoid, as mounted on the Nano,
+did not excite a readable spoke.
