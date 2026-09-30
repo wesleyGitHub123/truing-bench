@@ -1730,3 +1730,51 @@ so that comparison is possible.
 when the solenoids and mics are mounted together; a fresh pulse-width sweep on the new mounts; then mic profiling.
 The B3.2 excitation finding is unchanged: nothing here changes the conclusion that the solenoid, as mounted on the Nano,
 did not excite a readable spoke.
+
+### Frozen-rig characterization: pre-stated metrics (2026-09-30, before any data)
+
+Exploratory and outside every registration: one spoke, no held-out spoke set, so nothing here is campaign
+evidence or a selection under B3.2. Written and committed before the first shot, so the metrics cannot be
+shaped by the data. Tool: `tools/char_loop.py`; data under `_explore/char_20260930/` (gitignored).
+
+**Rig.** Mechanics frozen for the whole run: spoke 0 (S0, LEFT-leading) clamped at the LEFT station,
+both mics seated as they are (rig-2: DevKit, a mic beside each strike point). The `LEFT/rig-2` values
+(mic seating, standoff) are recorded from the operator's description when the rig is declared frozen.
+Only the LEFT solenoid is enabled (`-DBOARD_PLUCK_ACTUATOR_LEFT_PRESENT=1`, a test build; B0 is still not
+done on this board, and the operator accepted that for this run). Roller disabled.
+
+**What varies.** Pulse width (per-shot override), recording choices (local or far mic; capture length
+only with a reflash and a new batch), and analysis (chain-profile fields replayed through the firmware's
+own DSP on the host; two-mic methods and code-level DSP changes as exploratory host analyses first).
+
+**Reference frequency.** Five hand plucks of spoke 0 chosen by the operator from the 09-21 cued run
+(`EXPLORE-pluck-lead3_sp0_r0/r1/r2/r7/r13`). The unchanged DSP clears 2 of 5 at 406.1 and 406.3 Hz:
+reference f1 406.2 Hz. Only its frequency transfers (different board, mic and position), and only if
+spoke 0's tension is unchanged since 09-21.
+
+**Stage 0 go/no-go** (line finding, not the board's verdict; local and far mic): GO when, at some pulse
+width, at least 50% of strikes have a strong in-band peak within +-5 Hz of 406.2 Hz and at most 25% of
+the no-fire controls do. Otherwise stop and report: the excitation, not the analysis, is still the limit.
+
+**Metrics, per candidate** (a candidate = a chain profile x a mic x a pulse width):
+
+| metric | role |
+|---|---|
+| clears on the no-fire controls (at least one control required) | hard gate: 0 |
+| strike f1 median within 2 Hz of a coherent line of the no-fire set | hard gate: must not be |
+| strike clear rate on spoke 0 at that width | primary |
+| clears within +-2 Hz of their own median f1, and the spread | primary |
+| strike median f1 minus the pluck reference, under the same profile | reported, never tuned on |
+| local/far level ratio at the f1 peak | reported; should favour the struck station |
+
+**Discipline.** Every analysis variant is run as an answer to a written hypothesis with a prediction,
+logged before the result exists (`char_loop.py sweep` refuses otherwise). No variant may lower
+`measurement_min_snr_db` below 12 dB or narrow the f1 band (both refused by the tool). Selection only on
+the exploration batch; the number of variants tried is reported with any winner.
+
+**Confirmation.** The chosen configuration is flashed (a chain-profile change is halt-and-ask: the
+operator approves it first) and a fresh batch runs with the board's own live verdicts: pass is at least
+9 of 10 strikes clearing with f1 within +-2 Hz of their median, 0 of 10 no-fire controls clearing, and
+the f1 not a no-fire line. One bounded return is allowed (one more exploration pass, one fresh batch),
+then the run stops. Last: the operator gives spoke 0 a quarter turn and a short batch must show the f1
+move (up when tightened); a reading that does not move is the rig, whatever else passed.
