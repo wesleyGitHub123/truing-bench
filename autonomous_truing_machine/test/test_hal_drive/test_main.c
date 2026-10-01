@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "truing_hal/spoke_sensor_if.h"
 #include "truing_hal/step_ramp.h"
 #include "truing_hal/tmc2209_frame.h"
 
@@ -262,6 +263,41 @@ static void test_tmc2209_microsteps_and_current_fields(void)
     TEST_ASSERT_TRUE((TRUING_TMC2209_DRV_FAULT_MASK & TRUING_TMC2209_DRV_OLA) == 0u);
 }
 
+/* The planned laser spoke sensor's seam (scaffold): the fake hands back scripted beam edges in order,
+ * `blocked` follows the last edge, an unfitted sensor reports nothing, and a full queue counts drops. */
+static void test_spoke_sensor_fake_reports_edges_in_order(void)
+{
+    truing_spoke_sensor_if_t sn;
+    truing_spoke_sensor_fake_ctx_t c;
+    truing_spoke_event_t e;
+    truing_spoke_sensor_fake_init(&sn, &c, false);
+    TEST_ASSERT_FALSE(sn.available(&sn));
+    TEST_ASSERT_TRUE(truing_spoke_sensor_fake_push(&c, TRUING_SPOKE_EDGE_ENTER, 10u, 100));
+    TEST_ASSERT_FALSE(sn.blocked(&sn));
+    TEST_ASSERT_FALSE(sn.next_event(&sn, &e));
+    truing_spoke_sensor_fake_init(&sn, &c, true);
+    TEST_ASSERT_TRUE(sn.available(&sn));
+    TEST_ASSERT_FALSE(sn.blocked(&sn));
+    TEST_ASSERT_TRUE(truing_spoke_sensor_fake_push(&c, TRUING_SPOKE_EDGE_ENTER, 1000u, 400));
+    TEST_ASSERT_TRUE(sn.blocked(&sn));
+    TEST_ASSERT_TRUE(truing_spoke_sensor_fake_push(&c, TRUING_SPOKE_EDGE_LEAVE, 1800u, 430));
+    TEST_ASSERT_FALSE(sn.blocked(&sn));
+    TEST_ASSERT_TRUE(sn.next_event(&sn, &e));
+    TEST_ASSERT_EQUAL_INT(TRUING_SPOKE_EDGE_ENTER, e.edge);
+    TEST_ASSERT_EQUAL_UINT32(1000u, e.t_us);
+    TEST_ASSERT_EQUAL_INT32(400, e.drive_steps);
+    TEST_ASSERT_TRUE(sn.next_event(&sn, &e));
+    TEST_ASSERT_EQUAL_INT(TRUING_SPOKE_EDGE_LEAVE, e.edge);
+    TEST_ASSERT_FALSE(sn.next_event(&sn, &e));
+    for (unsigned i = 0; i < TRUING_SPOKE_SENSOR_FAKE_QUEUE; ++i) {
+        TEST_ASSERT_TRUE(truing_spoke_sensor_fake_push(&c, TRUING_SPOKE_EDGE_ENTER, i, (int32_t)i));
+    }
+    TEST_ASSERT_FALSE(truing_spoke_sensor_fake_push(&c, TRUING_SPOKE_EDGE_LEAVE, 99u, 99));
+    TEST_ASSERT_EQUAL_UINT32(1u, c.dropped);
+    TEST_ASSERT_TRUE(sn.next_event(&sn, &e));
+    TEST_ASSERT_EQUAL_UINT32(0u, e.t_us);                         /* oldest first, after wrap-around too */
+}
+
 int main(int argc, char **argv)
 {
     (void)argc;
@@ -281,5 +317,6 @@ int main(int argc, char **argv)
     RUN_TEST(test_tmc2209_write_frame_layout);
     RUN_TEST(test_tmc2209_reply_is_validated);
     RUN_TEST(test_tmc2209_microsteps_and_current_fields);
+    RUN_TEST(test_spoke_sensor_fake_reports_edges_in_order);
     return UNITY_END();
 }
