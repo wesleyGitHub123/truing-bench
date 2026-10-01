@@ -1803,3 +1803,27 @@ Which of the three is spoke 0 is the next question; the tension nudge is the dec
 2026-10-01 (seating and standoff not yet described; to be filled in when the operator is back). Image: `s3_devkit_lab`
 at 77500b5 with `-DBOARD_PLUCK_ACTUATOR_LEFT_PRESENT=1` (the build reports -dirty only for uncommitted host-tool edits
 to `tools/workbench.py` from another session; the firmware sources are committed).
+
+### Frozen-rig characterization: overnight results (2026-10-01/02, exploratory)
+
+Full iteration log, hypotheses written before each result: `_explore/char_20260930/LOG.md` (gitignored, this
+machine). Batches S0 (26 shots), E1 (76), E2 (40) with spoke 0 at LEFT as first seated; R1 (32), R2 (30) after
+the operator refitted the roller (spring-loaded mount) and re-seated spoke 0. Board 5A84006975.
+
+- **The board's reading is repeatable and clean, and probably not spoke 0.** With the firmware's rule (lowest
+  strong line in 350-600 Hz) the LEFT strikes clear at 30-50 ms in 7-8 of 8, at 362.6-362.7 Hz, with 0 of 46
+  no-fire controls clearing across S0/E1/E2. But the strike rings ~90 recurring lines (300-3000 Hz), and other
+  generic rules (strongest line, most local line) give equally clean, equally repeatable readings at 376.7 or
+  455.5 Hz. Repeatability and clean controls cannot tell spoke from rig here (A3, A4).
+- **Spoke 0's own family, when excited, is 427.3 / 904.6 / 1497.5 Hz.** It is the only prominent family the
+  plunger's dwell damps (present at 30-40 ms, gone at 85-100 ms; replicated on a fresh batch, E2), with the
+  even partial (904.6) undamped as a mid-span strike predicts, ratios 2.117 and 3.505 -- the same three-line
+  family and ratios as the operator's 09-21 hand plucks of spoke 0 on the old rig (426.4 / 897.1 / 1500.6).
+  Post-hoc in part, labelled as such in the log.
+- **A rig change confirmed the split.** After the re-seat (R1) every remaining line is an E2 line scaled by
+  0.9962, and exactly the spoke-0 family (plus 422/434) vanished; shorter pulses did not bring it back (R2).
+- **Not done (needs the operator):** re-seat spoke 0 at the strike point and the tension nudge, whose
+  predictions are pre-registered in the log. A per-station rig-line mask is the proposed fix if the nudge
+  confirms; nothing was changed in firmware's analysis for it.
+
+None of this is campaign evidence; the pipeline-demonstration build (`docs/DEMO_BUILD.md`) makes no use of it.
