@@ -330,6 +330,73 @@ def gonogo(docs, lines_per, ref_f1, min_snr=None):
     return {"go": go, "nofire_frac": nf_frac, "nofire_n": len(nf), "widths": widths}
 
 
+# ------------------------------------------------------------------ nudge: which lines move
+
+def strike_lines(docs, all_peaks, width, min_snr=BASE_MIN_SNR_DB, frac=0.5, tol=SAME_LINE_HZ):
+    """Coherent lines (>= min_snr, in >= frac of the strikes at this width) over the whole search band."""
+    caps = {b: [f for f, snr in all_peaks.get(b, []) if snr >= min_snr] for b, d in docs.items()
+            if d.get("campaign_kind") == "strike" and int(d.get("char_pulse_ms") or 0) == width and b in all_peaks}
+    return sorted(l["freq_hz"] for l in bv.coherent_lines(caps, tol=tol, frac=frac)), len(caps)
+
+
+def track(before, after, stay_hz=1.0, max_shift_hz=60.0):
+    """Lines before vs after a tension change. stayed: within stay_hz. The rest are paired greedily by the
+    smallest shift up to max_shift_hz (closest first); what cannot be paired is listed as gone / new."""
+    stayed, gone, new = [], [], list(after)
+    for f in before:
+        m = [g for g in new if abs(g - f) <= stay_hz]
+        if m:
+            g = min(m, key=lambda g: abs(g - f))
+            stayed.append((f, g))
+            new.remove(g)
+        else:
+            gone.append(f)
+    moved = []
+    for d, f, g in sorted((abs(g - f), f, g) for f in gone for g in new if stay_hz < abs(g - f) <= max_shift_hz):
+        if f in gone and g in new:
+            moved.append((f, g))
+            gone.remove(f)
+            new.remove(g)
+    return {"stayed": stayed, "moved": sorted(moved), "gone": gone, "new": sorted(new)}
+
+
+def all_peaks_from_lines(path):
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            if not raw.strip() or "," not in raw:
+                continue
+            row = next(csv.reader([raw.strip()]))
+            if len(row) != len(bv.HEADER):
+                continue
+            d = dict(zip(bv.HEADER, row))
+            if d["idx"] == "" or d["snr_db"] == "":
+                continue
+            try:
+                out.setdefault(d["bundle"], []).append((float(d["freq_hz"]), float(d["snr_db"])))
+            except ValueError:
+                pass
+    return out
+
+
+def cmd_track(args):
+    sets = []
+    for tag in (args.tag, args.after):
+        docs = load_docs(os.path.join(args.root, tag))
+        peaks = all_peaks_from_lines(os.path.join(args.root, "iter", "%s.lines.local.csv" % tag))
+        sets.append(strike_lines(docs, peaks, args.width))
+    (b, nb), (a, na) = sets
+    t = track(b, a)
+    text = ["## %s  line tracking %s (%d strikes) -> %s (%d strikes) at %d ms, local mic, lines >= %g dB in >= 50%%" % (
+        ts(), args.tag, nb, args.after, na, args.width, BASE_MIN_SNR_DB),
+        "stayed within 1 Hz: %d of %d before" % (len(t["stayed"]), len(b)),
+        "MOVED: %s" % (", ".join("%.1f -> %.1f (%+.1f)" % (f, g, g - f) for f, g in t["moved"]) or "none"),
+        "gone, unpaired: %s" % (", ".join("%.1f" % f for f in t["gone"]) or "none"),
+        "new, unpaired: %s" % (", ".join("%.1f" % f for f in t["new"]) or "none")]
+    print("\n".join(text))
+    log_append(args.root, "\n".join(text))
+
+
 # ------------------------------------------------------------------ subcommands
 
 def cmd_lines(args):
@@ -508,6 +575,10 @@ def selftest():
     assert gonogo(docs, per, 406.2, min_snr=8.5)["go"] is False         # s2's 3 dB peak no longer counts: 1/3 strikes
     per["n1"] = {"peaks": [(406.0, 0.5)]}
     assert gonogo(docs, per, 406.2, min_snr=2.0)["nofire_frac"] == 0.0  # a noise-level peak is not a line
+    # nudge tracking: rig lines stay, the spoke's family moves up together
+    t = track([362.7, 376.8, 426.4, 455.6, 897.1], [362.9, 376.5, 438.0, 455.6, 923.0, 1500.0])
+    assert [f for f, _ in t["stayed"]] == [362.7, 376.8, 455.6], t
+    assert t["moved"] == [(426.4, 438.0), (897.1, 923.0)] and t["new"] == [1500.0] and t["gone"] == [], t
     print("selftest ok")
 
 
@@ -546,11 +617,14 @@ def main():
     sc = common(sub.add_parser("score"))
     sc.add_argument("--csv", required=True)
     common(sub.add_parser("wav"))
+    tr = common(sub.add_parser("track"))
+    tr.add_argument("--after", required=True, help="the batch taken after the tension change")
+    tr.add_argument("--width", type=int, required=True)
     lg = common(sub.add_parser("log"), tag=False)
     lg.add_argument("--text", required=True)
     args = p.parse_args()
     return {"acquire": acquire, "lines": cmd_lines, "gonogo": cmd_gonogo, "sweep": cmd_sweep, "score": cmd_score,
-            "wav": cmd_wav, "log": cmd_log}[args.cmd](args) or 0
+            "wav": cmd_wav, "log": cmd_log, "track": cmd_track}[args.cmd](args) or 0
 
 
 if __name__ == "__main__":
