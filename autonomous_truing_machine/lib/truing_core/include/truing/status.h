@@ -67,6 +67,16 @@ typedef enum {
      *             fire() failed, so there is nothing to measure; also refuses a session whose
      *             acoustic subsystem is not ready. Never degraded to a hand pluck (plan A10). */
     TRUING_REASON_EXCITATION_UNAVAILABLE,
+    /* FORCED_CANDIDATE — the pipeline-demonstration build only (TRUING_DEMO_ALWAYS_READ): the DSP's
+     *             own gates would have rejected this capture (no onset, ambiguous or weak peaks,
+     *             nothing in the f1 band), and the build reported a frequency candidate anyway so
+     *             the chain can be shown working end to end. Always SUSPECT, never VALID; it is a
+     *             demonstration of the pipeline, not a measured tension. It deliberately departs from
+     *             SPEC 7.4 (those captures map to rejected) and is scoped to that build. On such a record
+     *             mode identity is provisional as ever (PROVISIONAL_MODE_ID is implied), and when the
+     *             frequency is the band's largest bin rather than the interim rule's pick, mode_identity is
+     *             UNKNOWN and selection_rule_version / candidates describe the gated analysis, not it. */
+    TRUING_REASON_FORCED_CANDIDATE,
     TRUING_REASON__COUNT
 } truing_reason_t;
 

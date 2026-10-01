@@ -303,6 +303,136 @@ static void test_a_silent_capture_reports_listening_but_never_an_onset(void)
     src.close(&src);
 }
 
+/* ---- pipeline-demonstration fallback (TRUING_DEMO_ALWAYS_READ) ------------------------------
+ *
+ * Off by default: nothing changes. On: a capture the gates reject still yields one SUSPECT /
+ * FORCED_CANDIDATE frequency candidate in the f1 band; a capture the gates accept is untouched;
+ * digital silence (a dead mic) is still rejected, because there is no event to report. */
+static void measure_noise(bool always_read, float amplitude, float noise_rms, truing_tension_estimate_t *e,
+                          truing_acoustic_real_ctx_t *ctx)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, amplitude, 0.25f, 0.3f, noise_rms);
+    truing_acoustic_if_t a;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch,
+                                               g_scratch_bytes, &detail));
+    truing_acoustic_real_set_always_read(&a, always_read);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, e);
+    src.close(&src);
+}
+
+static void test_always_read_turns_a_rejected_noise_capture_into_a_forced_candidate(void)
+{
+    truing_tension_estimate_t e;
+    truing_acoustic_real_ctx_t ctx;
+    measure_noise(false, 0.0f, 1e-3f, &e, &ctx);                 /* noise only: the gates reject it */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
+    TEST_ASSERT_FALSE(ctx.diag.forced);
+    measure_noise(true, 0.0f, 1e-3f, &e, &ctx);                  /* the same capture, demonstration build */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_FORCED_CANDIDATE, e.meta.reason_code);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_FORCED_CANDIDATE, e.frequency.meta.reason_code);
+    TEST_ASSERT_TRUE(ctx.diag.forced);
+    TEST_ASSERT_TRUE(e.frequency.selected_frequency_hz >= g_chain.f1_band_lo_hz &&
+                     e.frequency.selected_frequency_hz <= g_chain.f1_band_hi_hz);
+    TEST_ASSERT_TRUE(isfinite(e.tension_n) && e.tension_n > 0.0f);
+    TEST_ASSERT_EQUAL_INT(TRUING_CHECK_OK, truing_tension_estimate_check(&e));
+    TEST_ASSERT_FALSE(truing_status_is_verification_grade(e.meta.status));
+    /* the band's largest bin, not the interim rule's pick: its mode identity is not presumed */
+    TEST_ASSERT_EQUAL_INT(TRUING_MODE_ID_UNKNOWN, e.frequency.mode_identity);
+    TEST_ASSERT_EQUAL_UINT32(1u, ctx.forced);
+}
+
+/* The interim rule found f1 and only the SNR gate failed (here: a gate set out of reach): the fallback reports
+ * THAT frequency, with its presumed mode identity -- it does not go looking for another one. */
+static void test_always_read_keeps_the_rules_f1_when_only_the_snr_gate_failed(void)
+{
+    truing_chain_profile_t strict = g_chain;
+    strict.measurement_min_snr_db = 90.0f;
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 3e-3f);   /* a clear pluck, SNR well under 90 dB */
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &strict, &g_excitation, &g_profile, &src, &g_act, g_scratch,
+                                               g_scratch_bytes, &detail));
+    truing_tension_estimate_t e;
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_LOW_SNR, e.meta.reason_code);          /* off: the gate rejects */
+    truing_acoustic_real_set_always_read(&a, true);
+    truing_acoustic_measure(&a, 0u, &g_wheel, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_SUSPECT, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_FORCED_CANDIDATE, e.meta.reason_code);
+    TEST_ASSERT_FLOAT_WITHIN(0.5f, 480.0f, e.frequency.selected_frequency_hz);
+    TEST_ASSERT_EQUAL_INT(TRUING_MODE_ID_PRESUMED_FUNDAMENTAL, e.frequency.mode_identity);
+    TEST_ASSERT_TRUE(e.frequency.snr_db < strict.measurement_min_snr_db);    /* the real SNR, reported not gated */
+    TEST_ASSERT_EQUAL_INT(TRUING_CHECK_OK, truing_tension_estimate_check(&e));
+    src.close(&src);
+}
+
+/* A line stuck on one non-zero value (what an undriven INMP441 slot can read) carries no event either. */
+static void test_always_read_rejects_a_line_stuck_on_one_value(void)
+{
+    truing_audio_source_if_t src;
+    truing_audio_synthetic_ctx_t sctx;
+    truing_audio_synthetic_init(&src, &sctx, 480.0f, 0.3f, 0.25f, 0.3f, 1e-4f);
+    truing_acoustic_if_t a;
+    truing_acoustic_real_ctx_t ctx;
+    const char *detail = NULL;
+    TEST_ASSERT_TRUE(truing_acoustic_real_init(&a, &ctx, g_clock, &g_chain, &g_excitation, &g_profile, &src, &g_act, g_scratch,
+                                               g_scratch_bytes, &detail));
+    truing_acoustic_real_set_always_read(&a, true);
+    const uint32_t n = 48000u;
+    int32_t *words = (int32_t *)malloc(n * sizeof(int32_t));
+    TEST_ASSERT_NOT_NULL(words);
+    for (uint32_t i = 0; i < n; ++i) {
+        words[i] = (int32_t)((uint32_t)-1 << 8);   /* a floating-high line: -1 in every 24-bit sample */
+    }
+    words[1000] = 0x00100000;                     /* one glitch does not make it alive */
+    truing_tension_estimate_t e;
+    truing_acoustic_real_analyze_words(&a, words, n, 1u, &e);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
+    TEST_ASSERT_FALSE(ctx.diag.forced);
+    free(words);
+    src.close(&src);
+}
+
+static void test_always_read_leaves_an_accepted_capture_exactly_as_it_was(void)
+{
+    truing_tension_estimate_t off, on;
+    truing_acoustic_real_ctx_t c1, c2;
+    measure_noise(false, 0.3f, 1e-4f, &off, &c1);                /* a clean 480 Hz pluck */
+    measure_noise(true, 0.3f, 1e-4f, &on, &c2);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_PROVISIONAL_MODE_ID, off.meta.reason_code);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_PROVISIONAL_MODE_ID, on.meta.reason_code);
+    TEST_ASSERT_FALSE(c2.diag.forced);
+    TEST_ASSERT_EQUAL_FLOAT(off.frequency.selected_frequency_hz, on.frequency.selected_frequency_hz);
+    TEST_ASSERT_EQUAL_FLOAT(off.tension_n, on.tension_n);
+    TEST_ASSERT_EQUAL_FLOAT(off.frequency.snr_db, on.frequency.snr_db);
+}
+
+static void test_always_read_still_rejects_digital_silence(void)
+{
+    truing_tension_estimate_t e;
+    truing_acoustic_real_ctx_t ctx;
+    measure_noise(true, 0.0f, 0.0f, &e, &ctx);                   /* every sample zero: a dead mic, not an event */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATUS_REJECTED, e.meta.status);
+    TEST_ASSERT_EQUAL_INT(TRUING_REASON_NO_ONSET_DETECTED, e.meta.reason_code);
+    TEST_ASSERT_FALSE(ctx.diag.forced);
+}
+
+static void test_always_read_is_a_no_op_for_another_implementation(void)
+{
+    truing_acoustic_if_t other;
+    memset(&other, 0, sizeof(other));
+    truing_acoustic_real_set_always_read(&other, true);          /* no ctx, not real_measure: nothing happens */
+    truing_acoustic_real_set_always_read(NULL, true);
+    TEST_ASSERT_NULL(other.ctx);
+}
+
 /* Each spoke is struck by the actuator at its own acoustic station and by nothing else, with that
  * station's pulse. spoke 0 is LEFT's and assignment alternates (truing_acoustic_station_for_spoke):
  * firing the other station's solenoid would excite a different spoke under this one's name. */
@@ -1379,6 +1509,12 @@ int main(void)
     RUN_TEST(test_status_rules_calibration_cancel_overrun_silence_format);
     RUN_TEST(test_phase_events_report_the_measurement_lifecycle_in_order);
     RUN_TEST(test_a_silent_capture_reports_listening_but_never_an_onset);
+    RUN_TEST(test_always_read_turns_a_rejected_noise_capture_into_a_forced_candidate);
+    RUN_TEST(test_always_read_leaves_an_accepted_capture_exactly_as_it_was);
+    RUN_TEST(test_always_read_still_rejects_digital_silence);
+    RUN_TEST(test_always_read_keeps_the_rules_f1_when_only_the_snr_gate_failed);
+    RUN_TEST(test_always_read_rejects_a_line_stuck_on_one_value);
+    RUN_TEST(test_always_read_is_a_no_op_for_another_implementation);
     RUN_TEST(test_each_spoke_fires_only_its_own_stations_actuator);
     RUN_TEST(test_an_actuator_without_fire_report_still_measures_cleanly);
     RUN_TEST(test_capture_report_reaches_the_capture_view_when_the_source_provides_one);

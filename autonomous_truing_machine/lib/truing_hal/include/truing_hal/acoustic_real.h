@@ -86,6 +86,11 @@ typedef struct {
      * a bench-triggered capture for real session evidence. Defaults false; set only by
      * truing_acoustic_real_mark_debug_measurement() and consumed exactly once. */
     bool     debug_triggered;
+    /* True when the pipeline-demonstration fallback produced this capture's frequency (the gated analysis
+     * rejected it and the always-read build reported a candidate anyway). The estimate's reason is then
+     * FORCED_CANDIDATE -- unless the tension model went on to refuse that frequency, in which case the
+     * estimate carries the model's own status and reason while this stays true. */
+    bool     forced;
 } truing_acoustic_real_diag_t;
 
 /* The excitation actuators, one per acoustic station, indexed by truing_acoustic_station_slot().
@@ -166,6 +171,9 @@ typedef struct {
      * two apart: outcome_seq != capture_seq means an attempt's bookkeeping is still in flight
      * and last_status/last_reason may still describe the PREVIOUS attempt. */
     uint32_t                           outcome_seq;
+    /* Pipeline-demonstration fallback (truing_acoustic_real_set_always_read). False by default. */
+    bool                               always_read;
+    uint32_t                           forced;       /* candidates the fallback produced (also counted in `estimates`) */
 } truing_acoustic_real_ctx_t;
 
 /* Bytes of scratch the subsystem needs for this chain profile (capture buffers + DSP workspace).
@@ -208,6 +216,14 @@ void truing_acoustic_real_mark_debug_measurement(truing_acoustic_if_t *self);
  * as that function, including that it is a silent no-op for any other implementation -- a synthetic
  * or recorded backend ignores the override and measures normally (it has no actuator to withhold). */
 void truing_acoustic_real_set_debug_override(truing_acoustic_if_t *self, bool no_fire, float pulse_ms);
+
+/* Pipeline-demonstration build only (TRUING_DEMO_ALWAYS_READ): when on, a capture the gated analysis
+ * would reject still yields one frequency candidate, reported SUSPECT / FORCED_CANDIDATE (see
+ * acoustic_real.c, "pipeline-demonstration fallback"). A capture with no signal on the line (all zeros
+ * or stuck on one value) is still rejected. Off by default and set once by the composition root; a
+ * silent no-op for any other implementation. It changes what a rejected capture reports, never a
+ * capture the gates accept. */
+void truing_acoustic_real_set_always_read(truing_acoustic_if_t *self, bool on);
 
 /* Analyse an already-captured buffer (n words) with no excitation: the path the bring-up and the
  * golden tests use. Identical to measure() after the capture step. */

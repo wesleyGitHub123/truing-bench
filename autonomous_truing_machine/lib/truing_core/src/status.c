@@ -33,6 +33,7 @@ static const char *const k_reason_str[TRUING_REASON__COUNT] = {
     "WHEEL_REFERENCE_LOST",
     "CAPTURE_OVERRUN",
     "EXCITATION_UNAVAILABLE",
+    "FORCED_CANDIDATE",
 };
 
 static const char *const k_terminal_str[TRUING_TERMINAL__COUNT] = {

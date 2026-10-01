@@ -3,7 +3,9 @@
 #include <math.h>
 #include <string.h>
 
+#include "truing_dsp/peaks.h"
 #include "truing_dsp/tension_model.h"
+#include "truing_hal/audio_liveness.h"
 #include "truing_hal/records.h"
 
 static size_t align8(size_t v)
@@ -109,6 +111,128 @@ static void fill_rejected(truing_tension_estimate_t *out, truing_reason_t reason
     }
 }
 
+/* ---- pipeline-demonstration fallback (truing_acoustic_real_set_always_read) ------------------
+ *
+ * Off unless the composition root turns it on, and only the pipeline-demonstration build does
+ * (TRUING_DEMO_ALWAYS_READ). Where the analysis below would reject a capture -- no onset, a window
+ * that does not survive gating, ambiguous or weak peaks, nothing in the f1 band -- this still
+ * produces ONE frequency candidate so the chain can be shown working end to end:
+ *
+ *   1. the f1 the interim rule already selected, when there is one (the capture then failed the SNR gate
+ *      or the peak-count gate, AMBIGUOUS_PEAK); its mode identity stays PRESUMED_FUNDAMENTAL;
+ *   2. otherwise the largest spectral bin inside the f1 band of the window the analysis had, or of a
+ *      forced window: the first onset with the absolute floor disabled (what the sweep's lines mode
+ *      does), else the loudest sample, then the profile's gate and window length. The interim rule did
+ *      NOT choose this one, so its mode identity is UNKNOWN (the record's selection_rule_version and
+ *      candidate list describe the gated analysis, not this pick; the reason code says which it is).
+ *
+ * A capture that carries no signal is still rejected -- all zeros, or a line stuck on one value
+ * (truing_audio_liveness: what an undriven INMP441 data line reads) -- because there is no event, and
+ * a number there would hide a hardware fault. So are the rare cases where no spectrum or no finite SNR
+ * can be formed, and a tension model may still refuse the frequency afterwards. Otherwise the result
+ * is SUSPECT / FORCED_CANDIDATE: a candidate by construction, not a measurement that passed its gates. */
+static bool forced_candidate(truing_acoustic_real_ctx_t *c, uint32_t n_words, const truing_dsp_event_t *ev,
+                             const truing_dsp_window_t *w_known, float *f1_out, float *snr_out, bool *by_rule_out)
+{
+    truing_audio_liveness_t live;
+    truing_audio_liveness(c->words, n_words, &live);
+    if (live.stuck) {
+        return false;   /* no signal on the line: a dead, unclocked or undriven mic, not an event */
+    }
+    if (ev != NULL && ev->f1_found && isfinite(ev->f1.freq_hz) && isfinite(ev->snr_db)) {
+        *f1_out = ev->f1.freq_hz;
+        *snr_out = ev->snr_db;
+        *by_rule_out = true;
+        return true;
+    }
+    *by_rule_out = false;
+    float peak = 0.0f;
+    uint32_t loudest = 0u;
+    for (uint32_t i = 0; i < n_words; ++i) {
+        const float a = fabsf(c->samples[i]);
+        if (a > peak) {
+            peak = a;
+            loudest = i;
+        }
+    }
+    if (!(peak > 0.0f)) {
+        return false;
+    }
+    const float fs = (float)c->chain->sample_rate_hz;
+    truing_dsp_window_t w;
+    if (w_known != NULL) {
+        w = *w_known;
+    } else {
+        truing_dsp_params_t p = c->params;
+        p.onset_threshold_abs = 0.0f;   /* the same single override as the sweep's lines mode */
+        truing_onset_result_t on;
+        int64_t onset = (int64_t)loudest;
+        if (truing_onset_detect(c->samples, n_words, &p, c->onset_env, c->onset_env_cap, &on) && on.n_onsets > 0u) {
+            onset = (int64_t)on.onset_sample[0];
+        }
+        if (!truing_dsp_select_window(&c->dsp, c->samples, n_words, onset, -1, &p, &w)) {
+            /* Too little survives the decay gate: take the profile's window anyway. */
+            const uint32_t gate = (uint32_t)(c->chain->gate_start_ms * 1e-3f * fs + 0.5f);
+            uint32_t start = (uint32_t)onset + gate < n_words ? (uint32_t)onset + gate : (uint32_t)onset;
+            uint32_t len = n_words - start < c->dsp.max_window ? n_words - start : c->dsp.max_window;
+            if (len < 64u) {
+                start = n_words > c->dsp.max_window ? n_words - c->dsp.max_window : 0u;
+                len = n_words - start;
+            }
+            memset(&w, 0, sizeof(w));
+            w.start_sample = start;
+            w.n_samples = len;
+            w.window_len_ms = (float)len * 1e3f / fs;
+            w.truncated_by = TRUING_WINDOW_TRUNCATED_BY_NONE;
+        }
+    }
+    truing_spectrum_t spec;
+    if (!truing_spectrum_compute(&c->dsp.spectrum, c->samples + w.start_sample, w.n_samples, fs, c->chain->zero_pad_factor,
+                                 &spec)) {
+        return false;
+    }
+    uint32_t k = 0u;
+    if (!truing_spectrum_argmax_in_band(&spec, c->params.f1_band_lo_hz, c->params.f1_band_hi_hz, &k)) {
+        return false;
+    }
+    float f = NAN, mag = NAN;
+    truing_spectrum_refine_bin(&spec, k, &f, &mag);
+    /* The firmware's own SNR statistic at the candidate (S3.8): reported, never gated on here. The
+     * zero-padded input buffer is free once the transform is done, as analyze_window uses it. */
+    const float snr = truing_peaks_snr_db(&spec, f, mag, c->params.snr_noise_offset_lo_hz, c->params.snr_noise_offset_hi_hz,
+                                          c->dsp.spectrum.windowed, spec.n_fft);
+    c->diag.window = w;
+    *f1_out = f;
+    *snr_out = snr;
+    return isfinite(f) && f > 0.0f && isfinite(snr);
+}
+
+static void accept_estimate(truing_acoustic_real_ctx_t *c, const truing_dsp_event_t *ev, float f1, float f2, float snr_db,
+                            truing_reason_t reason, truing_mode_identity_t mode, uint8_t cycle_index, uint32_t now,
+                            truing_source_impl_t src, truing_tension_estimate_t *out);
+
+/* When the demonstration fallback is on and finds a candidate, report it and return true; otherwise
+ * count the rejection, fill it in, and return false. Every analysis-stage reject goes through here. */
+static bool reject_or_force(truing_acoustic_real_ctx_t *c, uint32_t n_words, const truing_dsp_event_t *ev,
+                            const truing_dsp_window_t *w, truing_reason_t reason, uint8_t cycle_index, uint32_t now,
+                            truing_source_impl_t src, truing_tension_estimate_t *out)
+{
+    float f1 = NAN, snr = NAN;
+    bool by_rule = false;
+    if (c->always_read && forced_candidate(c, n_words, ev, w, &f1, &snr, &by_rule)) {
+        c->diag.f1_hz = f1;
+        c->diag.snr_db = snr;
+        c->diag.forced = true;
+        c->forced++;
+        accept_estimate(c, ev, f1, NAN, snr, TRUING_REASON_FORCED_CANDIDATE,
+                        by_rule ? TRUING_MODE_ID_PRESUMED_FUNDAMENTAL : TRUING_MODE_ID_UNKNOWN, cycle_index, now, src, out);
+        return true;
+    }
+    c->rejections++;
+    fill_rejected(out, reason, cycle_index, now, src, c->profile);
+    return false;
+}
+
 static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, uint32_t n_words, uint8_t cycle_index,
                     uint8_t spoke_index, truing_tension_estimate_t *out)
 {
@@ -124,8 +248,7 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     if (!truing_onset_detect(c->samples, n_words, &c->params, c->onset_env, c->onset_env_cap, &on) || on.n_onsets == 0u) {
         d->onsets = on.n_onsets;
         d->onset_threshold = on.threshold;
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_NO_ONSET_DETECTED, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, NULL, NULL, TRUING_REASON_NO_ONSET_DETECTED, cycle_index, now, src, out);
         return;
     }
     d->onsets = on.n_onsets;
@@ -144,8 +267,8 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     const int64_t next = on.n_onsets > 1u ? (int64_t)on.onset_sample[1] : -1;
     truing_dsp_window_t w;
     if (!truing_dsp_select_window(&c->dsp, c->samples, n_words, (int64_t)on.onset_sample[0], next, &c->params, &w)) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, c->profile);   /* too little signal survives gating */
+        /* too little signal survives gating */
+        (void)reject_or_force(c, n_words, NULL, NULL, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, out);
         return;
     }
     d->window = w;
@@ -158,8 +281,7 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     /* Layers 2 + interim 3. */
     truing_dsp_event_t ev;
     if (!truing_dsp_analyze_window(&c->dsp, c->samples, &w, &c->params, &ev)) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, NULL, &w, TRUING_REASON_VALUE_OUT_OF_RANGE, cycle_index, now, src, out);
         return;
     }
     d->n_fft = ev.n_fft;
@@ -169,49 +291,56 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     d->f2_hz = ev.f2_found ? ev.f2.freq_hz : NAN;
     d->snr_db = ev.snr_db;
     if (ev.peaks_overflow) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_AMBIGUOUS_PEAK, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, &ev, &w, TRUING_REASON_AMBIGUOUS_PEAK, cycle_index, now, src, out);
         return;
     }
     if (ev.n_strong_peaks == 0u) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_LOW_SNR, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, &ev, &w, TRUING_REASON_LOW_SNR, cycle_index, now, src, out);
         return;
     }
     if (!ev.f1_found) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_FREQ_OUT_OF_RANGE, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, &ev, &w, TRUING_REASON_FREQ_OUT_OF_RANGE, cycle_index, now, src, out);
         return;
     }
     if (!isfinite(ev.snr_db) || ev.snr_db < c->chain->measurement_min_snr_db) {
-        c->rejections++;
-        fill_rejected(out, TRUING_REASON_LOW_SNR, cycle_index, now, src, c->profile);
+        (void)reject_or_force(c, n_words, &ev, &w, TRUING_REASON_LOW_SNR, cycle_index, now, src, out);
         return;
     }
+    accept_estimate(c, &ev, ev.f1.freq_hz, ev.f2_found ? ev.f2.freq_hz : NAN, ev.snr_db, TRUING_REASON_PROVISIONAL_MODE_ID,
+                    TRUING_MODE_ID_PRESUMED_FUNDAMENTAL, cycle_index, now, src, out);
+}
+
+/* The frequency record and the tension estimate for a selected f1 (SPEC 6.3): the gated path with
+ * PROVISIONAL_MODE_ID, or the demonstration fallback with FORCED_CANDIDATE. Both SUSPECT at best. */
+static void accept_estimate(truing_acoustic_real_ctx_t *c, const truing_dsp_event_t *ev, float f1, float f2, float snr_db,
+                            truing_reason_t reason, truing_mode_identity_t mode, uint8_t cycle_index, uint32_t now,
+                            truing_source_impl_t src, truing_tension_estimate_t *out)
+{
+    truing_acoustic_real_diag_t *d = &c->diag;
     /* The frequency measurement record (SPEC 6.3): a SELECTION with provisional identity. */
     memset(out, 0, sizeof(*out));
     truing_frequency_measurement_t *f = &out->frequency;
     f->meta.status = TRUING_STATUS_SUSPECT;
-    f->meta.reason_code = TRUING_REASON_PROVISIONAL_MODE_ID;
+    f->meta.reason_code = reason;
     f->meta.cycle_index = cycle_index;
     f->meta.timestamp_ms = now;
     f->meta.source_impl = src;
-    f->selected_frequency_hz = ev.f1.freq_hz;
-    f->mode_identity = TRUING_MODE_ID_PRESUMED_FUNDAMENTAL;
-    f->n_candidates = ev.n_candidates;
-    for (uint8_t i = 0; i < ev.n_candidates && i < TRUING_MAX_CANDIDATE_PEAKS; ++i) {
-        f->candidates[i].frequency_hz = ev.candidates[i].freq_hz;
-        f->candidates[i].magnitude_db = ev.candidates[i].magnitude_db;
-        f->candidates[i].prominence_db = ev.candidates[i].prominence_db;
+    f->selected_frequency_hz = f1;
+    f->mode_identity = mode;
+    f->n_candidates = ev != NULL ? ev->n_candidates : 0u;
+    for (uint8_t i = 0; ev != NULL && i < ev->n_candidates && i < TRUING_MAX_CANDIDATE_PEAKS; ++i) {
+        f->candidates[i].frequency_hz = ev->candidates[i].freq_hz;
+        f->candidates[i].magnitude_db = ev->candidates[i].magnitude_db;
+        f->candidates[i].prominence_db = ev->candidates[i].prominence_db;
     }
-    f->snr_db = ev.snr_db;
+    f->snr_db = snr_db;
     f->selection_rule_version = TRUING_DSP_SELECTION_RULE_VERSION;
     /* Layer 4: the session-fixed model. */
     out->meta = f->meta;
     out->model_name = c->profile != NULL ? c->profile->model_name : TRUING_TENSION_MODEL_UNSET;
     out->model_version = c->profile != NULL ? c->profile->model_version : 0u;
     out->sigma_n = NAN;   /* repeat-scatter propagation needs repeated plucks (research S4.4); one pluck has none */
-    const truing_tension_result_t t = truing_tension_model_apply(c->profile, ev.f1.freq_hz, ev.f2_found ? ev.f2.freq_hz : NAN);
+    const truing_tension_result_t t = truing_tension_model_apply(c->profile, f1, f2);
     d->l_eff_m = t.l_eff_m;
     if (!t.ok) {
         c->rejections++;
@@ -229,7 +358,7 @@ static void analyze(truing_acoustic_if_t *self, truing_acoustic_real_ctx_t *c, u
     }
     out->tension_n = t.tension_n;
     out->meta.status = TRUING_STATUS_SUSPECT;
-    out->meta.reason_code = TRUING_REASON_PROVISIONAL_MODE_ID;   /* SPEC 4.4.1: never valid while layer 3 is interim */
+    out->meta.reason_code = reason;   /* SPEC 4.4.1: never valid while layer 3 is interim; FORCED_CANDIDATE never at all */
     c->estimates++;
 }
 
@@ -496,6 +625,14 @@ void truing_acoustic_real_set_debug_override(truing_acoustic_if_t *self, bool no
     truing_acoustic_real_ctx_t *c = (truing_acoustic_real_ctx_t *)self->ctx;
     c->override_no_fire_pending = no_fire;
     c->override_pulse_ms_pending = pulse_ms > 0.0f ? pulse_ms : 0.0f;
+}
+
+void truing_acoustic_real_set_always_read(truing_acoustic_if_t *self, bool on)
+{
+    if (self == NULL || self->ctx == NULL || self->measure_spoke_tension != real_measure) {
+        return;
+    }
+    ((truing_acoustic_real_ctx_t *)self->ctx)->always_read = on;
 }
 
 static void real_cancel(truing_acoustic_if_t *self)
