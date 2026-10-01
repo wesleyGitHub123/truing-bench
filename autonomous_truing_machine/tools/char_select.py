@@ -67,11 +67,11 @@ def mag_db_at(x, start, n, freqs, nfft=1 << 17, tol_hz=1.5):
     return out
 
 
-def select(peaks, min_snr, ratios=None, overflow=False):
+def select(peaks, min_snr, ratios=None, overflow=False, mask=(), mask_hz=2.0):
     """{rule: f1 or None} for one bundle. ratios: {freq: local-far dB} for the `local` rule. overflow: the detector
     found more strong peaks than TRUING_DSP_MAX_STRONG_PEAKS, which the firmware rejects as AMBIGUOUS_PEAK before any
     rule runs -- so every rule abstains."""
-    lines = [(f, s) for f, s in peaks if s >= min_snr]
+    lines = [(f, s) for f, s in peaks if s >= min_snr and not any(abs(f - m) <= mask_hz for m in mask)]
     if not lines or overflow:
         return {r: None for r in RULES}
     out = {"lowest": min(lines)[0], "strongest": max(lines, key=lambda t: t[1])[0], "local": None}
@@ -92,7 +92,7 @@ def summarise(values):
             "spread": max(v) - min(v)}
 
 
-def run(root, tag, min_snr):
+def run(root, tag, min_snr, mask=()):
     d = os.path.join(root, tag)
     docs, _ = bv.load_bundles(d)
     rows = read_lines_rows(os.path.join(root, "iter", "%s.lines.local.csv" % tag))
@@ -108,8 +108,9 @@ def run(root, tag, min_snr):
             fs = [f for f, s in r["peaks"] if s >= min_snr]
             ml, mf = mag_db_at(loc, r["start"], r["n"], fs), mag_db_at(far, r["start"], r["n"], fs)
             ratios = {f: (a - c) for f, a, c in zip(fs, ml, mf) if a is not None and c is not None}
-        picks[b] = (doc, select(r["peaks"], min_snr, ratios, r["overflow"]))
-    lines = ["selection rules on %s (lines >= %g dB SNR; same peak list for every rule)" % (tag, min_snr)]
+        picks[b] = (doc, select(r["peaks"], min_snr, ratios, r["overflow"], mask))
+    lines = ["selection rules on %s (lines >= %g dB SNR; same peak list for every rule)%s" % (
+        tag, min_snr, "; rig-line mask +-2 Hz: %s" % ", ".join("%g" % m for m in mask) if mask else "")]
     agree = [abs(p["lowest"] - doc["expect_f1_hz"]) <= 0.5 for doc, p in picks.values()
              if p["lowest"] is not None and doc.get("status") == "suspect" and doc.get("expect_f1_hz")]
     both_reject = sum(1 for doc, p in picks.values() if p["lowest"] is None and doc.get("status") != "suspect")
@@ -147,6 +148,8 @@ def selftest():
     assert select([(380.0, 5.0)], 12.0) == {"lowest": None, "strongest": None, "local": None}
     assert select(peaks, 12.0)["local"] is None                      # no far channel: the rule abstains
     assert select(peaks, 12.0, overflow=True)["lowest"] is None       # AMBIGUOUS_PEAK: nothing is selected
+    assert select(peaks, 12.0, mask=[361.0])["lowest"] == 406.0      # a masked rig line is never selected
+    assert select([(362.0, 15.0)], 12.0, mask=[362.0])["lowest"] is None
     assert summarise([362.6, 363.0, 362.8, None, 400.0]) == {"clears": 4, "median": 362.9, "within": 3,
                                                              "spread": 400.0 - 362.6}
     fs = 48000
@@ -165,8 +168,9 @@ def main():
     p.add_argument("--root", required=True)
     p.add_argument("--tag", required=True)
     p.add_argument("--min-snr", type=float, default=12.0)
+    p.add_argument("--mask", default="", help="comma list of measured rig-line frequencies to exclude (+-2 Hz)")
     a = p.parse_args()
-    print(run(a.root, a.tag, a.min_snr))
+    print(run(a.root, a.tag, a.min_snr, [float(x) for x in a.mask.split(",") if x.strip()]))
     return 0
 
 
