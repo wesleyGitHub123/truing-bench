@@ -101,9 +101,15 @@ const IDENT = {
   acquisition: 'manual', acquisition_selectable: false,
   real_front_end: false, acoustic_demo_spokes: 0, composite_navigation: false,
 };
+// Every GET the page makes is logged; /demo/jog answers with JOG_REPLY, everything else with /id.
+let xhrUrls = [];
+let JOG_REPLY = { ok: true, enabled: true, moving: false, position_steps: 0, detail: '' };
 function XMLHttpRequest() {
-  this.open = (mth, url) => { this._url = url; };
-  this.send = () => { this.responseText = JSON.stringify(IDENT); if (this.onload) this.onload(); };
+  this.open = (mth, url) => { this._url = url; xhrUrls.push(url); };
+  this.send = () => {
+    this.responseText = JSON.stringify(this._url.indexOf('/demo/jog') === 0 ? JOG_REPLY : IDENT);
+    if (this.onload) this.onload();
+  };
 }
 const location = { protocol: 'http:', host: '192.168.4.1' };
 // Minimal Web Storage stub: the diagnostics history lives in the tab's sessionStorage.
@@ -245,7 +251,9 @@ ok(feedText('act').indexOf('MEASURE_SPOKE_TENSION -> MEASURE_WHEEL_STATE') < 0, 
 ok(feedText('dbg').indexOf('MEASURE_SPOKE_TENSION -> MEASURE_WHEEL_STATE') >= 0, 'protocol feed keeps the raw transitions');
 
 // ---- latest measurement is translated, not an enum dump --------------------------------
-ok(txt('last').indexOf('460 Hz') >= 0 && txt('last').indexOf('781.55 N') >= 0, 'latest measurement shows frequency and tension');
+ok(txt('last').indexOf('460.0 Hz') >= 0 && txt('last').indexOf('782 N') >= 0 && txt('last').indexOf('79.7 kgf') >= 0,
+   'latest measurement shows frequency and tension (N and kgf)');
+ok(txt('last').indexOf('null') < 0, 'latest measurement never prints a raw null');
 ok(txt('last').indexOf('Provisional measurement') >= 0, 'suspect reason is translated for the operator', JSON.stringify(txt('last').slice(-90)));
 ok(txt('last').indexOf('PROVISIONAL_MODE_ID') >= 0, 'the original reason code is still shown alongside');
 
@@ -736,7 +744,7 @@ const REASONS = [
   'NOT_IMPLEMENTED', 'CALIBRATION_MISSING', 'STALE_MEASUREMENT', 'PARTIAL_WHEEL_STATE',
   'ARTIFACT_INVALID', 'STALE_INTENT', 'REQUIRES_ARTIFACT_REGENERATION',
   'MEAN_TENSION_MODEL_UNAVAILABLE', 'TENSION_NOT_VERIFICATION_GRADE', 'CANCELLED',
-  'WHEEL_REFERENCE_LOST', 'CAPTURE_OVERRUN', 'EXCITATION_UNAVAILABLE',
+  'WHEEL_REFERENCE_LOST', 'CAPTURE_OVERRUN', 'EXCITATION_UNAVAILABLE', 'FORCED_CANDIDATE',
 ];
 const missing = REASONS.filter(r => !(sandbox.REASON && sandbox.REASON[r]));
 ok(missing.length === 0, 'every firmware reason code has a page translation', missing.join(', '));
@@ -790,7 +798,118 @@ sandbox.loadIdent();
   ok(rowCls('act') === 't-good', 'replay: a geometry-only convergence still reads as success');
   ok(txt('statusbody').indexOf('Sending') < 0 && txt('statusbody').indexOf('Confirming') < 0,
     'replay: no in-flight command is left stuck on the status card after the run ends');
+  // every retry emits a frame; the spoke table keeps only the last one per spoke
+  const lastPer = {};
+  frames.filter(f => f.kind === 'MEASUREMENT_RESULT' && f.channel === 'TENSION').forEach(f => { lastPer[f.index] = f.status; });
+  const tableOf = (i) => byId[i % 2 ? 'spkR' : 'spkL'].innerHTML;
+  ok(Object.keys(lastPer).length > 0 && Object.keys(lastPer).every(i => tableOf(+i).indexOf(lastPer[i].toUpperCase()) >= 0),
+    'replay: each spoke row shows the status of its final attempt', JSON.stringify(lastPer));
+  const finals = [new Set(), new Set()];
+  Object.keys(lastPer).forEach(i => finals[i % 2].add(lastPer[i].toUpperCase()));
+  const stale = ['VALID', 'SUSPECT', 'REJECTED', 'UNAVAILABLE']
+    .filter(s => [0, 1].some(t => !finals[t].has(s) && tableOf(t).indexOf('>' + s + '<') >= 0));
+  ok(stale.length === 0, 'replay: no earlier attempt lingers in the spoke table', stale.join(', '));
 })();
+
+// ---- spoke tension panel: two station tables and a radar -------------------------------------
+// Rows come only from MEASUREMENT_RESULT frames, last frame per spoke, split by index parity
+// (the acoustic station: even LEFT, odd RIGHT). Mirrored per session in sessionStorage.
+const spkL = () => byId['spkL'].innerHTML, spkR = () => byId['spkR'].innerHTML, radar = () => byId['radar'].innerHTML;
+const MR = (index, status, reason, hz, n, cyc) => ({ t: 'event', kind: 'MEASUREMENT_RESULT', ts_ms: 40000 + index,
+  cycle_index: cyc || 1, channel: 'TENSION', index, status, reason, tension_n: n, selected_frequency_hz: hz });
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle(S({ current_state: 'MEASURE_SPOKE_TENSION', session_active: true, active_wait: null }));
+ok(spkL().indexOf('UNAVAILABLE') < 0 && spkR().indexOf('UNAVAILABLE') < 0, 'a new session starts the spoke table empty');
+ok(radar().indexOf('No readings yet') >= 0 && radar().indexOf('<polygon') < 0, 'an empty radar says so and draws no shape');
+[MR(0, 'rejected', 'AMBIGUOUS_PEAK', null, null), MR(0, 'suspect', 'FORCED_CANDIDATE', 412.3, 905.2),
+ MR(1, 'suspect', 'FORCED_CANDIDATE', 431.7, 980.4),
+ MR(2, 'suspect', 'FORCED_CANDIDATE', 999.9, 4321), MR(2, 'suspect', 'FORCED_CANDIDATE', 405.2, 870)]
+  .forEach(f => sandbox.handle(f));
+ok(spkL().indexOf('412.3') >= 0 && spkL().indexOf('405.2') >= 0, 'the left station table holds spokes 0 and 2');
+ok(spkR().indexOf('431.7') >= 0 && spkL().indexOf('431.7') < 0, 'the right station table holds spoke 1, and only it does');
+ok(spkL().indexOf('999.9') < 0 && spkL().indexOf('4321') < 0 && spkL().indexOf('REJECTED') < 0,
+  'the last frame per spoke wins over earlier attempts');
+ok(spkL().indexOf('>905<') >= 0 && spkL().indexOf('>92.3<') >= 0, 'tension is shown in N and in kgf (N / 9.80665)');
+ok(spkL().indexOf('SUSPECT') >= 0, 'each row carries its status chip');
+ok(spkL().indexOf('Candidate forced by the demonstration build') >= 0 && spkL().indexOf('FORCED_CANDIDATE') >= 0,
+  'the row reason is translated on hover, with the code beside it');
+ok(spkL().indexOf('<b>2 / 16</b>') >= 0 && spkR().indexOf('<b>1 / 16</b>') >= 0,
+  'the stats strip counts measured spokes against 16 per station');
+ok(/<circle class='d pL'/.test(radar()) && /<circle class='d pR'/.test(radar()), 'the radar plots measured spokes as dots');
+ok(radar().indexOf('<polygon') < 0, 'fewer than three points per station draws dots, not a polygon');
+sandbox.handle(MR(4, 'suspect', 'FORCED_CANDIDATE', 410.0, 890));
+sandbox.handle(MR(6, 'suspect', 'FORCED_CANDIDATE', 520.0, 1500));
+ok(/<polygon class=pL/.test(radar()) && radar().indexOf('<polygon class=pR') < 0,
+  'three or more points on a station draw its polygon; the other station stays dots');
+const leftT = [905.2, 870, 890, 1500], mean = leftT.reduce((a, b) => a + b) / 4;
+const sdev = Math.sqrt(leftT.reduce((a, b) => a + (b - mean) * (b - mean), 0) / 3);
+ok(spkL().indexOf('<b>' + mean.toFixed(0) + '</b>') >= 0 && spkL().indexOf('<b>' + sdev.toFixed(0) + '</b>') >= 0,
+  'the stats strip shows the station mean and standard deviation', mean.toFixed(0) + ' / ' + sdev.toFixed(0));
+ok(spkL().indexOf((mean * 0.8).toFixed(0) + '&#8211;' + (mean * 1.2).toFixed(0)) >= 0, 'the stats strip shows the 20% limits');
+ok(spkL().indexOf('class=out') >= 0 && spkL().indexOf('class=in') >= 0,
+  'a spoke outside 20% of its station mean is flagged; the rest are marked within');
+// A reload restores the table from this tab's storage: telemetry is never replayed.
+const sandbox3 = {
+  document, WebSocket, XMLHttpRequest, sessionStorage, location, JSON, Math, console, parseFloat, String, Object, Array,
+  setTimeout: setTimeout_, setInterval: setInterval_, clearTimeout: clearAny, clearInterval: clearAny,
+  Date: { now: () => now },
+};
+sandbox3.window = sandbox3;
+vm.createContext(sandbox3);
+byId['spkL'].innerHTML = '';
+vm.runInContext(script, sandbox3, { filename: 'web_ui.js' });
+ok(spkL().indexOf('412.3') >= 0 && spkR().indexOf('431.7') >= 0, 'a page reload restores the spoke table for this session');
+// A new cycle starts the table over; a new session empties it.
+sandbox.handle(MR(3, 'valid', 'NONE', 440.0, 950, 2));
+ok(spkL().indexOf('412.3') < 0 && spkR().indexOf('440.0') >= 0, 'a result from a new cycle starts a fresh table');
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 50000, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
+ok(spkR().indexOf('440.0') < 0, 'a session starting clears the spoke table');
+ok(Object.keys(JSON.parse(sessionStorage.getItem('truing_spokes')).d).length === 0, 'and its stored copy');
+ok(txt('spkunit') === 'radius: tension (N)' && spkL().indexOf('mean N') >= 0, 'an empty panel is labelled in tension units');
+// No tension model accepted a reading: frequency is plotted instead, and the panel says so.
+sandbox.handle(MR(0, 'suspect', 'FORCED_CANDIDATE', 433.3, null));
+sandbox.handle(MR(1, 'suspect', 'FORCED_CANDIDATE', 421.0, null));
+ok(txt('spkunit') === 'radius: frequency (Hz)' && spkL().indexOf('mean Hz') >= 0 && /<circle class='d pR'/.test(radar()),
+  'with frequencies only, the radar and stats switch to frequency and say so', txt('spkunit'));
+
+// ---- the always-read pipeline build says its readings are not validated tensions -------------
+IDENT.mode = 'fastdemo+inmp441+alwaysread';
+sandbox.loadIdent();
+ok(byId['arbanner'].className.indexOf('hide') < 0, 'an alwaysread build shows the pipeline-demonstration banner');
+ok(byId['spkdemo'].className.indexOf('hide') < 0, 'and repeats it over the spoke table');
+const flat = page.replace(/\s+/g, ' ');
+ok(flat.indexOf('every excitation yields a frequency candidate') >= 0 && flat.indexOf('they are not validated tensions') >= 0,
+  'the banner says every excitation yields a candidate and that these are not validated tensions');
+IDENT.mode = 'interactive';
+sandbox.loadIdent();
+ok(byId['arbanner'].className.indexOf('hide') >= 0 && byId['spkdemo'].className.indexOf('hide') >= 0,
+  'any other build shows no pipeline-demonstration banner');
+
+// ---- roller jog scaffold: only when /id says so, signed steps, the reply rendered as given ----
+delete IDENT.jog;
+sandbox.loadIdent();
+ok(byId['jogcard'].className.indexOf('hide') >= 0, 'no jog card unless /id reports jog:true');
+IDENT.jog = true;
+sandbox.loadIdent();
+ok(byId['jogcard'].className.indexOf('hide') < 0, 'jog:true shows the roller card');
+const jogUrl = (id) => { xhrUrls = []; byId[id].onclick(); return xhrUrls.find(u => u.indexOf('/demo/jog') === 0) || ''; };
+ok(jogUrl('j-bb').indexOf('/demo/jog?steps=-400') === 0, 'back 1/8 turn sends -400 steps', jogUrl('j-bb'));
+ok(jogUrl('j-b').indexOf('/demo/jog?steps=-200') === 0, 'back small sends -200 steps');
+ok(jogUrl('j-f').indexOf('/demo/jog?steps=200') === 0, 'forward small sends +200 steps');
+ok(jogUrl('j-ff').indexOf('/demo/jog?steps=400') === 0, 'forward 1/8 turn sends +400 steps');
+ok(txt('jogst') === 'Roller: energised, idle' && txt('jogerr') === '', 'an accepted jog shows the roller state', txt('jogst'));
+JOG_REPLY = { ok: false, enabled: false, moving: false, position_steps: 0, detail: 'driver is released' };
+ok(jogUrl('j-rel').indexOf('/demo/jog?enable=0') === 0, 'Release sends enable=0');
+ok(txt('jogerr') === 'driver is released' && txt('jogst') === 'Roller: released, idle',
+  'a refused jog shows the machine\'s detail and the state it reported', txt('jogerr'));
+ok(page.indexOf('Step counts are not a position reference') >= 0, 'the card says step counts are not a position reference');
+IDENT.jog = false;
+sandbox.loadIdent();
+ok(byId['jogcard'].className.indexOf('hide') >= 0, 'jog:false hides the roller card again');
+
+// ---- always light ------------------------------------------------------------------------------
+ok(!/prefers-color-scheme\s*:\s*dark/.test(page), 'no dark-mode media query remains');
 
 console.log(failures ? ('\n' + failures + ' FAILED') : '\nall checks passed');
 process.exit(failures ? 1 : 0);
