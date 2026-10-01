@@ -236,3 +236,22 @@ R0/R1 remain valid (they characterize the driver/motor/microstep setting, not th
 candidate speed/accel values remain valid for the same reason. Nothing about the architecture is
 in question -- see the plan file's 2026-09-29 entry for the distinction drawn between the
 software being validated and the mechanism being unproven.
+
+## 2026-10-01 -- spring-loaded roller mount; step counts are not a position (operator's tests)
+
+**Mechanics, as the operator described it (not reverse-engineered here):** the NEMA 17's bracket is now
+spring-loaded (a simple dynamic spring-loaded 3D-printed plane), so the whole stepper mount adjusts to the
+deviations of the wheel's shape. It removed essentially all the dead spots where the roller lost contact
+with the wheel and stopped turning it.
+
+**Finding:** with dead spots gone, the operator ran a simple back-and-forth repeatability test -- `roll N`
+then `roll -N`, to see whether the same spoke comes back to its solenoid station. It did not, consistently:
+the same procedure over a few tests did not bring the spoke back. **So the step count sent to the driver is
+not a reliable ground truth for navigation**, and roller calibration phases aimed at steps (R3/R4 above,
+`steps_per_wheel_rev` in `src/roller_calibration.h`) are set aside rather than pursued.
+
+**Direction:** a laser break-beam spoke sensor at the strike point (transmitter on one side, receiver on
+the other) detects a spoke passing; the roller decelerates from a known speed so the wheel stops with that
+spoke at the solenoid. Scaffold only until the module is delivered: `truing_hal/spoke_sensor_if.h`,
+reserved flag `TRUING_SPOKE_SENSOR`, and `docs/DEMO_BUILD.md`. Meanwhile the demonstration build jogs the
+roller manually and the operator confirms each spoke by eye.
