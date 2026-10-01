@@ -186,16 +186,86 @@
 /* TRUING_DUAL_MIC reads both I2S slots: a second INMP441 on the shared bus, one microphone per
  * acoustic station. Each capture still hands the DSP ONE mono stream -- the struck station's own
  * mic -- and keeps the other only as a debug-dump companion. It is an exploratory seam for the
- * dual-mic characterization workbench (tools/workbench.py), so it is legal only on the campaign
- * bench build: no session image, and least of all the demo, may change what it listens with until
- * a configuration has earned it and per-station provenance exists (SPEC 11.3). */
-#if TRUING_DUAL_MIC && !TRUING_CAMPAIGN_DEBUG
-#error "TRUING_DUAL_MIC is the campaign bench build only: it needs TRUING_CAMPAIGN_DEBUG."
+ * dual-mic characterization workbench (tools/workbench.py), legal on the campaign bench build; no
+ * evidence-bearing session image may change what it listens with until a configuration has earned it
+ * and per-station provenance exists (SPEC 11.3). The one exception is the pipeline-demonstration build
+ * above, which bears no evidence by construction and uses it as a presentation choice. */
+#ifndef TRUING_DEMO_ALWAYS_READ
+#define TRUING_DEMO_ALWAYS_READ 0
+#endif
+
+/* TRUING_DEMO_ALWAYS_READ is the PIPELINE-DEMONSTRATION build (operator's decision, 2026-10-02, for the
+ * 2026-10-03 demonstration): an excitation whose capture the DSP's quality gates would reject still yields a
+ * frequency candidate, so the whole chain -- strike, capture, analysis, tension, display -- can be shown
+ * working on the spot. Such a capture is reported SUSPECT / FORCED_CANDIDATE (acoustic_real.c,
+ * "pipeline-demonstration fallback"); one the gates accept is untouched. Still rejected: a capture with
+ * no signal on the line (all zeros or stuck), the rare one where no spectrum or finite SNR can be formed,
+ * and a frequency the tension model refuses. It claims nothing about the acoustic method: no reading from
+ * this build is evidence, and the page says so. It is an audience image, so the debug channel (a bench
+ * tool) is excluded.
+ *
+ * DELIBERATE DEVIATION, scoped to this build: SPEC 7.4 maps no-onset / out-of-range / ambiguous captures
+ * to REJECTED, and SPEC 8.11 makes SUSPECT solver-admissible. A forced candidate is therefore an
+ * admissible row in principle; it stays display-only because this image's layout keeps tension out of
+ * the solve (TENSION_ABSENT). That is CHECKED AT BOOT, not assumed: unless the loaded artifact selects
+ * TENSION_ABSENT, orch_demo.c leaves always-read OFF (fails closed), and /id reports always_read false.
+ *
+ * It also listens with each station's OWN microphone when both are wired (TRUING_DUAL_MIC), which the
+ * rule below otherwise reserves for the bench: that is this build's presentation choice (the mics sit
+ * beside their solenoids), not a characterized configuration. */
+#if TRUING_DEMO_ALWAYS_READ && !(TRUING_FAST_DEMO && TRUING_REAL_FRONT_END)
+#error "TRUING_DEMO_ALWAYS_READ is the acoustic demonstration image: it needs TRUING_FAST_DEMO and TRUING_REAL_FRONT_END."
+#endif
+#if TRUING_DEMO_ALWAYS_READ && TRUING_CAMPAIGN_DEBUG
+#error "TRUING_DEMO_ALWAYS_READ is an audience image: not with the bench debug channel (TRUING_CAMPAIGN_DEBUG)."
+#endif
+
+#if TRUING_DUAL_MIC && !TRUING_CAMPAIGN_DEBUG && !TRUING_DEMO_ALWAYS_READ
+#error "TRUING_DUAL_MIC is the campaign bench build (or the pipeline-demonstration build): it needs TRUING_CAMPAIGN_DEBUG or TRUING_DEMO_ALWAYS_READ."
+#endif
+
+#ifndef TRUING_DEMO_ROLLER_JOG
+#define TRUING_DEMO_ROLLER_JOG 0
+#endif
+
+/* TRUING_DEMO_ROLLER_JOG: the MANUAL roller mode of the demonstration build. The TMC2209 is brought up
+ * disabled and the operator turns the wheel with it from the page (GET /demo/jog), then confirms the
+ * spoke at the station BY EYE as before: navigation stays the operator's (composite: the acoustic
+ * stations are manual). Step counts are a jog distance, never a position: a back-and-forth on the
+ * spring-loaded roller (2026-10-01) did not return the wheel to the same spoke, so no step-based
+ * position or roller calibration is used here. Not with the bench drive or roller navigation (one
+ * owner of the STEP pin). */
+#if TRUING_DEMO_ROLLER_JOG && !TRUING_DEMO_ALWAYS_READ
+#error "TRUING_DEMO_ROLLER_JOG is part of the pipeline-demonstration build: it needs TRUING_DEMO_ALWAYS_READ."
+#endif
+#if TRUING_DEMO_ROLLER_JOG && (TRUING_BENCH_DRIVE || TRUING_ROLLER_NAV)
+#error "TRUING_DEMO_ROLLER_JOG, TRUING_BENCH_DRIVE and TRUING_ROLLER_NAV all claim the wheel drive: pick one owner."
+#endif
+
+#ifndef TRUING_SPOKE_SENSOR
+#define TRUING_SPOKE_SENSOR 0
+#endif
+
+/* TRUING_SPOKE_SENSOR: RESERVED for the AUTOMATIC roller mode (planned, hardware not delivered): a laser
+ * break-beam across the strike point (transmitter on one side, receiver on the other) reports a spoke
+ * passing; the roller decelerates from a known speed so the wheel stops with that spoke at the
+ * solenoid. Position knowledge then comes from beam edges, not step counts. The seam is
+ * truing_hal/spoke_sensor_if.h; there is no implementation yet, so the flag refuses to build. */
+#if TRUING_SPOKE_SENSOR
+#error "TRUING_SPOKE_SENSOR is reserved: the laser spoke sensor is not delivered yet (scaffold: truing_hal/spoke_sensor_if.h, docs/DEMO_BUILD.md)."
 #endif
 
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_ROLLER_NAV
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+jog"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DEMO_ROLLER_JOG
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441+alwaysread+jog"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441+alwaysread"
+#elif TRUING_FAST_DEMO && TRUING_ROLLER_NAV
 #define TRUING_BUILD_MODE_STR "fastdemo+roller"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_CAMPAIGN_DEBUG && TRUING_DUAL_MIC && TRUING_BENCH_DRIVE
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+campaign+drive"

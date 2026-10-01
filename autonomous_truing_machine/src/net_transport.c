@@ -733,6 +733,51 @@ static esp_err_t drive_json_handler(httpd_req_t *req)
 }
 #endif
 
+#if TRUING_DEMO_ROLLER_JOG
+/* The pipeline-demonstration build's MANUAL roller: GET /demo/jog?steps=<signed int> turns the wheel by
+ * that many steps (energising the coils if needed); GET /demo/jog?enable=0 stops and releases it; with
+ * no query it only reports. It is NOT an operator intent and answers no wait: the operator still
+ * confirms the spoke at the station by eye, and the step count is a jog distance, never a position
+ * (build_mode.h). Unlike /demo/acquisition it does actuate hardware during a session, so it is fenced in
+ * firmware (truing_demo_jog, orch_demo.c): a move only while the machine is idle or asking the operator
+ * to position a spoke, never while a strike is prepared or captured, and every strike waits for a jog to
+ * finish and the wheel to settle. */
+static esp_err_t jog_handler(httpd_req_t *req)
+{
+    char q[48], v[16];
+    bool have_steps = false, release = false;
+    long steps = 0;
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        if (httpd_query_key_value(q, "steps", v, sizeof(v)) == ESP_OK) {
+            steps = strtol(v, NULL, 10);
+            have_steps = true;
+        }
+        if (httpd_query_key_value(q, "enable", v, sizeof(v)) == ESP_OK && strcmp(v, "0") == 0) {
+            release = true;
+        }
+    }
+    const char *detail = "status";
+    bool ok = true;
+    if (release || have_steps) {
+        ok = truing_demo_jog((int32_t)steps, release, &detail);
+        if (ok) {
+            ESP_LOGI(TAG, "operator jog: %s", release ? "release" : "move");
+        }
+    }
+    truing_demo_jog_state_t st;
+    const bool have = truing_demo_jog_state(&st);
+    char body[192];
+    const int m = snprintf(body, sizeof(body),
+                           "{\"ok\":%s,\"enabled\":%s,\"moving\":%s,\"faulted\":%s,\"position_steps\":%ld,\"detail\":\"%s\"}",
+                           ok && have ? "true" : "false", have && st.enabled ? "true" : "false",
+                           have && st.moving ? "true" : "false", have && st.faulted ? "true" : "false",
+                           have ? (long)st.position_steps : 0L, have ? detail : "this image has no manual roller");
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, m > 0 ? (size_t)m : 0u);
+}
+#endif
+
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[448];   /* the reply is ~330 bytes; a truncated JSON body would be silently wrong */
@@ -747,11 +792,13 @@ static esp_err_t id_get_handler(httpd_req_t *req)
         "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\",\"mode\":\"%s\","
         "\"acquisition\":\"%s\",\"acquisition_selectable\":%s,"
         "\"real_front_end\":%s,\"acoustic_demo_spokes\":%d,\"composite_navigation\":%s,"
+        "\"always_read\":%s,\"jog\":%s,"
         "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
         BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR,
         truing_demo_acquisition_is_automatic() ? "auto" : "manual", TRUING_FAST_DEMO ? "true" : "false",
         TRUING_REAL_FRONT_END ? "true" : "false", (int)TRUING_ACOUSTIC_DEMO_SPOKES,
         truing_demo_navigation_is_composite() ? "true" : "false",
+        truing_demo_always_read_active() ? "true" : "false", TRUING_DEMO_ROLLER_JOG ? "true" : "false",
         mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");
@@ -933,6 +980,12 @@ bool truing_net_start(void)
     static const httpd_uri_t acq_uri = { .uri = "/demo/acquisition", .method = HTTP_GET,
                                          .handler = acq_post_handler };
     (void)httpd_register_uri_handler(s_server, &acq_uri);
+#endif
+#if TRUING_DEMO_ROLLER_JOG
+    static const httpd_uri_t jog_uri = { .uri = "/demo/jog", .method = HTTP_GET, .handler = jog_handler };
+    if (httpd_register_uri_handler(s_server, &jog_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "manual roller endpoint not registered; /demo/jog will 404");
+    }
 #endif
 
     if (xTaskCreatePinnedToCore(sender_task, "wire_tx", SENDER_STACK, NULL, tskIDLE_PRIORITY + 3, NULL, 0) != pdPASS) {

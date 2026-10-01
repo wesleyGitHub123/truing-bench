@@ -66,6 +66,23 @@ typedef struct {
 } truing_demo_drive_state_t;
 /* False when this image has no bench drive (or it failed to initialise); `out` is then untouched. */
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out);
+/* The pipeline-demonstration build's MANUAL roller (TRUING_DEMO_ROLLER_JOG, GET /demo/jog). A jog is a
+ * distance the operator asks for, never a position: the spoke is confirmed at the station by eye. */
+typedef struct {
+    bool    enabled;          /* coils energised */
+    bool    moving;
+    bool    faulted;
+    int32_t position_steps;   /* pulses sent since boot: NOT the wheel's position */
+} truing_demo_jog_state_t;
+bool truing_demo_jog_state(truing_demo_jog_state_t *out);   /* false: this image has no manual roller */
+/* True when the pipeline-demonstration fallback is actually on (it fails closed at boot unless the layout
+ * keeps tension out of the solve). Reported by /id. */
+bool truing_demo_always_read_active(void);
+/* Move by `steps` (energising the coils if needed), or with `release` stop and de-energise. A move is
+ * refused unless the machine is idle or waiting for the operator to position a spoke, while a strike is
+ * being prepared or captured, while the roller still moves, and beyond +-16000 steps; `detail` says why.
+ * Every strike in this build waits for a jog to finish and the wheel to settle first (orch_demo.c). */
+bool truing_demo_jog(int32_t steps, bool release, const char **detail);
 truing_source_impl_t truing_demo_acoustic_source(void);
 
 /* The acoustic chain configuration the measurement ran under. Its digest is what lets a

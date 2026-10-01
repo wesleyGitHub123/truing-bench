@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "artifact_store.h"
@@ -58,6 +59,15 @@ static const char *TAG = "orch_demo";
 #if TRUING_BENCH_DRIVE && !defined(BOARD_PROFILE_S3_DEVKIT)
 #error "TRUING_BENCH_DRIVE is DevKit only (s3_devkit_lab): the Nano's pins carry no roller."
 #endif
+#if TRUING_DEMO_ROLLER_JOG && !defined(BOARD_PROFILE_S3_DEVKIT)
+#error "TRUING_DEMO_ROLLER_JOG is DevKit only (s3_devkit_demo): the Nano's pins carry no roller."
+#endif
+
+/* Manual roller jog of the pipeline-demonstration build (TRUING_DEMO_ROLLER_JOG): brisk enough to turn
+ * the wheel on stage, on the spring-loaded roller. A jog distance, never a position (build_mode.h). */
+#define DEMO_JOG_CRUISE_HZ   3000u
+#define DEMO_JOG_ACCEL_SS    3000u
+#define DEMO_JOG_MAX_STEPS   16000   /* one request: five motor turns at 16 microsteps */
 
 /* Bench drive ramp (TRUING_BENCH_DRIVE): roller_smoke's cautious first-spin knobs, not a measured
  * calibration. `roll speed` (DRIVE_MOTION) changes them for the running image. */
@@ -81,6 +91,12 @@ static struct {
     truing_pluck_if_t pluck[TRUING_ACOUSTIC_STATIONS];
     truing_pluck_fake_ctx_t pluck_ctx[TRUING_ACOUSTIC_STATIONS];        /* synthetic front end */
     truing_pluck_gpio_ctx_t pluck_gpio_ctx[TRUING_ACOUSTIC_STATIONS];   /* real front end: the stations' GPIOs */
+#if TRUING_DEMO_ROLLER_JOG
+    /* Manual roller (demo build): every strike goes through jog_guarded_fire(), which calls these. */
+    truing_pluck_if_t pluck_real[TRUING_ACOUSTIC_STATIONS];
+    SemaphoreHandle_t jog_lock;     /* one owner at a time of "may the wheel move now": a jog vs a strike */
+    volatile bool     striking;     /* a strike is being prepared or fired: no jog may start */
+#endif
     void *acoustic_scratch;
     truing_runout_if_t runout;
     truing_runout_manual_ctx_t rctx;
@@ -163,7 +179,7 @@ static void fastdemo_apply_to_wheel(const truing_artifact_t *art, uint8_t spoke,
 /* ROLLER image: the TMC2209 drive, brought up once and left DISABLED. Its motion profile and the
  * microstep count it enforces come from the measured calibration; while that is empty the drive
  * refuses moves and navigation refuses positioning (CALIBRATION_MISSING), so nothing turns. */
-#if TRUING_ROLLER_NAV || TRUING_BENCH_DRIVE
+#if TRUING_ROLLER_NAV || TRUING_BENCH_DRIVE || TRUING_DEMO_ROLLER_JOG
 static void roller_drive_init_once(void)
 {
     if (s.drive_inited) {
@@ -189,6 +205,14 @@ static void roller_drive_init_once(void)
     ESP_LOGW(TAG, "BENCH DRIVE: the roller's TMC2209 answers the DRIVE_* debug codes in raw steps (%s); it starts "
                   "DISABLED at %u steps/s, %u steps/s2. Navigation stays synthetic.",
              s.drive_ok ? "initialised" : "INIT FAILED", (unsigned)BENCH_DRIVE_CRUISE_HZ, (unsigned)BENCH_DRIVE_ACCEL_SS);
+#elif TRUING_DEMO_ROLLER_JOG
+    /* Manual roller mode: the operator jogs from the page and confirms the spoke by eye. Same 16 microsteps
+     * as the bench drive (measured), no roller calibration, no step-based position. */
+    const truing_ramp_profile_t jog_prof = { 1000000u, DEMO_JOG_CRUISE_HZ, DEMO_JOG_ACCEL_SS };
+    s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &jog_prof, 16u);
+    ESP_LOGW(TAG, "DEMO ROLLER (manual): TMC2209 %s, DISABLED until the operator jogs (GET /demo/jog), %u steps/s, "
+                  "%u steps/s2. Spokes are confirmed at the station by eye; steps are not a position.",
+             s.drive_ok ? "initialised" : "INIT FAILED", (unsigned)DEMO_JOG_CRUISE_HZ, (unsigned)DEMO_JOG_ACCEL_SS);
 #else
     const truing_ramp_profile_t prof = { 1000000u, k_roller_calibration.max_step_hz, k_roller_calibration.accel_steps_s2 };
     s.drive_ok = truing_wheel_drive_tmc2209_init(&s.drive, &s.drive_ctx, &pins, &prof, k_roller_calibration.microsteps);
@@ -342,6 +366,155 @@ uint32_t truing_demo_listen_read(uint32_t station, uint32_t *pos, int32_t *out, 
     (void)lost;
     return 0u;
 #endif
+}
+
+/* ---- manual roller jog (TRUING_DEMO_ROLLER_JOG) -------------------------------------------
+ *
+ * The interlock, both ways, under one lock (jog_lock) so a check and the move it allows cannot be split
+ * by the other task:
+ *   - a JOG starts only when nothing is about to be struck: no session is running, or the machine is
+ *     waiting for the operator to POSITION a spoke (reference, spoke, rim index). Between a confirmed
+ *     positioning and its measurement, during the strike, the capture, the analysis and any retry, the
+ *     orchestrator is not in such a wait, so the jog is refused. Nor while a strike is being prepared.
+ *   - a STRIKE (every fire in this build goes through jog_guarded_fire) first marks itself, waits for any
+ *     jog already under way to finish (a jog begun during a positioning wait and still running when the
+ *     operator confirms), releases the coils (no holding-current noise under the capture; the
+ *     spring-loaded roller holds the wheel), lets the wheel settle, and only then fires. A roller still
+ *     moving after DEMO_JOG_WAIT_MS refuses the strike (the attempt is rejected, never fired on a moving
+ *     wheel). */
+#if TRUING_DEMO_ROLLER_JOG
+#define DEMO_JOG_SETTLE_MS 300u
+#define DEMO_JOG_WAIT_MS   10000u
+
+static bool jog_guarded_fire(truing_pluck_if_t *self, float pulse_ms)
+{
+    const ptrdiff_t i = self - s.pluck;
+    if (i < 0 || i >= (ptrdiff_t)TRUING_ACOUSTIC_STATIONS || s.pluck_real[i].fire == NULL) {
+        return false;
+    }
+    if (s.jog_lock != NULL) {
+        (void)xSemaphoreTake(s.jog_lock, portMAX_DELAY);
+    }
+    s.striking = true;
+    if (s.jog_lock != NULL) {
+        (void)xSemaphoreGive(s.jog_lock);
+    }
+    bool settle = false;
+    const int64_t until = esp_timer_get_time() + (int64_t)DEMO_JOG_WAIT_MS * 1000;
+    while (s.drive_ok && truing_wheel_drive_is_moving(&s.drive) && esp_timer_get_time() < until) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        settle = true;
+    }
+    bool ok = false;
+    if (s.drive_ok && truing_wheel_drive_is_moving(&s.drive)) {
+        ESP_LOGW(TAG, "strike refused: the roller is still moving after %u ms", (unsigned)DEMO_JOG_WAIT_MS);
+    } else {
+        if (s.drive_ok && s.drive_ctx.enabled) {
+            (void)truing_wheel_drive_enable(&s.drive, false, NULL);
+            settle = true;
+        }
+        if (settle) {
+            vTaskDelay(pdMS_TO_TICKS(DEMO_JOG_SETTLE_MS));
+        }
+        ok = s.pluck_real[i].fire(&s.pluck_real[i], pulse_ms);
+    }
+    s.striking = false;   /* from here the session state (measuring, not positioning) keeps jogs refused */
+    return ok;
+}
+
+/* True when the orchestrator is in a state where turning the wheel cannot move a spoke out from under a
+ * strike: no session, or waiting for the operator to position. */
+static bool jog_window_open(const char **why)
+{
+    truing_orch_snapshot_t snap;
+    truing_orch_snapshot(&s.orch, &snap);
+    if (snap.waiting) {
+        const truing_wait_kind_t k = snap.active_wait.kind;
+        if (k == TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION || k == TRUING_WAIT_POSITION_TO_SPOKE ||
+            k == TRUING_WAIT_POSITION_TO_RIM_INDEX) {
+            return true;
+        }
+        *why = "the machine is waiting for something other than positioning a spoke";
+        return false;
+    }
+    if (!snap.session_active) {
+        return true;
+    }
+    *why = "a session is measuring: jog only while the page asks you to position a spoke";
+    return false;
+}
+#endif
+
+/* ---- manual roller jog (TRUING_DEMO_ROLLER_JOG): the page's controls -------------------------- */
+bool truing_demo_always_read_active(void)
+{
+    return TRUING_REAL_FRONT_END && s.actx.always_read;
+}
+
+bool truing_demo_jog_state(truing_demo_jog_state_t *out)
+{
+#if TRUING_DEMO_ROLLER_JOG
+    if (out == NULL || !s.drive_ok) {
+        return false;
+    }
+    const truing_wheel_drive_tmc2209_ctx_t *c = &s.drive_ctx;
+    memset(out, 0, sizeof(*out));
+    out->enabled = c->enabled;
+    out->moving = c->moving;
+    out->faulted = c->faulted;
+    out->position_steps = c->position;
+    return true;
+#else
+    (void)out;
+    return false;
+#endif
+}
+
+bool truing_demo_jog(int32_t steps, bool release, const char **detail)
+{
+    const char *d = "ok";
+    bool ok = false;
+#if TRUING_DEMO_ROLLER_JOG
+    truing_reason_t reason = TRUING_REASON_NONE;
+    if (!s.drive_ok) {
+        d = "the roller driver did not initialise";
+    } else if (release) {
+        /* Stopping and de-energising never moves a spoke onto or off the plunger: always allowed. */
+        truing_wheel_drive_stop(&s.drive);
+        ok = truing_wheel_drive_enable(&s.drive, false, &reason) == TRUING_STATUS_VALID;
+        d = ok ? "released" : truing_reason_str(reason);
+    } else if (steps == 0 || steps > DEMO_JOG_MAX_STEPS || steps < -DEMO_JOG_MAX_STEPS) {
+        d = "steps must be non-zero and within +-16000";
+    } else {
+        if (s.jog_lock != NULL) {
+            (void)xSemaphoreTake(s.jog_lock, portMAX_DELAY);
+        }
+        if (s.striking || truing_demo_capture_pending()) {
+            d = "a strike is being prepared or captured: wait for it to finish";
+        } else if (!jog_window_open(&d)) {
+            /* d says why */
+        } else if (truing_wheel_drive_is_moving(&s.drive)) {
+            d = "the roller is still moving";
+        } else if (!s.drive_ctx.enabled && truing_wheel_drive_enable(&s.drive, true, &reason) != TRUING_STATUS_VALID) {
+            d = truing_reason_str(reason);
+        } else if (truing_wheel_drive_move_relative(&s.drive, steps, &reason) != TRUING_STATUS_VALID) {
+            d = truing_reason_str(reason);
+        } else {
+            ok = true;
+        }
+        if (s.jog_lock != NULL) {
+            (void)xSemaphoreGive(s.jog_lock);
+        }
+    }
+#else
+    (void)steps;
+    (void)release;
+    d = "this image has no manual roller";
+#endif
+    if (detail != NULL) {
+        *detail = d;
+    }
+    return ok;
 }
 
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
@@ -622,8 +795,10 @@ static void demo_task(void *arg)
     }
     /* The acoustic stations' actuators on their GPIOs (SPEC 4.3: pin numbers exist only in the
      * board profile). Wired ONLY when the board profile says that station's solenoid is attached
-     * and bench-verified - gpio_config() succeeding is not evidence of a solenoid, and a bare pin
-     * makes gpio_fire() return true for nothing (SPEC 17.3). */
+     * - gpio_config() succeeding is not evidence of a solenoid, and a bare pin makes gpio_fire()
+     * return true for nothing (SPEC 17.3). The profile's default is "attached and bench-verified";
+     * the pipeline-demonstration build (s3_devkit_demo) declares both present with the B0 check still
+     * open, by the operator's decision (docs/DEMO_BUILD.md). */
 #if BOARD_PLUCK_ACTUATOR_LEFT_PRESENT
     if (!truing_pluck_gpio_init(&s.pluck[0], &s.pluck_gpio_ctx[0], BOARD_PLUCK_ACTUATOR_LEFT_GPIO)) {
         ESP_LOGW(TAG, "LEFT actuator GPIO init failed (%d); sessions will be refused", BOARD_PLUCK_ACTUATOR_LEFT_GPIO);
@@ -646,6 +821,17 @@ static void demo_task(void *arg)
     /* Constant-folded, so both branches stay type-checked in every build (see build_mode.h).
      * Real front end: a station's GPIO actuator only if the board says it is wired AND it
      * configured; otherwise NULL, which refuses sessions and rejects that station's spokes. */
+#if TRUING_DEMO_ROLLER_JOG
+    /* Manual roller: every strike first waits for any jog to finish and the wheel to settle (and releases
+     * the coils), and no jog may start while a strike is being prepared (jog_guarded_fire, truing_demo_jog). */
+    s.jog_lock = xSemaphoreCreateMutex();
+    for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        if (s.pluck_gpio_ctx[i].configured) {
+            s.pluck_real[i] = s.pluck[i];
+            s.pluck[i].fire = jog_guarded_fire;
+        }
+    }
+#endif
     truing_acoustic_actuators_t actuators;
     for (unsigned i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
         actuators.at[i] = TRUING_REAL_FRONT_END ? (s.pluck_gpio_ctx[i].configured ? &s.pluck[i] : NULL) : &s.pluck[i];
@@ -663,6 +849,7 @@ static void demo_task(void *arg)
     /* Wired by the composition root, which is the only place that knows there is a transport to
      * push to. The orchestrator's contract with the acoustic subsystem is unchanged. */
     truing_acoustic_real_set_observer(&s.acoustic, acoustic_phase_observer, NULL);
+
     /* THE fast-demo substitution. Both implementations already exist and both already declare
      * what they are; picking between them here - before truing_orch_init() - is what makes the
      * whole session honest downstream.
@@ -694,6 +881,25 @@ static void demo_task(void *arg)
         return;
     }
     truing_calc_artifact_init(&s.calc, &s.cctx, art, &s.wheel);
+#if TRUING_DEMO_ALWAYS_READ
+    /* The pipeline-demonstration build turns rejected captures into SUSPECT candidates, and SUSPECT is
+     * solver-admissible. That is contained only because this image's layout keeps tension out of the
+     * solve (TENSION_ABSENT: displayed evidence, never solver input). So it FAILS CLOSED: unless the
+     * loaded artifact really selects TENSION_ABSENT, always-read stays off and the gates apply as usual. */
+    {
+        truing_reason_t policy = TRUING_REASON_NONE;
+        const truing_layout_id_t layout = s.calc.select_layout(&s.calc, false, &policy);
+        if (layout == TRUING_LAYOUT_TENSION_ABSENT) {
+            truing_acoustic_real_set_always_read(&s.acoustic, true);
+            ESP_LOGW(TAG, "PIPELINE DEMONSTRATION BUILD: every excitation yields a frequency candidate (SUSPECT / "
+                          "FORCED_CANDIDATE where the DSP gates would reject). Readings are not evidence; tension "
+                          "stays out of the solve (layout TENSION_ABSENT, %s).", truing_reason_str(policy));
+        } else {
+            ESP_LOGE(TAG, "PIPELINE DEMONSTRATION BUILD: the artifact puts tension in the solve (layout %d), so "
+                          "always-read stays OFF: forced candidates must never reach a solve.", (int)layout);
+        }
+    }
+#endif
     truing_telemetry_ring_init(&s.sink, &s.ring);
     truing_auto_operator_init(&s.op);
     /* Starting state: the model's own response to three mis-set spokes (+0.30 rev on 3, -0.25 rev on 10,
@@ -772,6 +978,8 @@ static void demo_task(void *arg)
      * in a session can move it. A drive that failed to initialise is not handed over (DRIVE_* refused). */
     roller_drive_init_once();
     deps.bench_drive = s.drive_ok ? &s.drive : NULL;
+#elif TRUING_DEMO_ROLLER_JOG
+    roller_drive_init_once();   /* the operator's jog only: never handed to navigation or the orchestrator */
 #endif
     /* The interface structs are re-initialised IN PLACE when the path changes, so these
      * pointers stay valid and keep pointing at whichever implementation is wired now. */
@@ -975,9 +1183,9 @@ static void demo_task(void *arg)
              (double)s.solver.tol_lateral_mm);
     const uint32_t fires_left = TRUING_REAL_FRONT_END ? s.pluck_gpio_ctx[0].fires : s.pluck_ctx[0].fires;
     const uint32_t fires_right = TRUING_REAL_FRONT_END ? s.pluck_gpio_ctx[1].fires : s.pluck_ctx[1].fires;
-    ESP_LOGI(TAG, "acoustic: calls=%" PRIu32 " estimates=%" PRIu32 " rejections=%" PRIu32 " fires LEFT=%" PRIu32
-                  " RIGHT=%" PRIu32 " | last f1=%.3f Hz snr=%.1f dB analysis=%" PRIu32 " ms (source %s)",
-             s.actx.calls, s.actx.estimates, s.actx.rejections, fires_left, fires_right, (double)s.actx.diag.f1_hz,
+    ESP_LOGI(TAG, "acoustic: calls=%" PRIu32 " estimates=%" PRIu32 " (forced %" PRIu32 ") rejections=%" PRIu32
+                  " fires LEFT=%" PRIu32 " RIGHT=%" PRIu32 " | last f1=%.3f Hz snr=%.1f dB analysis=%" PRIu32 " ms (source %s)",
+             s.actx.calls, s.actx.estimates, s.actx.forced, s.actx.rejections, fires_left, fires_right, (double)s.actx.diag.f1_hz,
              (double)s.actx.diag.snr_db, s.actx.diag.analysis_us / 1000u, s.audio.impl_name);
     ESP_LOGI(TAG, "NOTE: %s is the honest Stage 1 ceiling (SPEC 8.6.3). The calculation and the acoustic layers 2-4 are "
                   "real; the audio front end is a synthetic pluck and the wheel is a simulation of the artifact's own model, so "
