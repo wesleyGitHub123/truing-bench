@@ -1778,3 +1778,28 @@ operator approves it first) and a fresh batch runs with the board's own live ver
 the f1 not a no-fire line. One bounded return is allowed (one more exploration pass, one fresh batch),
 then the run stops. Last: the operator gives spoke 0 a quarter turn and a short batch must show the f1
 move (up when tightened); a reading that does not move is the rig, whatever else passed.
+
+### Frozen-rig characterization, Amendment 1 (2026-10-01, after Stage 0 data, disclosed)
+
+**What changed.** The pre-stated Stage 0 rule counted any strong in-band peak within +-5 Hz of 406.2 Hz. It omitted the
+SNR floor that B3.0's own definition of a line carries (a peak counts as a line only at or above the chain's
+`measurement_min_snr_db`, 12 dB). The omission made the rule degenerate: a no-fire control here has about 128 strong
+peaks (the board rejects them as AMBIGUOUS_PEAK), so any 10 Hz window catches one by chance. As written, the rule gave
+NO-GO because 5 of 8 controls "had" a peak near 406 Hz, at a median SNR of 0.1 dB. The amended rule counts only peaks at
+or above 12 dB SNR. This was decided after seeing the data, which is why it is recorded here rather than folded in.
+
+**Stage 0 under each rule** (`S0`, 26 shots: 40/60/85 ms x 6 strikes + 8 no-fire, seed 930, LEFT/rig-2):
+as pre-stated NO-GO (local controls 62% "hit"); amended GO (local mic: strikes with a >= 12 dB line within +-5 Hz of
+406.2 Hz: 40 ms 4/6, 60 ms 3/6, 85 ms 0/6; controls 0/8). Far mic: 0 at every width.
+
+**Also observed, not yet interpreted.** The board itself cleared 13 of 18 strikes and 0 of 8 controls, every clear at
+360.5-363.2 Hz (40 ms: 362.6-363.0). On the local mic the strikes carry three lines at >= 12 dB that no control
+reaches: about 362 Hz (15/18), 426 Hz (12/18; B3.2's spoke-0 strike line) and 406 Hz (7/18; the pluck reference). All
+three are weak on the far mic, so they are local to the LEFT station, but that does not say whether they are the
+spoke or the station's own structure. The firmware picks the lowest strong peak in the band, so it reports 362 Hz.
+Which of the three is spoke 0 is the next question; the tension nudge is the deciding test.
+
+**Rig-2 record (LEFT).** Board 5A84006975, LEFT solenoid on GPIO 15, both mics as seated by the operator on
+2026-10-01 (seating and standoff not yet described; to be filled in when the operator is back). Image: `s3_devkit_lab`
+at 77500b5 with `-DBOARD_PLUCK_ACTUATOR_LEFT_PRESENT=1` (the build reports -dirty only for uncommitted host-tool edits
+to `tools/workbench.py` from another session; the firmware sources are committed).

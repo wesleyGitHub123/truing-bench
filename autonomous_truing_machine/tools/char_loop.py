@@ -308,11 +308,16 @@ def nofire_coherent_lines(docs, lines_per, min_snr):
     return bv.coherent_lines(caps)
 
 
-def gonogo(docs, lines_per, ref_f1):
+def gonogo(docs, lines_per, ref_f1, min_snr=None):
     """Stage 0: fraction of strikes (per width) and of no-fire controls whose strong in-band peaks include one
-    within GONOGO_HZ of the reference f1. The board's clear/reject verdict is not used."""
+    within GONOGO_HZ of the reference f1. The board's clear/reject verdict is not used.
+
+    min_snr (Amendment 1, 2026-10-01): count only peaks whose SNR reaches it, as B3.0's definition of a line
+    does. Without it the test is degenerate: a noise control has ~128 strong peaks, so any +-5 Hz window
+    catches one by chance (S0: 62% of controls "had" 406 Hz, at a median SNR of 0.1 dB)."""
     def hit(b):
-        return any(abs(f - ref_f1) <= GONOGO_HZ for f, _ in lines_per.get(b, {}).get("peaks", []))
+        return any(abs(f - ref_f1) <= GONOGO_HZ and (min_snr is None or snr >= min_snr)
+                   for f, snr in lines_per.get(b, {}).get("peaks", []))
     nf = [b for b, d in docs.items() if d.get("campaign_kind") == "no_fire" and b in lines_per]
     nf_frac = sum(hit(b) for b in nf) / len(nf) if nf else None
     per = {}
@@ -348,14 +353,15 @@ def cmd_gonogo(args):
     verdicts = []
     for ch in ("local", "far"):
         try:
-            _, per = read_lines(args.root, args.tag, ch)
+            settings, per = read_lines(args.root, args.tag, ch)
         except FileNotFoundError:
             report.append("%s: no lines CSV (run `lines --channel %s`)" % (ch, ch))
             continue
-        g = gonogo(docs, per, args.ref_f1)
+        floor = settings.get("min_snr", BASE_MIN_SNR_DB)
+        g = gonogo(docs, per, args.ref_f1, min_snr=floor)
         verdicts.append(g["go"])
-        report.append("%s mic: no-fire with the line %s of %d; strikes by width: %s -> %s" % (
-            ch, "-" if g["nofire_frac"] is None else "%.0f%%" % (100 * g["nofire_frac"]), g["nofire_n"],
+        report.append("%s mic (peaks >= %g dB SNR): no-fire with the line %s of %d; strikes by width: %s -> %s" % (
+            ch, floor, "-" if g["nofire_frac"] is None else "%.0f%%" % (100 * g["nofire_frac"]), g["nofire_n"],
             ", ".join("%d ms %.0f%%" % (p, 100 * f) for p, f in g["widths"].items()), "GO" if g["go"] else "no-go"))
     report.append("**Stage 0: %s**" % ("GO" if any(verdicts) else "NO-GO"))
     text = "\n".join(report)
@@ -499,6 +505,9 @@ def selftest():
     assert g["go"] and abs(g["widths"][40] - 2 / 3) < 1e-9 and g["nofire_frac"] == 0.0
     per["n1"] = {"peaks": [(406.0, 8.0)]}
     assert not gonogo(docs, per, 406.2)["go"]                          # the line is in the controls too
+    assert gonogo(docs, per, 406.2, min_snr=8.5)["go"] is False         # s2's 3 dB peak no longer counts: 1/3 strikes
+    per["n1"] = {"peaks": [(406.0, 0.5)]}
+    assert gonogo(docs, per, 406.2, min_snr=2.0)["nofire_frac"] == 0.0  # a noise-level peak is not a line
     print("selftest ok")
 
 
