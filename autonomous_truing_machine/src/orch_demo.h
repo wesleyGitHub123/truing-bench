@@ -83,6 +83,10 @@ bool truing_demo_jog_state(truing_demo_jog_state_t *out);   /* false: this image
 /* True when the pipeline-demonstration fallback is actually on (it fails closed at boot unless the layout
  * keeps tension out of the solve). Reported by /id. */
 bool truing_demo_always_read_active(void);
+/* The figures the page's tension-survey plan uses, from the loaded wheel and solver configuration (never a
+ * page constant): tension change per nipple revolution for side A (DS, odd spokes here) and side B (NDS,
+ * even spokes), and the largest single adjustment the solver would allow. */
+void truing_demo_plan_model(float *c_side_a_n_per_rev, float *c_side_b_n_per_rev, float *max_adjustment_rev);
 /* Move by `steps` (energising the coils if needed), or with `release` stop and de-energise. A move is
  * refused unless the machine is idle or waiting for the operator to position a spoke, while a strike is
  * being prepared or captured, while the roller still moves, and beyond +-16000 steps; `detail` says why.

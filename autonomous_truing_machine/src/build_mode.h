@@ -255,9 +255,24 @@
 #error "TRUING_SPOKE_SENSOR is reserved: the laser spoke sensor is not delivered yet (scaffold: truing_hal/spoke_sensor_if.h, docs/DEMO_BUILD.md)."
 #endif
 
+#ifndef TRUING_DEMO_TENSION_ONLY
+#define TRUING_DEMO_TENSION_ONLY 0
+#endif
+
+/* TRUING_DEMO_TENSION_ONLY: the TENSION-SURVEY form of the pipeline-demonstration build (operator's
+ * decision, 2026-10-03, for the demonstration). The session is the acoustic pass alone: once every spoke it
+ * collects has been struck and read, it ends TENSION_SURVEY_COMPLETE -- no runout, no solve, no
+ * adjustment waits (truing_orch_deps_t.end_after_tension_pass). The page then shows the recorded
+ * tensions and a plan computed from them. Demonstration image only. */
+#if TRUING_DEMO_TENSION_ONLY && !TRUING_DEMO_ALWAYS_READ
+#error "TRUING_DEMO_TENSION_ONLY is part of the pipeline-demonstration build: it needs TRUING_DEMO_ALWAYS_READ."
+#endif
+
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG && TRUING_DEMO_TENSION_ONLY
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+jog+survey"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+jog"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread"

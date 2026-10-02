@@ -452,6 +452,13 @@ bool truing_demo_always_read_active(void)
     return TRUING_REAL_FRONT_END && s.actx.always_read;
 }
 
+void truing_demo_plan_model(float *c_side_a_n_per_rev, float *c_side_b_n_per_rev, float *max_adjustment_rev)
+{
+    *c_side_a_n_per_rev = s.wheel.c_side_a_n_per_rev;
+    *c_side_b_n_per_rev = s.wheel.c_side_b_n_per_rev;
+    *max_adjustment_rev = s.solver.max_adjustment_revolutions;
+}
+
 bool truing_demo_jog_state(truing_demo_jog_state_t *out)
 {
 #if TRUING_DEMO_ROLLER_JOG
@@ -970,6 +977,11 @@ static void demo_task(void *arg)
         ESP_LOGW(TAG, "ACOUSTIC DEMONSTRATION: at most %d spokes will be plucked; the rest are left "
                       "uncollected while the active layout is TENSION_ABSENT. Not a physical wheel measurement.",
                  (int)TRUING_ACOUSTIC_DEMO_SPOKES);
+    }
+    /* The tension survey (TRUING_DEMO_TENSION_ONLY): the session ends after its acoustic pass. */
+    deps.end_after_tension_pass = TRUING_DEMO_TENSION_ONLY ? true : false;
+    if (TRUING_DEMO_TENSION_ONLY) {
+        ESP_LOGW(TAG, "TENSION SURVEY: a session ends after its acoustic pass (no runout, solve or adjustment).");
     }
     /* False in every image but the campaign bench build: TRUING_CAMPAIGN_DEBUG is the only
      * thing that ever sets this true, so TRUING_INTENT_DEBUG (SPEC §12.5, MEASURE_ONCE) stays
