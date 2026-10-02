@@ -32,6 +32,7 @@
 #include "truing_hal/navigation_synthetic.h"
 #include "truing_hal/runout_if.h"
 #include "truing_hal/telemetry_if.h"
+#include "truing/survey_readings.h"
 #include "truing_orch/auto_operator.h"
 #include "truing_orch/orchestrator.h"
 #include "roller_calibration.h"
@@ -116,6 +117,7 @@ static struct {
     truing_navigation_if_t nav_phys, nav_sim;
     truing_navigation_composite_ctx_t ncomp;
     bool composite_nav;   /* the wiring above is in use; reported by /id so the page does not infer it */
+    truing_survey_t survey;   /* the demo task writes it as results pass; GET /demo/readings reads it */
     /* ROLLER image: the automated navigation over the real TMC2209 drive (TRUING_ROLLER_NAV). */
     truing_navigation_roller_ctx_t nroll;
 #if TRUING_DEMO_LASER_NAV
@@ -580,6 +582,11 @@ bool truing_demo_always_read_active(void)
     return TRUING_REAL_FRONT_END && s.actx.always_read;
 }
 
+size_t truing_demo_survey_json(char *buf, size_t cap)
+{
+    return truing_survey_json(&s.survey, buf, cap);
+}
+
 bool truing_demo_laser_nav_active(void)
 {
 #if TRUING_DEMO_LASER_NAV
@@ -841,6 +848,9 @@ static void drain_telemetry(void)
         }
         switch (ev.kind) {
         case TRUING_EVT_STATE_TRANSITION:
+            if (ev.u.transition.from == TRUING_STATE_READY) {
+                truing_survey_clear(&s.survey);   /* a session starts: the last one's readings are done with */
+            }
             ESP_LOGI(TAG, "[%6" PRIu32 " ms] c%u %s -> %s", ev.timestamp_ms, (unsigned)ev.cycle_index,
                      truing_state_str(ev.u.transition.from), truing_state_str(ev.u.transition.to));
             break;
@@ -851,6 +861,8 @@ static void drain_telemetry(void)
             break;
         case TRUING_EVT_MEASUREMENT_RESULT:
             if (ev.u.measurement.channel == TRUING_EVT_CHANNEL_TENSION) {
+                truing_survey_put(&s.survey, ev.u.measurement.index, ev.cycle_index, ev.u.measurement.value_b,
+                                  ev.u.measurement.value_a);
                 ESP_LOGI(TAG, "[%6" PRIu32 " ms] tension spoke %2u %s/%s T=%.0f N f=%.0f Hz", ev.timestamp_ms,
                          (unsigned)ev.u.measurement.index, truing_status_str(ev.u.measurement.status),
                          truing_reason_str(ev.u.measurement.reason), (double)ev.u.measurement.value_a,

@@ -23,6 +23,7 @@
 #include "firmware_version.h"
 #include "laser_bench.h"
 #include "truing/limits.h"
+#include "truing/survey_readings.h"
 #include "truing_proto/json.h"
 #include "truing_proto/wire.h"
 #include "web_ui.h"
@@ -1076,6 +1077,23 @@ static esp_err_t jog_handler(httpd_req_t *req)
 }
 #endif
 
+#if TRUING_DEMO_ALWAYS_READ
+/* GET /demo/readings: the latest tension reading of every spoke measured this session, so a page that
+ * connected part-way through (a phone joining at spoke 14) can show the whole table. Telemetry is never
+ * replayed to a late client. Display only. */
+static esp_err_t readings_handler(httpd_req_t *req)
+{
+    static char body[TRUING_SURVEY_JSON_MAX];   /* one handler at a time on the server task */
+    const size_t n = truing_demo_survey_json(body, sizeof(body));
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (n == 0u) {
+        return httpd_resp_send_500(req);   /* torn or too small: the page asks again */
+    }
+    return httpd_resp_send(req, body, n);
+}
+#endif
+
 static esp_err_t id_get_handler(httpd_req_t *req)
 {
     char body[640];   /* the reply is ~460 bytes; a truncated JSON body would be silently wrong */
@@ -1296,6 +1314,12 @@ bool truing_net_start(void)
     static const httpd_uri_t acq_uri = { .uri = "/demo/acquisition", .method = HTTP_GET,
                                          .handler = acq_post_handler };
     (void)httpd_register_uri_handler(s_server, &acq_uri);
+#endif
+#if TRUING_DEMO_ALWAYS_READ
+    static const httpd_uri_t readings_uri = { .uri = "/demo/readings", .method = HTTP_GET, .handler = readings_handler };
+    if (httpd_register_uri_handler(s_server, &readings_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "readings endpoint not registered; /demo/readings will 404");
+    }
 #endif
 #if TRUING_DEMO_ROLLER_JOG
     static const httpd_uri_t jog_uri = { .uri = "/demo/jog", .method = HTTP_GET, .handler = jog_handler };

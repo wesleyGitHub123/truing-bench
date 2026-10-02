@@ -104,10 +104,12 @@ const IDENT = {
 // Every GET the page makes is logged; /demo/jog answers with JOG_REPLY, everything else with /id.
 let xhrUrls = [];
 let JOG_REPLY = { ok: true, enabled: true, moving: false, position_steps: 0, detail: '' };
+let READINGS_REPLY = null;   // /demo/readings: what the board kept for a late joiner (null: the stub answers /id)
 function XMLHttpRequest() {
   this.open = (mth, url) => { this._url = url; xhrUrls.push(url); };
   this.send = () => {
-    this.responseText = JSON.stringify(this._url.indexOf('/demo/jog') === 0 ? JOG_REPLY : IDENT);
+    this.responseText = JSON.stringify(this._url.indexOf('/demo/jog') === 0 ? JOG_REPLY
+      : (this._url.indexOf('/demo/readings') === 0 && READINGS_REPLY) ? READINGS_REPLY : IDENT);
     if (this.onload) this.onload();
   };
 }
@@ -940,6 +942,26 @@ ok(txt('plansub').indexOf('473 N per nipple revolution') >= 0 && txt('plansub').
 sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 62000, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
 ok(byId['plancard'].className.indexOf('hide') >= 0, 'a new session takes the plan down');
+// A page that joins part-way through is brought up to date from the board's copy of the readings.
+READINGS_REPLY = { cycle: 1, r: [[14, 359.4, 477.0], [15, 355.7, 467.0], [16, 433.3, null]] };
+sandbox.loadIdent();
+ok(spkL().indexOf('>359.4<') >= 0 && spkL().indexOf('>433.3<') >= 0 && spkR().indexOf('>355.7<') >= 0,
+  'a late joiner shows the readings the board kept', spkL());
+ok(noStatus(spkL()) && noStatus(spkR()), 'and they carry no status wording');
+ok(spkL().indexOf('<b>1 / 16</b>') >= 0 && spkR().indexOf('<b>1 / 16</b>') >= 0, 'and those with a tension are counted (spoke 16 has a frequency only)');
+sandbox.handle(MR(14, 'suspect', 'FORCED_CANDIDATE', 360.0, 478));
+READINGS_REPLY = { cycle: 1, r: [[14, 111.1, 222.0]] };
+sandbox.loadIdent();
+ok(spkL().indexOf('>360.0<') >= 0 && spkL().indexOf('>111.1<') < 0, 'a reading the page already has is not overwritten');
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null,
+  last_known_result: 'TENSION_SURVEY_COMPLETE' }));
+READINGS_REPLY = { cycle: 1, r: Array.from({ length: 32 }, (_, i) => [i, 400 + i, 900 + i]) };
+sandbox.loadIdent();
+ok(txt('statusbody').indexOf('Complete - every spoke tension recorded') >= 0 && txt('statusbody').indexOf('32 / 32 spokes recorded') >= 0,
+  'a page opened after the survey ended shows all 32 recorded, not what it happened to see', txt('statusbody'));
+READINGS_REPLY = null;
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 62500, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
 ['always_read', 'survey', 'c_side_a_n_per_rev', 'c_side_b_n_per_rev', 'max_adjustment_rev'].forEach(k => delete IDENT[k]);
 IDENT.mode = 'interactive';
 sandbox.loadIdent();

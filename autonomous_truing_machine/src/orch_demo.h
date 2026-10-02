@@ -89,6 +89,9 @@ bool truing_demo_always_read_active(void);
 /* True when the laser-guided roller positions the acoustic stations (TRUING_DEMO_LASER_NAV and the
  * receiver came up); false when they are the operator's. Reported by /id. */
 bool truing_demo_laser_nav_active(void);
+/* The latest tension reading of each spoke this session, as JSON for a page that connected part-way through
+ * (GET /demo/readings; truing/survey_readings.h). Returns the length, 0 on failure or when this image keeps none. */
+size_t truing_demo_survey_json(char *buf, size_t cap);
 void truing_demo_plan_model(float *c_side_a_n_per_rev, float *c_side_b_n_per_rev, float *max_adjustment_rev);
 /* Move by `steps` (energising the coils if needed), or with `release` stop and de-energise. A move is
  * refused unless the machine is idle or waiting for the operator to position a spoke, while a strike is
