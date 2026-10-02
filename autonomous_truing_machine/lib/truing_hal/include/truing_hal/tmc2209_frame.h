@@ -75,6 +75,10 @@ bool truing_tmc2209_parse_reply(const uint8_t in[TRUING_TMC2209_REPLY_LEN], uint
 unsigned truing_tmc2209_chopconf_microsteps(uint32_t chopconf);
 /* CHOPCONF with MRES replaced for `microsteps` (a power of two, 1..256); false otherwise. */
 bool truing_tmc2209_chopconf_set_microsteps(uint32_t chopconf, unsigned microsteps, uint32_t *out);
+/* True when the registers still hold the microstep setting the host wrote: GCONF.mstep_reg_select set (MRES, not the
+ * MS1/MS2 pins, governs) and CHOPCONF.MRES decoding to `want`. A driver that lost power or reset powers up on the pins
+ * (8 microsteps on this bench: its MS1/MS2 are strapped to GND), so every step count silently halves. */
+bool truing_tmc2209_microsteps_intact(uint32_t gconf, uint32_t chopconf, unsigned want);
 /* IHOLD_IRUN value; each current is a 0..31 fraction ((n+1)/32) of the VREF full scale. */
 uint32_t truing_tmc2209_ihold_irun(unsigned ihold, unsigned irun, unsigned iholddelay);
 unsigned truing_tmc2209_cs_actual(uint32_t drv_status);

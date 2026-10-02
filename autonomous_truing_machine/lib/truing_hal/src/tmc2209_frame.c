@@ -62,6 +62,12 @@ unsigned truing_tmc2209_chopconf_microsteps(uint32_t chopconf)
     return mres <= 8u ? (256u >> mres) : 0u;
 }
 
+bool truing_tmc2209_microsteps_intact(uint32_t gconf, uint32_t chopconf, unsigned want)
+{
+    return want != 0u && (gconf & TRUING_TMC2209_GCONF_MSTEP_REG_SELECT) != 0u &&
+           truing_tmc2209_chopconf_microsteps(chopconf) == want;
+}
+
 bool truing_tmc2209_chopconf_set_microsteps(uint32_t chopconf, unsigned microsteps, uint32_t *out)
 {
     for (unsigned mres = 0; mres <= 8u; ++mres) {
