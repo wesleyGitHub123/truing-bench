@@ -49,8 +49,9 @@ reports `"always_read":false`.
     python tools/flash.py s3_devkit_demo --port COMxx --build-dir ~/truing_roller/autonomous_truing_machine
 
 Join the board's Wi-Fi (`truing-xxxxxx`; `heartbeat.cmd` / `tools/workbench.py` join it automatically),
-open `http://192.168.4.1/`. `/id` reports `"mode":"fastdemo+inmp441x2+alwaysread+jog+survey"`,
-`"always_read":true` (the fallback is actually on), `"jog":true`, `"survey":true`.
+open `http://192.168.4.1/`. `/id` reports `"mode":"fastdemo+inmp441x2+alwaysread+laser+survey"`,
+`"always_read":true` (the fallback is actually on), `"jog":true`, `"survey":true`, `"laser":true` (the
+receiver came up and positions the stations). `s3_devkit_demo_manual` reports `...+jog+survey`, `"laser":false`.
 
 What the image is, flag by flag (`src/build_mode.h`, `platformio.ini`):
 
@@ -61,6 +62,7 @@ What the image is, flag by flag (`src/build_mode.h`, `platformio.ini`):
 | `TRUING_DUAL_MIC` | each station listens with its own mic (the mics sit beside their solenoids) |
 | `TRUING_DEMO_ROLLER_JOG` | the manual roller mode (below) |
 | `TRUING_DEMO_TENSION_ONLY` | the session ends after the acoustic pass (`TENSION_SURVEY_COMPLETE`, above) |
+| `TRUING_DEMO_LASER_NAV` | the laser-guided roller positions each spoke (below); not in `s3_devkit_demo_manual` |
 | `BOARD_PLUCK_ACTUATOR_*_PRESENT=1` | both solenoids fire; the B0 electrical check on the DevKit is still open and the operator accepted that for the demonstration |
 
 A session measures `TRUING_ACOUSTIC_DEMO_SPOKES` (32) spokes: the operator places each one at its station
@@ -95,7 +97,36 @@ test on it -- `roll +N` then `roll -N` -- did not consistently return the same s
 work aimed at steps-per-revolution is set aside (`docs/ROLLER_BENCH.md` R3/R4, `src/roller_calibration.h`
 stays empty).
 
-### Automatic mode (planned; scaffold only)
+### Automatic mode: laser-guided roller (built 2026-10-03, `TRUING_DEMO_LASER_NAV`, in `s3_devkit_demo`)
+
+The alignment campaign proved the chain on the lab image with the PC driving it: a full revolution, 32/32
+spokes found, stopped on and struck with nothing missed (`docs/ALIGN_CAMPAIGN.md`). This image runs that sequencer in firmware:
+
+- **`navigation_laser`** (`lib/truing_hal`, host-tested against a simulated wheel with the bench wheel's
+  spacing: `test/test_nav_laser`) is the composite's physical child. For each spoke it runs the per-class
+  recipe (spoke mod 4: ramp, strategy, offset; values from `tools/align_revolution.py`), then **names the
+  spoke that stopped from the wheel's measured 4-spoke spacing before anything strikes**. A stop on the
+  wrong spoke, a run that did not complete, beam chatter, a width or stop distance off its value, or a
+  reacquiring recipe that did not end aligned: back up to the gap before the spoke and run again, at most
+  3 tries; then the spoke is handed to the operator as a positioning wait (jog it into the beam with the
+  Roller card, confirm), and the next spoke is automatic again. A strike that nudged the next spoke into
+  the beam is reconciled the way the workbench did.
+- **Reference:** the operator places spoke 0 **just before the beam** and confirms; the first trigger is
+  trusted as spoke 0 (nothing to name it against yet), later ones are named by spacing.
+- **Strikes keep the coils energised** in this mode (the campaign struck that way; a released roller lets
+  the wheel drift off the aligned spoke). The manual image still releases them.
+- **Not ported:** the PC script's backward re-locating scan (its anchor looks one blocked width off) and its
+  reboot / Wi-Fi recovery. Whatever would need them goes to the operator instead.
+- A driver reset that the enable repaired (incident 1) drops the spacing anchor; the spoke count carries on.
+- If the receiver or the drive does not come up at boot, the stations stay **manual** (never synthetic) and
+  `/id` reports `"laser":false`.
+- **Fallback image:** `s3_devkit_demo_manual` is the same survey with the manual roller only.
+
+What is unproven: none of this has run on the board yet (it was written while the perfboard was being
+resoldered); the recipes were tuned on one wheel in one power state; the mic noise floor with energised
+coils is unmeasured.
+
+### The earlier scaffold
 
 The operator's plan: a laser transmitter and receiver across the strike point, one on each side of the
 wheel near the plunger. A spoke passing breaks the beam. The roller turns the wheel at a known speed and,
@@ -116,7 +147,7 @@ The first bench step toward it exists on the lab image (`s3_devkit_lab`, not thi
 7 as an observable subsystem and a one-shot laser-stop that measures trigger -> controlled stop -> where the
 counter and the beam ended up (`docs/LASER_BENCH.md`). It is characterization, not this navigation.
 
-If the automatic mode is not ready by the demo, this image IS the fallback: manual roller, operator
+If the automatic mode misbehaves at the demo, flash `s3_devkit_demo_manual`: manual roller, operator
 confirms by eye.
 
 ## What the audience sees
