@@ -374,3 +374,27 @@ the laser glitch counter stayed 0.
   spoke 5, the trial stopped on break 1, and the counter stayed right: the same nudge case that failed before the fix.
 - Caveats: one revolution, one wheel, one power state; the open chatter/power-dip cause is unresolved. (The microstep
   read-back guard was added after this run; this run itself had no such protection and relied on the width check.)
+
+## Full revolution after the perfboard was resoldered, and the sequencer that recovers (2026-10-03)
+
+Subsystem checks first, each alone, on the lab image: both mics ALIVE; roller driver answering with 16 microsteps read
+back; roller +-400, +-1500 and +-3500 steps returning to counter 0 with no fault; laser quiet (0 glitches) and seeing spoke 0
+with a blocked width of 66; a 6-shot burst from both solenoids with both mics ALIVE through it and the board not rebooting.
+
+- **Run 3 (the old script) halted at spoke 4.** Spokes 0-4 were clean, then spoke 4's strikes pushed the spoke out of the
+  beam. The workbench had left spoke 4 IN the beam (REACQUIRE) and now saw the beam CLEAR, which it refused to reconcile, so
+  the script stopped before the next trial moved anything. The mirror of the spoke-2/spoke-3 failure fixed earlier: the
+  strikes change the beam level, so the level cannot be what says which spoke is where.
+- **Fix.** `reconcile_belief` now treats "left in the beam, now clear" as the spoke pushed on past (an assumption: every
+  nudge seen moved a spoke forward). `tools/align_revolution.py` was rewritten to name every stop by its distance from the
+  last confirmed spoke (the spacing repeats 1980/700/1965/3290 by class) BEFORE it strikes, to back up and retry a stop that
+  landed on the wrong spoke, and to re-locate by a no-strike backward scan after a reboot, a driver reset or chatter. It
+  halts on chatter with the wheel still, 3 failures on one spoke, or 12 recoveries. `align pluck <k>` strikes without
+  moving. Offline, the naming gets every spoke of the 32/32 run of 2026-10-03 right (worst error 38 steps, tolerance 250),
+  including a stop one spoke late and a re-found spoke.
+- **Run 4 (the new script): 32 of 32, counter 32, 0 recoveries.** Re-locate read gaps 1973/714/1952 and named spoke 31 behind
+  the beam. Stops were +314/+201/+251/+209 per class, widths 64-67. Strikes moved the spoke after spokes 4, 8 and 9 and the
+  run carried on. Spokes 20-31 identified +15 to +43 steps long. The operator's hit calls are not recorded here.
+- **A bug found in that run:** re-locate anchored on the beam-CLEAR edge instead of the break edge, one blocked width (~66
+  steps) off (spoke 0 read +65). Harmless inside the tolerance, fixed afterwards, not re-run.
+- Not covered: roller slip, an unreadable driver UART, chatter with the wheel still (all halt, by design).
