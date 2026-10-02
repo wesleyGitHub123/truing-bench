@@ -500,12 +500,15 @@ def reconcile_belief(belief, want_blocked, now_blocked, index_dir, n_spokes):
     """(belief, expected beam level) for the next trial, given the beam level now. `want_blocked` is what the last
     trial left (None = a spoke the operator declared: no expectation). A beam BLOCKED where the last trial left it
     clear means the next spoke ahead has already entered it: the belief moves on one spoke. A beam CLEAR where the
-    last trial left a spoke in it cannot be reconciled."""
+    last trial left a spoke IN it means the strikes pushed that spoke on past the beam (every nudge seen on this
+    wheel, 17 of 129 trials, moved a spoke FORWARD, toward and through the beam, never back): the belief stays, the
+    spoke is now behind, and the next break is the next spoke. That is an assumption, not an observation; the
+    caller's trigger-spacing check is what catches it if the spoke went the other way."""
     if want_blocked is None or now_blocked == want_blocked:
         return belief, (now_blocked if want_blocked is not None else None)
     if now_blocked:
         return (belief + index_dir) % n_spokes, True
-    raise ValueError("the beam is CLEAR but the last trial left a spoke in it: place a spoke and `align spoke <k>`")
+    return belief, False
 
 
 def board_align_state(host, timeout, query=""):
@@ -715,8 +718,11 @@ def slot_channels(meta, local_raw, far_raw):
     return sorted(ch, key=lambda c: c[0])
 
 
+HEARTBEAT_MS = 250            # audio per beat: the level, stuck-line and clipping tests do not depend on the length
+HEARTBEAT_STATE_EVERY = 3     # the roller and laser lines are polled on the first beat and every 3rd after (~0.2 s each)
+
 HEARTBEAT_HELP = """
-MIC HEARTBEAT -- half a second of both mics from the live stream every ~1 s, nothing saved.
+MIC HEARTBEAT -- a quarter second of both mics from the live stream, a few beats a second, nothing saved.
   ALIVE     the samples scatter the way a powered mic's self-noise does (quiet room: about -90..-60 dBFS)
   DEAD      the data line sits on one value: that mic is unpowered, unclocked, or not on GPIO6
   CLIPPING  live but hitting full scale: too loud / too close
@@ -868,7 +874,7 @@ def heartbeat(host, timeout=20.0, beats=None):
         while beats is None or beat < beats:
             try:
                 if quick:
-                    chans = quick_channels(host, timeout)
+                    chans = quick_channels(host, timeout, HEARTBEAT_MS)
                 else:
                     if ws is None:
                         ws = cr.WS(host, 80, "/ws")
@@ -919,6 +925,8 @@ def heartbeat(host, timeout=20.0, beats=None):
                 if h["state"] != "DEAD" and (not tap or run > 20):
                     recent.append(h["peak_dbfs"])
                 say(mic_line(SLOT_NAMES.get(slot, slot), h, tap))
+            if (beat - 1) % HEARTBEAT_STATE_EVERY:
+                continue      # the board serves one request at a time, so these polls cannot overlap the stream: skip most
             try:
                 drv = board_drive_state(host, timeout)
             except (OSError, ValueError):
@@ -1796,12 +1804,15 @@ class Workbench(cmd.Cmd):
         # left it CLEAR just behind a spoke and that spoke is IN the beam now (a strike nudged it, a hand, creep), the
         # controller will not count that spoke's break, so the target break would be one too many: it would stop a
         # spoke late. That is the spoke-2-passes-and-spoke-3-stops failure of 2026-10-03.
-        was = cfg["belief"]
+        was, was_blocked = cfg["belief"], cfg.get("belief_blocked")
         cfg["belief"], cfg["belief_blocked"] = reconcile_belief(
             cfg["belief"], cfg.get("belief_blocked"), lz["beam"] == "BLOCKED", cfg["index_dir"], int(cfg["spokes"]))
         if cfg["belief"] != was:
             print("   [BELIEF] the beam is BLOCKED at the start but the last trial left it clear: the next spoke "
                   "ahead is already in the beam -> now spoke %d" % cfg["belief"])
+        if was_blocked and lz["beam"] != "BLOCKED":
+            print("   [BELIEF] the last trial left spoke %d IN the beam but the beam is CLEAR now: the strikes pushed it on "
+                  "past (assumed forward, as every earlier nudge was) -> it is behind, the next break is the next spoke" % was)
         n_sp = int(cfg["spokes"])
         s = int(cfg["belief"])
         for j in range(1, 5):
@@ -1929,6 +1940,23 @@ class Workbench(cmd.Cmd):
                              if st.get("reacquired") else ""))
         return row
 
+    def _align_pluck(self, idx):
+        """Strike spoke `idx` from its station, as a trial's burst would, without moving anything. For a sequencer that
+        checks which spoke really stopped at the beam BEFORE it strikes (tools/align_revolution.py)."""
+        cfg = self._acfg()
+        if self._drive_state().get("moving"):
+            raise ValueError("the roller is moving: `roll stop`, or wait")
+        station = cr.station_for_spoke(idx)
+        n_pl = max(1, int(cfg.get("plucks") or 1))
+        pulse = int(self.s.knobs["pulse"] or 0) or 20
+        before = self._laser()
+        print("   [PLUCK] BURST %d strikes, %s station on spoke %d, %d ms each" % (n_pl, station, idx, pulse))
+        hits, gap = self._strike_burst(station, n_pl, pulse, int(cfg.get("pgap") or 0))
+        after = self._laser()
+        if int(after.get("edges", 0)) != int(before.get("edges", 0)) or after.get("beam") != before.get("beam"):
+            print("   [PLUCK] the beam changed during the strikes: the spoke moved")
+        print("   [PLUCK] %d of %d strikes heard, gap %d ms (impacts counted from the mic stream)" % (hits, n_pl, gap))
+
     # the adaptive ladder ---------------------------------------------------------------------------------
     def _align_series(self, cls, strategy, n, stage):
         rows = []
@@ -2055,6 +2083,7 @@ class Workbench(cmd.Cmd):
                                       pluck aligned|always|never, beam_at_station yes|no,
                                       plucks <n> (strikes per trial), pluckmode capture|burst, pgap <ms> (burst gap)
           align spoke <k>             declare: spoke k is in the beam now (you placed it)
+          align pluck <k>             strike spoke k now from its station (burst, `plucks` strikes of the `pulse` knob)
           align count [v1 v2 ...]     STAGE 0: count 32 passages at each speed (steps/s): missed/extra/return error
           align trial <class> [n] [STOP|REVERSE_FIXED|RETURN_TO_EDGE|REACQUIRE|REACQUIRE_CLEAR]   n trials on the next spokes of a class
           align campaign <class|all>  the adaptive ladder per class (STOP -> step-based or laser-guided -> repeat)
@@ -2118,6 +2147,10 @@ class Workbench(cmd.Cmd):
             cfg["belief_blocked"] = None
             self.s.save()
             print("   spoke %d (%s) is in the beam" % (cfg["belief"], spoke_class(cfg["belief"])))
+        elif head == "pluck":
+            if len(t) < 2:
+                raise ValueError("align pluck <spoke>")
+            self._align_pluck(int(t[1]) % int(cfg["spokes"]))
         elif head == "count":
             breaks = None
             speeds = []

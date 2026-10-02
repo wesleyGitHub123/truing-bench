@@ -173,7 +173,7 @@ Join the board's AP, then:
 
 ### Mic heartbeat (`--heartbeat`, or `mic` inside a session)
 
-This reads half a second of both mics from the board's live stream about once a second (no acoustic
+This reads a quarter second of both mics from the board's live stream, a few beats a second (the roller and laser lines every third beat) (no acoustic
 analysis, so it is fast enough for wiring work; on an older image without the stream it falls back to one
 full capture every ~7 s) and prints one line per mic. Run it while you wire, and tap each mic to confirm it. Double-click `heartbeat.cmd` (in the repo's `autonomous_truing_machine` folder) or run
 `python tools/workbench.py --heartbeat`: it joins the board's Wi-Fi and waits for the board to boot by

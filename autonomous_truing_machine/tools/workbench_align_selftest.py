@@ -65,12 +65,11 @@ def main():
     assert wb.reconcile_belief(0, False, True, -1, 32) == (31, True)         # the other index direction
     assert wb.reconcile_belief(5, True, True, 1, 32) == (5, True)            # left in the beam, still in it
     assert wb.reconcile_belief(7, None, True, 1, 32) == (7, None)            # a declared spoke: no expectation
-    try:
-        wb.reconcile_belief(5, True, False, 1, 32)                           # left in the beam, now clear
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("a clear beam where a spoke was left in it must be refused")
+    assert wb.reconcile_belief(7, None, False, 1, 32) == (7, None)
+    # left in the beam, now clear: the strikes pushed it on past (2026-10-03, spoke 4 of the revolution). The belief stays,
+    # the beam is expected clear from here on, so the next break is the next spoke.
+    assert wb.reconcile_belief(5, True, False, 1, 32) == (5, False)
+    assert wb.reconcile_belief(5, True, False, -1, 32) == (5, False)
 
     # The driver's microstep read-back (2026-10-03: a reset halved every step count without a word): the state line
     # has to say so, and say nothing about a healthy driver.
@@ -79,6 +78,21 @@ def main():
     assert "MICROSTEPS REVERTED" in wb.drive_line(dict(healthy, mres_ok=False))
     assert "rewritten 2 time(s)" in wb.drive_line(dict(healthy, mres_repairs=2))
     assert "MICROSTEPS" not in wb.drive_line({"enabled": True, "moving": False})     # an older firmware: no claim
+
+    # align_revolution.py names every stop by its distance from the last trusted spoke before it strikes. Triggers of the
+    # 32/32 run of 2026-10-03 (spoke 0 first): each one must be named right, and so must a stop one spoke late or one
+    # that re-found the same spoke.
+    import align_revolution as ar
+    trig = [1054, 3021, 3735, 5705, 8968, 10921, 11583, 13535, 16815, 18777, 19455, 21423, 24708, 26669, 27359, 29314,
+            32596, 34602, 35312, 37269, 40582, 42596, 43307, 45282, 48602, 50596, 51307, 53278, 56596, 58581, 59295,
+            61251]
+    for k in range(1, 32):
+        assert ar.identify(trig[k], (trig[k - 1], k - 1))[0] == k, k
+        if k < 31:
+            assert ar.identify(trig[k + 1], (trig[k - 1], k - 1))[0] == k + 1, k     # one spoke late (a nudge)
+        assert ar.identify(trig[k - 1], (trig[k - 1], k - 1))[0] == k - 1, k         # the same spoke again
+    assert ar.identify(trig[4] + 1000, (trig[4], 4))[0] is None                      # mid-gap: no spoke there
+    assert ar.offset(-1, 0) == ar.GAP[3] and ar.offset(4, 2) == -(ar.GAP[2] + ar.GAP[3])
 
     print("selftest ok: bench 4-spoke spacing pattern is not a miscount; uniform is period 1; "
           "a missed and an extra break are still reported; belief vs beam level reconciles; "
