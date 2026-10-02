@@ -674,7 +674,7 @@ bool truing_demo_jog(int32_t steps, bool release, const char **detail)
 
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
 {
-#if TRUING_BENCH_DRIVE
+#if TRUING_BENCH_DRIVE || TRUING_DEMO_ROLLER_JOG
     if (out == NULL || !s.drive_ok) {
         return false;
     }
@@ -702,7 +702,7 @@ bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
     (void)truing_wheel_drive_tmc2209_check_microsteps(&s.drive_ctx, false);
     out->mres_ok = c->microsteps_wanted == 0u || c->mres_ok;
     out->mres_repairs = c->mres_repairs;
-    if (c->uart_ok) {
+    if (c->uart_ok && !c->moving) {   /* the UART is not touched mid-move */
         uint32_t st = 0u, gs = 0u;
         if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_DRV_STATUS, &st)) {
             out->drv_ok = true;

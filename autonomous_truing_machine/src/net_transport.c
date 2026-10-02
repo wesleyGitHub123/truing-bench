@@ -1077,6 +1077,79 @@ static esp_err_t jog_handler(httpd_req_t *req)
 }
 #endif
 
+#if TRUING_DEMO_ROLLER_JOG
+/* GET /demo/diag: what the roller's driver and the laser receiver say right now, and how the last alignment run
+ * ended -- READ-ONLY, for finding out why the wheel is not being found (VM off? beam never breaking?). The audience
+ * image has no debug channel on purpose; this reports state and changes none. */
+static esp_err_t diag_handler(httpd_req_t *req)
+{
+    static char body[1100];
+    static truing_beam_stop_t bs;
+    static truing_beam_align_t al;
+    truing_laser_bench_io_t io;
+    truing_demo_drive_state_t d;
+    const bool have_drive = truing_demo_bench_drive_state(&d);
+    const bool have_laser = truing_laser_bench_snapshot(&bs, &io);
+    const bool have_run = truing_laser_align_snapshot(&al);
+    truing_json_writer_t w;
+    truing_json_init(&w, body, sizeof(body));
+    truing_json_obj_open(&w, NULL);
+    truing_json_str(&w, "schema", "truing.demo.diag/1");
+    truing_json_obj_open(&w, "driver");
+    truing_json_bool(&w, "present", have_drive);
+    if (have_drive) {
+        truing_json_bool(&w, "uart_ok", d.uart_ok);     /* false: no answer on the single wire -- VM off at boot? */
+        truing_json_bool(&w, "drv_ok", d.drv_ok);       /* a register read just now succeeded */
+        truing_json_u32(&w, "drv_status", d.drv_status);
+        truing_json_str(&w, "drv_flags", d.drv_flags);
+        truing_json_u32(&w, "gstat", d.gstat);
+        truing_json_u32(&w, "cs_actual", d.cs_actual);  /* current the driver is applying, 0..31 */
+        truing_json_bool(&w, "enabled", d.enabled);
+        truing_json_bool(&w, "moving", d.moving);
+        truing_json_bool(&w, "faulted", d.faulted);
+        truing_json_bool(&w, "mres_ok", d.mres_ok);
+        truing_json_u32(&w, "microsteps_want", d.microsteps_want);
+        truing_json_i32(&w, "position_steps", d.position_steps);   /* pulses sent: not evidence the wheel moved */
+    }
+    truing_json_obj_close(&w);
+    truing_json_obj_open(&w, "laser");
+    truing_json_bool(&w, "present", have_laser);
+    if (have_laser) {
+        truing_json_i32(&w, "level", io.level);          /* the raw pin level */
+        truing_json_bool(&w, "blocked", io.level == BOARD_SPOKE_BEAM_BLOCKED_LEVEL);
+        truing_json_u32(&w, "edges", bs.edges);
+        truing_json_u32(&w, "enters", bs.enters);
+        truing_json_u32(&w, "leaves", bs.leaves);
+        truing_json_u32(&w, "glitches", bs.glitches);
+    }
+    truing_json_obj_close(&w);
+    truing_json_obj_open(&w, "last_run");
+    truing_json_bool(&w, "present", have_run && al.run > 0u);
+    if (have_run && al.run > 0u) {
+        truing_json_u32(&w, "run", al.run);
+        truing_json_bool(&w, "active", truing_beam_align_active(&al));
+        truing_json_str(&w, "result", truing_align_result_str(al.result));
+        truing_json_str(&w, "detail", truing_align_detail_str(al.detail));
+        truing_json_str(&w, "strategy", truing_align_strategy_str(al.cfg.strategy));
+        truing_json_u32(&w, "target_break", al.cfg.target_break);
+        truing_json_u32(&w, "breaks", al.breaks);          /* 0: the beam never broke during the approach */
+        truing_json_i32(&w, "start_pos", al.start_pos);
+        truing_json_bool(&w, "start_blocked", al.start_blocked);
+        truing_json_i32(&w, "final_pos", al.final_pos);
+        truing_json_u32(&w, "approach_hz", al.approach_hz);
+    }
+    truing_json_obj_close(&w);
+    truing_json_obj_close(&w);
+    size_t len = 0u;
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (!truing_json_finish(&w, &len)) {
+        return httpd_resp_send_500(req);
+    }
+    return httpd_resp_send(req, body, len);
+}
+#endif
+
 #if TRUING_DEMO_ALWAYS_READ
 /* GET /demo/readings: the latest tension reading of every spoke measured this session, so a page that
  * connected part-way through (a phone joining at spoke 14) can show the whole table. Telemetry is never
@@ -1327,6 +1400,8 @@ bool truing_net_start(void)
     }
 #endif
 #if TRUING_DEMO_ROLLER_JOG
+    static const httpd_uri_t diag_uri = { .uri = "/demo/diag", .method = HTTP_GET, .handler = diag_handler };
+    (void)httpd_register_uri_handler(s_server, &diag_uri);
     static const httpd_uri_t jog_uri = { .uri = "/demo/jog", .method = HTTP_GET, .handler = jog_handler };
     if (httpd_register_uri_handler(s_server, &jog_uri) != ESP_OK) {
         ESP_LOGW(TAG, "manual roller endpoint not registered; /demo/jog will 404");
