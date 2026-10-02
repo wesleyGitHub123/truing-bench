@@ -32,6 +32,11 @@ import urllib.error
 import warnings
 import wave
 
+try:
+    import msvcrt                                 # Windows only: a key press during `roll <steps>` marks a step count
+except ImportError:
+    msvcrt = None
+
 import numpy as np
 
 # a dead channel is all zeros, and matplotlib's spectrogram takes log10 of it
@@ -79,6 +84,10 @@ TAP TEST           ctrl while someone taps the LEFT mic: the LEFT station's chan
 ROLLER (lab image) roll on | roll <+/-steps> | roll stop | roll off. Energising the coils opens a new epoch (holding
                    current is a noise source beside the mics), so `ctrl 3` with the roller on and off gives two
                    floors. A capture is refused while the roller moves. Every saved shot records the roller state.
+LASER-STOP (lab)   roll speed <v> <a> ; laser trial <steps> [n]  (arm -> move -> the beam break requests the drive's
+                   controlled stop -> report -> a row in laser_trials.csv) ; change v or a ; repeat ; laser log.
+                   `laser scan <steps>` first, disarmed, shows how many steps the beam stays blocked per spoke: a
+                   stop lands inside the beam only when the overshoot is shorter than that.
 
 READING GUIDES (not thresholds)
   promising  a local line repeating within +-2 Hz across a spoke's strikes; NOT in the rig list; moves when
@@ -196,6 +205,10 @@ def drive_line(d):
         flags.append("driver: " + d["drv_flags"])
     if d.get("drv_ok") and d.get("gstat", 0) & 0x6:
         flags.append("GSTAT 0x%x" % d["gstat"])
+    if d.get("mres_ok") is False:
+        flags.append("MICROSTEPS REVERTED: every step count is off-scale until `roll on` rewrites them")
+    if d.get("mres_repairs"):
+        flags.append("microsteps rewritten %d time(s) since boot: the driver reset" % d["mres_repairs"])
     drv = ("  driver I %2d/31 %s" % (d.get("cs_actual", 0), d.get("drv_flags", "ok"))) if d.get("drv_ok") else \
           ("  driver UART silent" if "drv_ok" in d else "")
     return "  roller                 %-8s %-6s pos %7d steps  %5d steps/s  %6d steps/s2%s%s" % (
@@ -245,6 +258,400 @@ def roller_beat_line(d, hist):
     tail = ", ".join(severe + warn + notes)
     return "  roller  %s %s %s %s%s%s" % (level, state, pos, cur, "  <- " + tail if tail else "",
                                           "   (seen " + ", ".join(seen) + ")" if seen else "")
+
+
+# ------------------------------------------------------------------ the laser receiver and laser-stop (lab image)
+# GET /debug/laser.json (src/laser_bench.c): the break-beam receiver on GPIO 7 and the optional one-shot trigger
+# that asks the bench drive for its own controlled stop on a beam break. Step counts are the drive's pulse
+# counter (commanded, never proof the wheel followed); the beam level at the end is the physical observation.
+
+LASER_FIELDS = ["n", "time", "trial", "speed_steps_s", "accel_steps_s2", "move_steps", "armed_blocked",
+                "trigger_step", "final_step", "overshoot_steps", "ramp_ideal_steps", "stop_ms", "beam_at_stop",
+                "beam_settled", "left_beam_after_steps", "edges_after_trigger", "glitches_total", "result", "driver",
+                "note"]
+LASER_DARK_S = 10.0     # "no laser seen" for this long while the receiver is driven: blocked, off or misaligned
+
+
+def board_laser_state(host, timeout, query=""):
+    """The lab image's laser receiver as a dict (GET /debug/laser.json), or None when this image has none."""
+    try:
+        raw, _ = cf.get("http://%s/debug/laser.json%s" % (host, "?" + query if query else ""), timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return json.loads(raw.decode("utf-8"))
+
+
+def ramp_stop_steps(hz, accel):
+    """Pulses the firmware's ramp spends stopping FROM CRUISE (lib/truing_hal/src/step_ramp.c): about v^2/2a, or a
+    single pulse when cruise is slow enough to start at (no acceleration phase). A trigger caught while still
+    accelerating stops in fewer. The ramp's arithmetic, not a measurement: the trials measure what really happens."""
+    if not hz or not accel or hz <= 0 or accel <= 0:
+        return None
+    if 0.676 * 1e6 * (2.0 / accel) ** 0.5 <= 1e6 / hz:
+        return 1
+    return int(hz * hz / (2.0 * accel))
+
+
+def laser_beat_line(z, hist):
+    """One line for the heartbeat, in the roller line's manner: healthy is quiet. `hist` (kept by the caller)
+    remembers the glitch count so a burst of chatter between beats is flagged once."""
+    beam = z.get("beam", "?")
+    age = z.get("last_edge_age_ms")
+    warn, notes = [], []
+    glitches = int(z.get("glitches", 0))
+    new_glitch = glitches - hist.get("glitches", glitches)
+    hist["glitches"] = glitches
+    if z.get("input") == "floating":
+        level = "!  NO INPUT "
+        warn.append("GPIO %s floats: the receiver's OUT is not reaching it" % z.get("gpio", "?"))
+    elif new_glitch > 0:
+        level = "!  CHATTER  "
+        warn.append("%d glitch%s since the last beat (pulses shorter than the interrupt can follow)" %
+                    (new_glitch, "es" if new_glitch > 1 else ""))
+    elif beam == "BLOCKED" and (age is None or age > LASER_DARK_S * 1000):
+        level = "DARK       "
+        notes.append("no laser seen for %s: blocked, laser off, misaligned or receiver unpowered" %
+                     ("ever" if age is None else "%.0f s" % (age / 1000.0)))
+    else:
+        level = "OK         "
+    armed = ("ARMED #%d" % z["trial"]["trial"]) if z.get("armed") and z.get("trial") else "disarmed"
+    last = z.get("last")
+    tail_last = ""
+    if last:
+        tail_last = "  last #%d %s" % (last["trial"], last["result"])
+        if last.get("fired"):
+            tail_last += " %+d" % (last["final_pos"] - last["trigger_pos"])
+    since = "never changed" if age is None else "changed %.1f s ago" % (age / 1000.0)
+    tail = ", ".join(warn + notes)
+    return "  laser   %s %-7s raw %s  edges %d  %s  %s%s%s" % (
+        level, beam, z.get("level", "?"), int(z.get("edges", 0)), since, armed, tail_last,
+        "  <- " + tail if tail else "")
+
+
+def laser_trial_row(t, settled, move_steps, glitches, driver, note=""):
+    """One finished trial (the board's `last` record) as a table/CSV row. Overshoot is signed along the move:
+    positive = pulses sent past the trigger in the direction of travel."""
+    sign = 1 if move_steps >= 0 else -1
+    fired = bool(t.get("fired"))
+    hz, acc = int(t.get("max_step_hz") or 0), int(t.get("accel_steps_s2") or 0)
+    return {
+        "n": "", "time": now(), "trial": t.get("trial"), "speed_steps_s": hz, "accel_steps_s2": acc,
+        "move_steps": move_steps, "armed_blocked": int(bool(t.get("blocked_at_arm"))),
+        "trigger_step": t.get("trigger_pos") if fired else "",
+        "final_step": t.get("final_pos"),
+        "overshoot_steps": sign * (t["final_pos"] - t["trigger_pos"]) if fired else "",
+        "ramp_ideal_steps": ramp_stop_steps(hz, acc) if fired else "",
+        "stop_ms": round(t.get("stop_us", 0) / 1000.0, 1) if fired else "",
+        "beam_at_stop": ("BLOCKED" if t.get("blocked_at_end") else "CLEAR") if fired else "",
+        "beam_settled": settled or "",
+        "left_beam_after_steps": sign * (t["leave_pos"] - t["trigger_pos"]) if fired and t.get("left_beam") else "",
+        "edges_after_trigger": t.get("edges_after", 0) if fired else "",
+        "glitches_total": glitches, "result": t.get("result", "?"), "driver": driver or "", "note": note,
+    }
+
+
+def laser_trial_report(row):
+    """Plain words for one trial, printed right after it."""
+    head = "   LASER TRIAL %s  %s   %s steps/s, %s steps/s2" % (row["trial"], row["result"], row["speed_steps_s"],
+                                                              row["accel_steps_s2"])
+    if row["result"] == "NO_TRIGGER":
+        return head + "\n     the move ended at step %s without a beam break" % row["final_step"]
+    lines = [head,
+             "     beam break at step %s -> last pulse at step %s: %+d steps after the trigger (ramp from cruise: ~%s), "
+             "%s ms (+-2 ms)" % (row["trigger_step"], row["final_step"], row["overshoot_steps"],
+                                 row["ramp_ideal_steps"], row["stop_ms"]),
+             "     beam at the last pulse: %s   0.5 s later: %s   edges after the trigger: %s%s" % (
+                 row["beam_at_stop"], row["beam_settled"] or "?", row["edges_after_trigger"],
+                 ("   (it cleared %+d steps after the trigger)" % row["left_beam_after_steps"])
+                 if row["left_beam_after_steps"] != "" else "")]
+    if row["armed_blocked"]:
+        lines.append("     (armed with the beam already blocked: this was the NEXT break)")
+    if row["result"] == "BLOCKED_AGAIN":
+        lines.append("     the beam cleared after the break and was blocked again at the stop: chatter at the spoke's edge, "
+                     "or a LATER spoke -- compare with `laser scan`'s blocked width and spacing")
+    if row["result"] == "INTERRUPTED":
+        lines.append("     the coils were released or the driver faulted before the controlled stop finished")
+    if row.get("note"):
+        lines.append("     note: %s" % row["note"])
+    return "\n".join(lines)
+
+
+def laser_table(rows):
+    """The session's trials side by side, for comparing speed/deceleration settings."""
+    out = ["   %4s %5s %6s %7s %10s %10s %9s %6s %8s %8s %8s  %s" % (
+        "n", "trial", "speed", "accel", "trigger", "final", "overshoot", "ideal", "stop_ms", "@stop", "settled",
+        "result")]
+    for r in rows:
+        out.append("   %4s %5s %6s %7s %10s %10s %9s %6s %8s %8s %8s  %s" % (
+            r.get("n", ""), r.get("trial", ""), r.get("speed_steps_s", ""), r.get("accel_steps_s2", ""),
+            r.get("trigger_step", ""), r.get("final_step", ""), r.get("overshoot_steps", ""),
+            r.get("ramp_ideal_steps", ""), r.get("stop_ms", ""), r.get("beam_at_stop", ""),
+            r.get("beam_settled", ""), r.get("result", "")))
+    return "\n".join(out)
+
+
+def laser_edge_line(e, prev):
+    """One beam edge for `laser watch` / `laser scan`, with the distance from the edges before it: a break to
+    the following clear is how long the beam stayed blocked; break to break is the spacing. `prev` (kept by the
+    caller) holds the last edge of each kind."""
+    extra = []
+    if e["edge"] == "LEAVE" and "ENTER" in prev:
+        b = prev["ENTER"]
+        extra.append("blocked for %+d steps, %.0f ms" % (e["pos"] - b["pos"], ((e["t_us"] - b["t_us"]) % 2 ** 32) / 1000.0))
+    if e["edge"] == "ENTER" and "ENTER" in prev:
+        extra.append("%+d steps since the previous break" % (e["pos"] - prev["ENTER"]["pos"]))
+    prev[e["edge"]] = e
+    return "   %s at step %7d  %s%s" % ("BREAK (beam blocked)" if e["edge"] == "ENTER" else "CLEAR (beam back)   ",
+                                      e["pos"], "moving" if e.get("moving") else "still ",
+                                      "   " + "; ".join(extra) if extra else "")
+
+
+def laser_scan_summary(edges):
+    """What a disarmed pass saw: blocked widths (break -> next clear) and break-to-break spacing, in steps."""
+    widths, spacing, last_enter, open_break = [], [], None, False
+    for e in edges:
+        if e["edge"] == "ENTER":
+            if last_enter is not None:
+                spacing.append(e["pos"] - last_enter["pos"])
+            last_enter, open_break = e, True
+        elif open_break:                                  # a clear pairs with the break before it, once
+            widths.append(e["pos"] - last_enter["pos"])
+            open_break = False
+    return widths, spacing
+
+
+LASER_USAGE = ("laser [status | arm | disarm | probe | watch [s] | scan <+/-steps> | trial <+/-steps> [n] | log]")
+
+
+def parse_laser(arg):
+    """('status',) | ('arm',) | ('disarm',) | ('probe',) | ('log',) | ('watch', s|None) | ('scan', steps)
+    | ('trial', steps, n)."""
+    t = arg.split()
+    if not t:
+        return ("status",)
+    head = t[0].lower()
+    try:
+        if head in ("status", "arm", "disarm", "probe", "log") and len(t) == 1:
+            return (head,)
+        if head == "watch" and len(t) <= 2:
+            return ("watch", float(t[1]) if len(t) == 2 else None)
+        if head == "scan" and len(t) == 2:
+            return ("scan", cr.drive_move_arg(int(t[1])))
+        if head == "trial" and len(t) in (2, 3):
+            n = int(t[2]) if len(t) == 3 else 1
+            if not 1 <= n <= 100:
+                raise ValueError("laser trial <steps> [n]: n is 1..100")
+            return ("trial", cr.drive_move_arg(int(t[1])), n)
+    except ValueError as e:
+        if "n is" in str(e) or "a move is" in str(e):
+            raise
+        raise ValueError(LASER_USAGE) from None
+    raise ValueError(LASER_USAGE)
+
+
+# ------------------------------------------------------------------ the alignment campaign (lab image)
+# GET /debug/align.json (src/laser_bench.c + lib/truing_hal/src/beam_align.c): the REAL-TIME controller on the
+# board -- count beam breaks, request the drive's controlled stop on the Nth from the beam interrupt, then a
+# correction strategy -- and its run record. The host only configures, sequences, plucks and logs.
+# docs/ALIGN_CAMPAIGN.md is the campaign's plan and its verdict rules.
+
+# Spoke class by machine spoke index: the shipped artifact's Phi_t_class_map (model_prep conventions.py
+# BWC_CLASS_BY_INDEX_MOD_4, indexing origin = spoke 0 is NDS leading, SPEC 6.5). The PHYSICAL spoke 0 must be the
+# NDS-leading spoke the wheel declares; the station is the acoustic subsystem's parity rule (even LEFT, odd RIGHT).
+SPOKE_CLASS_BY_MOD4 = {0: "NDS-leading", 1: "DS-leading", 2: "NDS-trailing", 3: "DS-trailing"}
+CLASS_NAMES = {c.lower().replace("-", ""): c for c in SPOKE_CLASS_BY_MOD4.values()}
+STRATEGIES = ("STOP", "REVERSE_FIXED", "RETURN_TO_EDGE", "REACQUIRE", "REACQUIRE_CLEAR")
+# Campaign parameters, kept per session. None = not chosen yet: a run that needs it refuses and says so. None of
+# them is a calibration; `pitch`/`width`/`rev_steps_measured` are filled only by a stage-0 count run.
+ALIGN_DEFAULTS = {"dir": 1, "index_dir": None, "spokes": 32, "settle_ms": 300, "slow_hz": None, "slow_accel": None,
+                  "rev_steps": None, "offset": 0, "center": False, "rmax": None, "max": None, "pluck": "aligned",
+                  "plucks": 1, "pluckmode": "capture", "pgap": 0,
+                  "beam_at_station": None, "pitch": None, "width": None, "rev_steps_measured": None,
+                  "measured_by": None, "belief": None}
+ALIGN_FIELDS = ["n", "time", "stage", "class", "spoke", "station", "strategy", "run", "dir", "speed", "accel",
+                "slow_hz", "slow_accel", "rev_steps", "offset", "center", "settle_ms", "target_break", "start_pos",
+                "start_blocked", "trigger_pos", "trigger_t_us", "stop_pos", "stop_t_us", "stop_ms", "overshoot_steps",
+                "zone_after_stop", "blocked_after_stop", "width_used", "pitch_med", "corr_cmd", "reacquisitions",
+                "reacq_pos", "reacq_offset", "same_spoke", "trim_cmd", "final_pos", "final_error_steps",
+                "final_zone", "final_blocked", "edges_still", "fw_result", "fw_detail", "pluck", "pluck_n", "pluck_hits",
+                "pluck_dsp_ok", "pluck_moved_spoke",
+                "acoustic_status", "acoustic_reason", "acoustic_f1_hz", "capture_result", "shot", "verdict",
+                "alignment_reference"]
+COUNT_FIELDS = ["n", "time", "run", "speed", "accel", "dir", "expected_breaks", "start_blocked", "breaks",
+                "missed", "duplicates", "glitches", "elapsed_s", "start_pos", "trigger_pos", "final_pos",
+                "overshoot_steps", "pitch_med", "width_med", "rev_steps", "return_error_steps", "final_blocked",
+                "fw_result", "verdict"]
+
+
+def spoke_class(idx):
+    return SPOKE_CLASS_BY_MOD4[idx % 4]
+
+
+def parse_class(tok):
+    c = CLASS_NAMES.get(tok.lower().replace("-", "").replace("_", ""))
+    if c is None:
+        raise ValueError("spoke class is one of %s" % ", ".join(SPOKE_CLASS_BY_MOD4.values()))
+    return c
+
+
+def reconcile_belief(belief, want_blocked, now_blocked, index_dir, n_spokes):
+    """(belief, expected beam level) for the next trial, given the beam level now. `want_blocked` is what the last
+    trial left (None = a spoke the operator declared: no expectation). A beam BLOCKED where the last trial left it
+    clear means the next spoke ahead has already entered it: the belief moves on one spoke. A beam CLEAR where the
+    last trial left a spoke in it cannot be reconciled."""
+    if want_blocked is None or now_blocked == want_blocked:
+        return belief, (now_blocked if want_blocked is not None else None)
+    if now_blocked:
+        return (belief + index_dir) % n_spokes, True
+    raise ValueError("the beam is CLEAR but the last trial left a spoke in it: place a spoke and `align spoke <k>`")
+
+
+def board_align_state(host, timeout, query=""):
+    """The board's alignment controller as a dict (GET /debug/align.json), or None when this image has none."""
+    try:
+        raw, _ = cf.get("http://%s/debug/align.json%s" % (host, "?" + query if query else ""), timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return json.loads(raw.decode("utf-8"))
+
+
+def _median(v):
+    v = sorted(v)
+    return v[len(v) // 2] if v else None
+
+
+def count_analysis(edges, start_blocked, n_spokes):
+    """Stage 0 from the run's own edge log: break-to-break spacing and blocked widths along the approach, the
+    breaks a missed spoke would leave (a spacing near twice its phase's median) and extra ones (under half), the
+    repeating spacing pattern, and -- when the run started just BEFORE spoke 0 -- the revolution in steps, edge to
+    edge."""
+    enters, widths, open_at = [], [], None
+    for e in edges:
+        if e["phase"] not in ("APPROACH",) or e["sign"] != 1:
+            continue
+        if e["enter"]:
+            enters.append(e)
+            open_at = e["pos"]
+        elif open_at is not None:
+            widths.append(abs(e["pos"] - open_at))
+            open_at = None
+    pitches = [abs(b["pos"] - a["pos"]) for a, b in zip(enters, enters[1:])]
+    med_p, med_w = _median(pitches), _median(widths)
+    # The beam sits where spokes cross, so the spacing it sees need not be uniform: the bench wheel gives a repeating
+    # 4-spoke pattern. Judge each spacing against the median of its OWN phase in the shortest period that fits,
+    # never against one global median (which called every short gap an extra break and every long one a missed one).
+    period, phase_med = _spacing_period(pitches)
+    missed = dups = 0
+    for i, p in enumerate(pitches):
+        ref = phase_med[i % period]
+        if ref and p > 1.5 * ref:
+            missed += max(0, int(round(p / ref)) - 1)
+        elif ref and p < 0.5 * ref:
+            dups += 1
+    rev = abs(enters[n_spokes]["pos"] - enters[0]["pos"]) if not start_blocked and len(enters) > n_spokes else None
+    return {"enters": enters, "pitches": pitches, "widths": widths, "pitch_med": med_p, "width_med": med_w,
+            "pitch_min": min(pitches) if pitches else None, "period": period, "pattern": phase_med,
+            "missed": missed, "duplicates": dups, "rev_steps": rev}
+
+
+def _spacing_period(pitches, max_period=8, tol=0.10, floor=60):
+    """(period, per-phase median spacings): the smallest period 1..max_period for which at most a tenth of the
+    spacings differ from their phase's median by more than max(tol * median, floor steps). Period 1 is a uniform
+    wheel. Nothing fits -> period 1 (the global median), so a genuinely irregular run still shows up as missed/extra."""
+    for p in range(1, max_period + 1):
+        if len(pitches) < 2 * p:
+            break
+        meds = [_median(pitches[k::p]) for k in range(p)]
+        bad = sum(1 for i, g in enumerate(pitches) if abs(g - meds[i % p]) > max(tol * meds[i % p], floor))
+        if bad <= 0.1 * len(pitches):
+            return p, meds
+    return 1, [_median(pitches)]
+
+
+def align_event_line(ev, st, t0):
+    """One controller phase change as a tagged live line ([LASER] / [ROLLER] / [REVERSE] / [ALIGN])."""
+    ph, dt = ev["phase"], ((ev["t_us"] - t0) % 2 ** 32) / 1e6
+    strat = st.get("cfg", {}).get("strategy")
+    if ph == "APPROACH":
+        msg = "[ROLLER] APPROACH at step %d (beam %s)" % (ev["pos"], "BLOCKED" if ev["blocked"] else "CLEAR")
+    elif ph == "STOPPING":
+        msg = "[LASER] TRIGGER break #%s at step %d  ->  [ROLLER] DECELERATING (controlled stop)" % (
+            st.get("cfg", {}).get("target_break", "?"), ev["pos"])
+    elif ph == "SETTLE":
+        msg = "[ROLLER] STOPPED at step %d (%+d steps after the trigger), settling" % (
+            ev["pos"], (ev["pos"] - st.get("trigger_pos", ev["pos"])) * st.get("cfg", {}).get("dir", 1))
+    elif ph == "CORRECT":
+        msg = {"REVERSE_FIXED": "[REVERSE] fixed reverse",
+               "RETURN_TO_EDGE": "[REVERSE] step-based return to the trigger edge",
+               "REACQUIRE": "[REVERSE] slow reverse until the laser re-finds the same spoke",
+               "REACQUIRE_CLEAR": "[REVERSE] slow reverse through the spoke until the beam clears on its far side"}.get(strat, "[ROLLER] correction")
+        msg += " (beam %s at step %d)" % ("BLOCKED" if ev["blocked"] else "CLEAR", ev["pos"])
+    elif ph == "TRIM":
+        msg = "[ALIGN] centering / offset move from step %d" % ev["pos"]
+    elif ph == "FINAL_SETTLE":
+        msg = "[ALIGN] CHECK at step %d (beam %s)" % (ev["pos"], "BLOCKED" if ev["blocked"] else "CLEAR")
+    elif ph == "DONE":
+        msg = "[ALIGN] %s%s" % (st.get("result"), " / " + st["result_detail"] if st.get("result_detail") else "")
+    else:
+        msg = ph
+    return "   %6.3fs  %s" % (dt, msg)
+
+
+def align_verdict(fw_result, plucked, pluck_ok, acoustic_ok):
+    """The trial verdict: the controller's geometric result first, then the pluck, then the capture."""
+    if fw_result != "ALIGNED":
+        return fw_result
+    if plucked and not pluck_ok:
+        return "PLUCK_FAILED"
+    if plucked and not acoustic_ok:
+        return "ACOUSTIC_CAPTURE_FAILED"
+    return "ALIGNMENT_SUCCESS"
+
+
+def policy_key(r):
+    """The parameters that define a policy for its strategy -- and only those: a STOP trial is not a different
+    policy because `rev` happened to be set."""
+    s = r["strategy"]
+    k = [s, str(r["speed"]), str(r["accel"])]
+    if s != "STOP":
+        k += ["slow %s/%s" % (r["slow_hz"], r["slow_accel"])]
+    if s == "REVERSE_FIXED":
+        k += ["rev %s" % r["rev_steps"]]
+    if s in ("RETURN_TO_EDGE", "REACQUIRE", "REACQUIRE_CLEAR"):
+        k += ["center %s" % r["center"], "off %s" % r["offset"]]
+    return tuple(k)
+
+
+def policy_str(k):
+    return "%s @ %s steps/s, %s steps/s2%s" % (k[0], k[1], k[2], (", " + ", ".join(k[3:])) if len(k) > 3 else "")
+
+
+def align_groups(rows):
+    """Trials grouped by (class, policy): one policy per group, in trial order."""
+    g = {}
+    for r in rows:
+        g.setdefault((r["class"],) + policy_key(r), []).append(r)
+    return g
+
+
+ADOPT_RUN = 5   # consecutive ALIGNMENT_SUCCESS trials of one policy on one class before it is called a candidate
+
+
+def adoption_status(trials):
+    """'CANDIDATE' when the last ADOPT_RUN trials of a policy all succeeded, else what is missing."""
+    tail = trials[-ADOPT_RUN:]
+    ok = sum(1 for r in tail if r["verdict"] == "ALIGNMENT_SUCCESS")
+    if len(tail) == ADOPT_RUN and ok == ADOPT_RUN:
+        return "CANDIDATE"
+    return "%d/%d of the last %d" % (ok, len(tail), ADOPT_RUN)
+
+
+ALIGN_USAGE = ("align [status | set <key> <value> | spoke <k> | count <steps/s>... | trial <class> [n] [strategy] "
+               "| campaign <class|all> | log | abort]")
 
 
 ROLL_USAGE = ("roll [on | off | stop | zero | <+/-steps> | speed <steps/s> [accel]]  -- `roll` alone shows the state")
@@ -455,7 +862,7 @@ def heartbeat(host, timeout=20.0, beats=None):
 
     say(HEARTBEAT_HELP)
     ensure_board(host, say=say)
-    ws, seq, beat, peaks, tap_run, roller_hist = None, 0, 0, {}, {}, {}
+    ws, seq, beat, peaks, tap_run, roller_hist, laser_hist = None, 0, 0, {}, {}, {}, {}
     quick = True                                          # the live stream; falls back to captures on an old image
     try:
         while beats is None or beat < beats:
@@ -518,6 +925,12 @@ def heartbeat(host, timeout=20.0, beats=None):
                 drv = None
             if drv is not None:                           # the lab image: the roller's state beside the mics
                 say(roller_beat_line(drv, roller_hist))
+            try:                                          # probe=1: the firmware refuses it while armed or moving
+                lz = board_laser_state(host, timeout, "probe=1")
+            except (OSError, ValueError):
+                lz = None
+            if lz is not None:                            # a lab image with the laser receiver input
+                say(laser_beat_line(lz, laser_hist))
     except KeyboardInterrupt:
         say("\nheartbeat stopped")
     finally:
@@ -753,6 +1166,8 @@ MENU = """
   ctrl [n]         n silent captures, saved        pluck [n]   cued hand pluck, saved
   fire [n]         solenoid strikes (needs solenoids wired and enabled in the firmware)
   roll [...]       the roller, lab image only: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`
+  laser [...]      the laser receiver + laser-stop, lab image only: `laser`, `laser arm`, `laser trial 6000 5`
+  align [...]      roller/laser/pluck ALIGNMENT campaign (real-time on the board): `align count 300`, `align campaign all`
   listen [s]       record the mic live for s seconds (up to 30) and play it: the ear / wiring check
   burst [n] [ms] [gap]  rapid solenoid burst while both mics are watched live (needs PRESENT=1 in the image)
   play local|far   listen to the last shot         view        reopen its figure
@@ -844,26 +1259,70 @@ class Workbench(cmd.Cmd):
             e = self.s.new_epoch("roller %s" % want, self.s.epoch["firmware"])
             print("   roller is %s: new epoch %s. Take `ctrl 3` for this epoch's floor." % (want, e["id"]))
 
-    def _await_roller(self, steps):
-        """Poll until the move ends. Ctrl+C sends STOP (a controlled deceleration) and keeps waiting."""
+    def _await_roller(self, steps, start=0):
+        """Poll until the move ends, printing the live step count. Ctrl+C sends STOP (a controlled deceleration) and keeps waiting."""
         d = self._drive_state()
         hz = max(1, int(d.get("max_step_hz") or 1))
         deadline = time.time() + abs(steps) / hz * 2.0 + 5.0
         stopping = False
-        while time.time() < deadline:
-            try:
-                time.sleep(0.25)
-                d = self._drive_state()
-                if not d["moving"]:
-                    break
-            except KeyboardInterrupt:
-                if not stopping:
-                    self._drive_cmd(cr.DRIVE_STOP_CODE)
-                    print("   stop requested: decelerating")
-                    stopping = True
-                    deadline = time.time() + 5.0
-        else:
-            print("   !! still moving after the expected time: `roll stop`")
+        t0, last, last_print = time.time(), None, 0.0
+        prev, marks, presses, listening = None, [], [], threading.Event()
+
+        def listen():
+            """Stamp each key press the instant it happens, independent of the (slow) position polling."""
+            while not listening.is_set():
+                if msvcrt.kbhit():
+                    if msvcrt.getwch() != "\x03":
+                        presses.append(time.time())
+                else:
+                    time.sleep(0.002)
+
+        def place(upto, p_now):
+            """Turn every press stamped at or before `upto` into a step count, interpolated between the two
+            position samples that bracket it. Pressed after the newest sample: wait for the next one."""
+            while presses and presses[0] <= upto:
+                tp = presses.pop(0)
+                p1 = prev if prev is not None else (upto, p_now)
+                frac = min(1.0, max(0.0, (tp - p1[0]) / (upto - p1[0]))) if upto > p1[0] else 1.0
+                at = int(round(p1[1] + (p_now - p1[1]) * frac))
+                marks.append(at)
+                gap = "" if len(marks) == 1 else "   (%+d since the previous mark)" % (at - marks[-2])
+                print("   MARK %d at pos %d = %+d steps from the move start%s" % (len(marks), at, at - start, gap))
+
+        if msvcrt:
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+            threading.Thread(target=listen, daemon=True).start()
+            print("   press SPACE (or m) each time spoke 0 passes the reference; Ctrl+C stops the move")
+        try:
+            while time.time() < deadline:
+                try:
+                    time.sleep(0.01)
+                    ta = time.time()
+                    d = self._drive_state()
+                    tm = (ta + time.time()) / 2
+                    pos = d.get("position_steps", 0)
+                    place(tm, pos)
+                    prev = (tm, pos)
+                    if pos != last and time.time() - last_print >= 0.25:
+                        print("   t=%5.2fs  pos %7d steps  (%+d of %+d)" % (time.time() - t0, pos, pos - start, steps))
+                        last, last_print = pos, time.time()
+                    if not d["moving"]:
+                        break
+                except KeyboardInterrupt:
+                    if not stopping:
+                        self._drive_cmd(cr.DRIVE_STOP_CODE)
+                        print("   stop requested: decelerating")
+                        stopping = True
+                        deadline = time.time() + 5.0
+            else:
+                print("   !! still moving after the expected time: `roll stop`")
+            if prev is not None:
+                place(time.time() + 1.0, prev[1])
+        finally:
+            listening.set()
+        if len(marks) > 1:
+            print("   marks: %s  ->  %s steps between them" % (marks, [b - a for a, b in zip(marks, marks[1:])]))
         print(drive_line(self._drive_state()))
 
     def do_roll(self, arg):
@@ -894,8 +1353,14 @@ class Workbench(cmd.Cmd):
             self._drive_cmd(cr.DRIVE_MOTION_CODE, cr.drive_motion_arg(hz, accel))
             print(drive_line(self._drive_state()))
         else:
+            start = self._drive_state().get("position_steps", 0)
+            armed = self._laser_armed_trial()
+            if armed:
+                print("   laser-stop is ARMED (trial %d): the next beam break stops this move" % armed)
             self._drive_cmd(cr.DRIVE_MOVE_CODE, op[1])
-            self._await_roller(op[1])
+            self._await_roller(op[1], start)
+            if armed:
+                self._laser_finish(armed, op[1])
 
     def _roller_before_shot(self):
         """The roller's state at the moment of a shot, or None on an image with no bench drive. The firmware
@@ -908,6 +1373,786 @@ class Workbench(cmd.Cmd):
         self._sync_roller(drv)
         return drv
 
+    # ---- the laser receiver and laser-stop (lab image)
+    def _laser(self, query=""):
+        z = board_laser_state(self.s.knobs["host"], float(self.s.knobs["timeout"]), query)
+        if z is None:
+            raise ValueError("this firmware has no laser receiver input: flash s3_devkit_lab (a build with the laser-stop)")
+        return z
+
+    def _laser_armed_trial(self):
+        """The armed trial's number, or None (not armed, or an image without the laser receiver)."""
+        try:
+            z = board_laser_state(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+        except (OSError, ValueError):
+            return None
+        return z["trial"]["trial"] if z and z.get("armed") and z.get("trial") else None
+
+    def _laser_csv(self):
+        return os.path.join(self.s.dir, "laser_trials.csv")
+
+    def _laser_rows(self):
+        if not os.path.exists(self._laser_csv()):
+            return []
+        with open(self._laser_csv(), newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
+    def _laser_log(self, row):
+        row = dict(row, n=len(self._laser_rows()) + 1)
+        new = not os.path.exists(self._laser_csv())
+        with open(self._laser_csv(), "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=LASER_FIELDS)
+            if new:
+                w.writeheader()
+            w.writerow(row)
+        return row
+
+    def _laser_finish(self, trial, move_steps, note=""):
+        """After a move that ran armed: wait for the board to close the trial, read the beam again once the wheel
+        has had 0.5 s to settle, then report the trial and log it. The row, or None. `note` marks a trial whose
+        move was also stopped by hand: a break during THAT deceleration still counts as the trigger."""
+        t_end = time.time() + 2.0
+        while True:
+            z = self._laser()
+            if (z.get("last") or {}).get("trial") == trial:
+                break
+            if time.time() > t_end:
+                self._laser("arm=0")
+                print("   !! laser trial %d did not close (a move too short for the 2 ms poll to see?): disarmed" % trial)
+                return None
+            time.sleep(0.05)
+        time.sleep(0.5)
+        settled = self._laser()
+        driver = ""
+        drv = board_drive_state(self.s.knobs["host"], float(self.s.knobs["timeout"]))
+        if drv:
+            driver = ("FAULT 0x%x" % drv.get("fault_detail", 0) if drv.get("faulted") else
+                      drv.get("drv_flags", "") if drv.get("drv_ok") else "UART silent")
+        row = self._laser_log(laser_trial_row(z["last"], settled.get("beam"), move_steps,
+                                              int(settled.get("glitches", 0)), driver, note))
+        print(laser_trial_report(row))
+        print("   logged: row %d of %s" % (row["n"], self._laser_csv()))
+        return row
+
+    def _wait_move(self, steps):
+        """Quietly wait for a move to end. Ctrl+C asks for the controlled stop; True if it was pressed."""
+        hz = max(1, int(self._drive_state().get("max_step_hz") or 1))
+        deadline = time.time() + abs(steps) / hz * 2.0 + 5.0
+        interrupted = False
+        while time.time() < deadline:
+            try:
+                time.sleep(0.05)
+                if not self._drive_state()["moving"]:
+                    return interrupted
+            except KeyboardInterrupt:
+                if not interrupted:
+                    self._drive_cmd(cr.DRIVE_STOP_CODE)
+                    print("   stop requested: decelerating (the series ends after this trial)")
+                    interrupted, deadline = True, time.time() + 5.0
+        print("   !! still moving after the expected time: `roll stop`")
+        return interrupted
+
+    def _laser_status(self, z):
+        age = z.get("last_edge_age_ms")
+        checked = "" if z.get("input") == "unprobed" else " (checked %.1f s ago)" % (z.get("probed_age_ms", 0) / 1000.0)
+        print("   laser receiver on GPIO %s: input %s%s, beam %s (raw %s)" % (
+            z.get("gpio"), z.get("input"), checked, z.get("beam"), z.get("level")))
+        if z.get("input") == "unprobed":
+            print("   (no pull test with this high-impedance divider: a broken OUT wire reads CLEAR, so confirm the "
+                  "wiring by waving a card through the beam under `laser watch`)")
+        print("   edges %d (%d breaks, %d clears), glitches %d, found late by the poll %d, %s" % (
+            z.get("edges", 0), z.get("enters", 0), z.get("leaves", 0), z.get("glitches", 0), z.get("resyncs", 0),
+            "never changed" if age is None else "last change %.1f s ago" % (age / 1000.0)))
+        print("   laser-stop %s; %d trials armed so far, %d stops requested" % (
+            "ARMED (trial %d)" % z["trial"]["trial"] if z.get("armed") and z.get("trial") else "disarmed",
+            z.get("trials", 0), z.get("stops_requested", 0)))
+        if z.get("last"):
+            t = z["last"]
+            print("   last trial #%d: %s%s" % (t["trial"], t["result"], "  break at %d, last pulse at %d (%+d)" % (
+                t["trigger_pos"], t["final_pos"], t["final_pos"] - t["trigger_pos"]) if t.get("fired") else ""))
+        if z.get("input") == "floating":
+            print("   !! GPIO %s floats: nothing drives it. Check the receiver's OUT -> divider -> GPIO wiring "
+                  "(docs/LASER_BENCH.md)" % z.get("gpio"))
+
+    def _laser_edges(self, seq, prev, edges):
+        """Fetch and print the edges after `seq`; the new seq."""
+        z = self._laser("since=%d" % seq)
+        if z.get("log_lost"):
+            print("   (%d edges came faster than this window and were lost)" % z["log_lost"])
+        for e in z.get("log", []):
+            seq = e["seq"]
+            edges.append(e)
+            print(laser_edge_line(e, prev))
+        return seq
+
+    def _laser_watch(self, seconds):
+        z = self._laser()
+        seq, prev, edges = z.get("log_seq", 0), {}, []
+        print("   watching GPIO %s (beam %s now); turn the wheel by hand or `roll` from elsewhere. Ctrl+C stops."
+              % (z.get("gpio"), z.get("beam")))
+        t_end = time.time() + seconds if seconds else None
+        try:
+            while t_end is None or time.time() < t_end:
+                time.sleep(0.05)
+                seq = self._laser_edges(seq, prev, edges)
+        except KeyboardInterrupt:
+            pass
+        print("   %d edges seen" % len(edges))
+
+    def _laser_scan(self, steps):
+        z = self._laser()
+        if z.get("armed"):
+            raise ValueError("laser-stop is armed: the scan would stop at the first break. `laser disarm` first")
+        d = self._drive_state()
+        if d.get("moving"):
+            raise ValueError("the roller is moving: `roll stop`, or wait for it to finish")
+        seq, prev, edges, stopping = z.get("log_seq", 0), {}, [], False
+        print("   scanning %+d steps at %d steps/s, %d steps/s2 with the laser DISARMED (nothing stops on a break)"
+              % (steps, d.get("max_step_hz", 0), d.get("accel_steps_s2", 0)))
+        self._drive_cmd(cr.DRIVE_MOVE_CODE, steps)
+        while True:
+            try:
+                time.sleep(0.05)
+                seq = self._laser_edges(seq, prev, edges)
+                d = self._drive_state()
+                if not d["moving"]:
+                    seq = self._laser_edges(seq, prev, edges)
+                    break
+            except KeyboardInterrupt:
+                if not stopping:
+                    self._drive_cmd(cr.DRIVE_STOP_CODE)
+                    print("   stop requested: decelerating")
+                    stopping = True
+        widths, spacing = laser_scan_summary(edges)
+        print("   %d breaks; blocked for %s steps; break to break %s steps" % (
+            sum(1 for e in edges if e["edge"] == "ENTER"), widths or "-", spacing or "-"))
+        print(drive_line(d))
+
+    def _laser_trials(self, steps, n):
+        rows = []
+        for i in range(n):
+            d = self._drive_state()
+            if not d.get("enabled"):
+                raise ValueError("the roller is off: `roll on` first")
+            if d.get("moving"):
+                raise ValueError("the roller is moving: `roll stop`, or wait for it to finish")
+            z = self._laser()
+            if z.get("input") == "floating":
+                print("   !! GPIO %s floats: no receiver is driving it, so nothing can trigger" % z.get("gpio"))
+            if z.get("beam") == "BLOCKED":
+                print("   beam is BLOCKED now: the trigger fires on the NEXT break, after it clears")
+            a = self._laser("arm=1")
+            if not a.get("action_ok"):
+                raise ValueError(a.get("detail", "arm refused"))
+            trial = a["trial"]["trial"]
+            print("   trial %d of %d (board trial %d): armed; moving %+d steps at %d steps/s, %d steps/s2" % (
+                i + 1, n, trial, steps, d.get("max_step_hz", 0), d.get("accel_steps_s2", 0)))
+            self._drive_cmd(cr.DRIVE_MOVE_CODE, steps)
+            interrupted = self._wait_move(steps)
+            row = self._laser_finish(trial, steps, "manual stop requested (Ctrl+C)" if interrupted else "")
+            if row is not None:
+                rows.append(row)
+            if interrupted or row is None or row["result"] == "INTERRUPTED":
+                break
+            time.sleep(0.3)
+        if len(rows) > 1:
+            print(laser_table(rows))
+
+    def do_laser(self, arg):
+        """laser [status | arm | disarm | probe | watch [s] | scan <+/-steps> | trial <+/-steps> [n] | log]: the laser
+        break-beam receiver (GPIO 7) and the bench laser-stop, lab image only (s3_devkit_lab).
+          laser              the receiver now: input driven/floating, beam CLEAR/BLOCKED, edges, glitches, trials
+          laser arm          one-shot: the next beam break while the roller moves requests its controlled stop (the
+                             same deceleration as `roll stop`); then `roll <steps>` reports and logs the trial
+          laser disarm       cancel an armed, unfired trial
+          laser probe        re-check whether anything drives GPIO 7 (refused while armed or moving)
+          laser watch [s]    print every beam edge live, with its step count and the distance from the last edge
+          laser scan <steps> a move with the laser DISARMED, printing each break/clear: blocked widths and spacing
+          laser trial <steps> [n]  n trials: arm, move, stop on the break, report, log a row (Ctrl+C ends the series)
+          laser log          this session's trials as a table (laser_trials.csv in the session folder)
+        `roll stop`, `roll off` and driver faults keep priority: the laser only ever requests the same stop. Step
+        counts are pulses sent, never proof the wheel followed; the beam level at the stop is the observation."""
+        if self.offline:
+            if parse_laser(arg)[0] == "log":
+                print(laser_table(self._laser_rows()))
+                return
+            raise ValueError("offline session: no board")
+        op = parse_laser(arg)
+        if op[0] == "status":
+            self._laser_status(self._laser())
+        elif op[0] in ("arm", "disarm", "probe"):
+            z = self._laser({"arm": "arm=1", "disarm": "arm=0", "probe": "probe=1"}[op[0]])
+            print("   %s%s" % ("" if z.get("action_ok") else "!! refused: ", z.get("detail", "")))
+            self._laser_status(z)
+        elif op[0] == "watch":
+            self._laser_watch(op[1])
+        elif op[0] == "scan":
+            self._laser_scan(op[1])
+        elif op[0] == "trial":
+            self._laser_trials(op[1], op[2])
+        else:
+            rows = self._laser_rows()
+            print(laser_table(rows) if rows else "   no laser trials in this session yet")
+            print("   %s" % self._laser_csv())
+
+    # ---- the alignment campaign (lab image): the real-time controller lives on the board
+    def _acfg(self):
+        cfg = self.s.knobs.setdefault("align", {})
+        for k, v in ALIGN_DEFAULTS.items():
+            cfg.setdefault(k, v)
+        return cfg
+
+    def _align(self, query=""):
+        z = board_align_state(self.s.knobs["host"], float(self.s.knobs["timeout"]), query)
+        if z is None:
+            raise ValueError("this firmware has no alignment controller: flash s3_devkit_lab built from this branch")
+        return z
+
+    def _align_csv(self, name):
+        return os.path.join(self.s.dir, name)
+
+    def _csv_rows(self, name):
+        p = self._align_csv(name)
+        if not os.path.exists(p):
+            return []
+        with open(p, newline="", encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
+    def _csv_log(self, name, fields, row):
+        path = self._align_csv(name)
+        if os.path.exists(path):
+            with open(path, newline="", encoding="utf-8") as f:
+                header = next(csv.reader(f), [])
+            if header != list(fields):
+                # the columns changed since this file was started: keep the old file whole beside the new one, never
+                # append rows under a header they do not match
+                os.replace(path, "%s.old-%s" % (path, time.strftime("%H%M%S")))
+        row = dict(row, n=len(self._csv_rows(name)) + 1)
+        new = not os.path.exists(self._align_csv(name))
+        with open(self._align_csv(name), "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            if new:
+                w.writeheader()
+            w.writerow(row)
+        return row
+
+    def _align_run(self, query):
+        """Start one controller run on the board and follow it live: every phase change as a tagged line, every
+        beam edge after the trigger. Ctrl+C aborts it (the drive's controlled stop). Returns (final state, all
+        edges), and keeps the full record as align_run_<run>.json in the session folder."""
+        z = self._align("start=" + query)
+        if not z.get("action_ok"):
+            raise ValueError("the board refused the run: %s" % z.get("detail"))
+        run, seen_ev, n_edge, edges, aborted = z["run"], 0, 0, [], False
+        t0 = z.get("start_t_us", 0)
+        while True:
+            try:
+                time.sleep(0.06)
+                z = self._align("since=%d" % n_edge)
+                if z["run"] != run:
+                    raise ValueError("another run replaced this one")
+                for ev in z.get("events", [])[seen_ev:]:
+                    print(align_event_line(ev, z, t0))
+                seen_ev = len(z.get("events", []))
+                for e in z.get("edges", []):
+                    edges.append(e)
+                    ts = ((e["t_us"] - t0) % 2 ** 32) / 1e6
+                    if e["phase"] == "APPROACH":
+                        if e["enter"]:
+                            print("   %6.3fs  [LASER] break #%d at step %d" % (
+                                ts, sum(1 for x in edges if x["enter"] and x["phase"] == "APPROACH"), e["pos"]))
+                    else:
+                        print("   %6.3fs  [LASER] %s at step %d (%s, zone %+d)%s" % (
+                            ts, "BLOCKED" if e["enter"] else "CLEAR", e["pos"],
+                            {1: "along", -1: "back", 0: "STILL"}.get(e["sign"], "?"), e["zone"],
+                            "  <- REACQUIRED" if e["phase"] == "CORRECT" and e["enter"] and e["zone"] == 0 else
+                            "  <- CLEARED the spoke" if e["phase"] == "CORRECT" and not e["enter"] and e["zone"] == -1 else ""))
+                n_edge = len(edges)
+                if not z.get("active") and n_edge >= z.get("n_edges", 0):
+                    break
+            except KeyboardInterrupt:
+                if not aborted:
+                    self._align("abort=1")
+                    print("   abort requested: controlled stop")
+                    aborted = True
+        with open(self._align_csv("align_run_%d.json" % run), "w", encoding="utf-8") as f:
+            json.dump({"state": z, "edges": edges}, f, indent=1)
+        if z.get("edges_dropped"):
+            print("   !! %d edges did not fit the board's log" % z["edges_dropped"])
+        return z, edges
+
+    def _align_preflight(self):
+        d = self._drive_state()
+        if not d.get("enabled"):
+            raise ValueError("the roller is off: `roll on` first")
+        if d.get("moving"):
+            raise ValueError("the roller is moving: `roll stop`, or wait")
+        if d.get("mres_ok") is False:
+            # one more look first: the read shares the driver's single wire with whatever else is talking to it
+            time.sleep(0.3)
+            d = self._drive_state()
+            if d.get("mres_ok") is False:
+                raise ValueError("the driver's microstep setting is not the %s the step counts assume (a driver reset "
+                                 "reverts it to its MS1/MS2 pins, 8 here, which halves every step count): `roll on` "
+                                 "rewrites and verifies it" % (d.get("microsteps_want") or "wanted count"))
+        lz = self._laser()
+        if lz.get("input") == "floating":
+            raise ValueError("GPIO %s floats: no receiver drives it" % lz.get("gpio"))
+        return d, lz
+
+    # stage 0 ----------------------------------------------------------------------------------------------
+    def _align_count(self, speeds, breaks=None):
+        """`breaks` overrides the stop count (default: one full turn, 33 from before the beam / 32 from in it)."""
+        cfg = self._acfg()
+        if not cfg["max"]:
+            raise ValueError("set a travel bound first: `align set max <steps>` (generous: more than one wheel turn)")
+        for hz in speeds or [None]:
+            if hz:
+                d = self._drive_state()
+                self._drive_cmd(cr.DRIVE_MOTION_CODE, cr.drive_motion_arg(hz, int(d.get("accel_steps_s2") or 1600)))
+            d, lz = self._align_preflight()
+            start_blocked = lz["beam"] == "BLOCKED"
+            n = breaks or int(cfg["spokes"]) + (0 if start_blocked else 1)
+            print("== STAGE 0 count run: %d steps/s, %d steps/s2, dir %+d, stop on break %d (%s)" % (
+                d["max_step_hz"], d["accel_steps_s2"], cfg["dir"], n,
+                "operator-chosen stop count: the spoke in the beam afterwards is not inferred" if breaks else
+                "spoke 0 IN the beam: its 32nd break is spoke 0 again" if start_blocked else
+                "spoke 0 just BEFORE the beam: break 1 is spoke 0, break 33 is spoke 0 again"))
+            st, edges = self._align_run("count&dir=%d&n=%d&max=%d&settle=%d" % (cfg["dir"], n, cfg["max"],
+                                                                                 cfg["settle_ms"]))
+            lz2 = self._laser()
+            a = count_analysis(edges, start_blocked, int(cfg["spokes"]))
+            glitches = int(lz2.get("glitches", 0)) - int(lz.get("glitches", 0))
+            ret = None
+            if a["rev_steps"] is not None and st.get("fired"):
+                # where the wheel stopped relative to spoke 0's edge now, minus where it started relative to it then
+                ret = ((st["final_pos"] - a["enters"][-1]["pos"]) - (st["start_pos"] - a["enters"][0]["pos"])) * cfg["dir"]
+            # PASS is about COUNTING only. Where the stop left the wheel is reported beside it, never folded in:
+            # counting reliability and positioning are separate verdicts.
+            ok = (st["result"] == "COUNT_DONE" and st["breaks"] == n and a["missed"] == 0 and a["duplicates"] == 0
+                  and glitches == 0 and not st.get("edges_dropped"))
+            row = {"time": now(), "run": st["run"], "speed": st["approach_hz"], "accel": st["approach_accel"],
+                   "dir": cfg["dir"], "expected_breaks": n, "start_blocked": int(start_blocked), "breaks": st["breaks"],
+                   "missed": a["missed"], "duplicates": a["duplicates"], "glitches": glitches,
+                   "elapsed_s": round(((st["end_t_us"] - st["start_t_us"]) % 2 ** 32) / 1e6, 2),
+                   "start_pos": st["start_pos"], "trigger_pos": st["trigger_pos"], "final_pos": st["final_pos"],
+                   "overshoot_steps": (st["stop_pos"] - st["trigger_pos"]) * cfg["dir"] if st.get("fired") else "",
+                   "pitch_med": a["pitch_med"], "width_med": a["width_med"], "rev_steps": a["rev_steps"] or "",
+                   "return_error_steps": "" if ret is None else ret, "final_blocked": int(bool(st.get("final_blocked"))),
+                   "fw_result": st["result"], "verdict": "PASS" if ok else "FAIL"}
+            row = self._csv_log("align_count.csv", COUNT_FIELDS, row)
+            print("   [COUNT] %s: %d of %d breaks, missed %d, extra %d, glitches %d, %.1f s; spacing median %s steps, "
+                  "blocked median %s steps%s; stopped %s steps past the last break, beam %s" % (
+                      row["verdict"], st["breaks"], n, a["missed"], a["duplicates"], glitches, row["elapsed_s"],
+                      a["pitch_med"], a["width_med"],
+                      ("; one revolution = %d steps edge to edge, return error %+d steps" % (a["rev_steps"], ret))
+                      if ret is not None else "; revolution not measured (%s)" % (
+                          "stopped short of one full turn" if breaks else "started in the beam"),
+                      row["overshoot_steps"], "BLOCKED" if st.get("final_blocked") else "CLEAR"))
+            if a["period"] > 1:
+                print("   spacing is NOT uniform: it repeats every %d spokes (%s steps, break to break)" % (
+                    a["period"], ", ".join(str(x) for x in a["pattern"])))
+            print("   (PASS means the laser counted %d spoke passages cleanly. It does NOT show the roller can align a "
+                  "spoke with a station.)" % int(cfg["spokes"]))
+            # Which spoke is in the beam now: the 32nd/33rd break was spoke 0 if the count was clean; the stop then
+            # carried the wheel zone/2 spokes further (zone accounting on the board).
+            zone = int(st.get("final_zone", 0))
+            if breaks or not ok or (zone % 2 == 0) != bool(st.get("final_blocked")):
+                cfg["belief"] = None
+            elif zone == 0:
+                cfg["belief"] = 0
+            elif cfg["index_dir"] in (1, -1):
+                cfg["belief"] = (cfg["index_dir"] * (zone // 2)) % int(cfg["spokes"])
+            else:
+                cfg["belief"] = None
+            if ok and a["pitch_med"]:
+                cfg.update(pitch=a["pitch_med"], width=a["width_med"], measured_by="count run %d @ %d steps/s" % (
+                    st["run"], st["approach_hz"]))
+                if a["rev_steps"]:
+                    cfg["rev_steps_measured"] = a["rev_steps"]
+                print("   measured: spacing %d, blocked width %d steps (%s)" % (a["pitch_med"], a["width_med"],
+                                                                             cfg["measured_by"]))
+            cfg["belief_blocked"] = None
+            self.s.save()
+            print("   now in / just behind the beam: %s" % (
+                "spoke %d" % cfg["belief"] if cfg["belief"] is not None else
+                "UNKNOWN (the stop left the wheel in a gap or the count was not clean) -- place a spoke, `align spoke <k>`"))
+        print("   %s" % self._align_csv("align_count.csv"))
+
+    # stages 1-3 -------------------------------------------------------------------------------------------
+    def _align_trial(self, cls, strategy, stage):
+        cfg = self._acfg()
+        if cfg["index_dir"] not in (1, -1):
+            raise ValueError("which way do spoke numbers run? `align set index_dir +1|-1` (does spoke 1 or spoke 31 "
+                             "reach the beam next when the roller turns along dir?)")
+        if cfg["belief"] is None:
+            raise ValueError("which spoke is in the beam? place one and `align spoke <k>`")
+        if strategy != "STOP" and not (cfg["slow_hz"] and cfg["slow_accel"]):
+            raise ValueError("%s moves at the slow ramp: `align set slow <steps/s> <steps/s2>`" % strategy)
+        if strategy == "REVERSE_FIXED" and not cfg["rev_steps"]:
+            raise ValueError("REVERSE_FIXED needs `align set rev <steps>`")
+        d, lz = self._align_preflight()
+        # The beam level at the start has to agree with where the last trial said it left the wheel. If the last trial
+        # left it CLEAR just behind a spoke and that spoke is IN the beam now (a strike nudged it, a hand, creep), the
+        # controller will not count that spoke's break, so the target break would be one too many: it would stop a
+        # spoke late. That is the spoke-2-passes-and-spoke-3-stops failure of 2026-10-03.
+        was = cfg["belief"]
+        cfg["belief"], cfg["belief_blocked"] = reconcile_belief(
+            cfg["belief"], cfg.get("belief_blocked"), lz["beam"] == "BLOCKED", cfg["index_dir"], int(cfg["spokes"]))
+        if cfg["belief"] != was:
+            print("   [BELIEF] the beam is BLOCKED at the start but the last trial left it clear: the next spoke "
+                  "ahead is already in the beam -> now spoke %d" % cfg["belief"])
+        n_sp = int(cfg["spokes"])
+        s = int(cfg["belief"])
+        for j in range(1, 5):
+            idx = (s + cfg["index_dir"] * j) % n_sp
+            if spoke_class(idx) == cls:
+                break
+        max_steps = int(cfg["max"]) if cfg["max"] else (int((j + 1.5) * cfg["pitch"]) if cfg["pitch"] else None)
+        if not max_steps:
+            raise ValueError("no travel bound: run `align count` first (it measures the spacing) or `align set max`")
+        rmax = cfg["rmax"] or (4 * int(cfg["pitch"]) if cfg["pitch"] else None)
+        if strategy in ("REACQUIRE", "REACQUIRE_CLEAR") and not rmax:
+            raise ValueError("%s needs a search bound: `align set rmax <steps>`" % strategy)
+        station = cr.station_for_spoke(idx)
+        print("== TRIAL stage %s  %s spoke %d (%s station), break %d along dir %+d, %s, %d steps/s %d steps/s2" % (
+            stage, cls, idx, station, j, cfg["dir"], strategy, d["max_step_hz"], d["accel_steps_s2"]))
+        q = "align&dir=%d&n=%d&max=%d&settle=%d&strat=%s&rev=%d&off=%d&center=%d&shz=%d&sacc=%d&rmax=%d" % (
+            cfg["dir"], j, max_steps, cfg["settle_ms"], strategy, cfg["rev_steps"] or 0, cfg["offset"] or 0,
+            1 if cfg["center"] else 0, cfg["slow_hz"] or 0, cfg["slow_accel"] or 0, rmax or 0)
+        st, edges = self._align_run(q)
+        dirn = cfg["dir"]
+        fired = st.get("fired")
+        w = st.get("width_used") if st.get("width_used", -1) > 0 else None
+        res = st["result"]
+        # belief: zone/2 spokes along dir from the target; lost when the controller cannot vouch for the zone
+        if res in ("ALIGNED", "OVERSHOOT", "UNDERSHOOT", "REVERSE_FAILED", "REACQUISITION_FAILED") and fired:
+            cfg["belief"] = (idx + cfg["index_dir"] * (int(st["final_zone"]) // 2)) % n_sp
+        else:
+            cfg["belief"] = None
+        cfg["belief_blocked"] = bool(st.get("final_blocked")) if cfg["belief"] is not None else None
+        self.s.save()
+        row = {"time": now(), "stage": stage, "class": cls, "spoke": idx, "station": station, "strategy": strategy,
+               "run": st["run"], "dir": dirn, "speed": st["approach_hz"], "accel": st["approach_accel"],
+               "slow_hz": cfg["slow_hz"] or "", "slow_accel": cfg["slow_accel"] or "", "rev_steps": cfg["rev_steps"] or "",
+               "offset": cfg["offset"], "center": int(bool(cfg["center"])), "settle_ms": cfg["settle_ms"],
+               "target_break": j, "start_pos": st["start_pos"], "start_blocked": int(bool(st["start_blocked"])),
+               "trigger_pos": st["trigger_pos"] if fired else "", "trigger_t_us": st["trigger_t_us"] if fired else "",
+               "stop_pos": st["stop_pos"] if fired else "", "stop_t_us": st["stop_t_us"] if fired else "",
+               "stop_ms": round(((st["stop_t_us"] - st["trigger_t_us"]) % 2 ** 32) / 1000.0, 1) if fired else "",
+               "overshoot_steps": (st["stop_pos"] - st["trigger_pos"]) * dirn if fired else "",
+               "zone_after_stop": st["zone_after_stop"] if fired else "",
+               "blocked_after_stop": int(bool(st["blocked_after_stop"])) if fired else "",
+               "width_used": w or "", "pitch_med": st["pitch_med"] if st["pitch_med"] > 0 else (cfg["pitch"] or ""),
+               "corr_cmd": st["corr_cmd"], "reacquisitions": st["reacquisitions"],
+               "reacq_pos": st["reacq_pos"] if st.get("reacquired") else "",
+               "reacq_offset": (st["reacq_pos"] - st["target_leave_pos"]) * dirn
+               if st.get("reacquired") and st.get("target_left") else "",
+               "same_spoke": ("ok" if st["same_spoke_ok"] else "FAILED") if st.get("same_spoke_checked") else "unchecked",
+               "trim_cmd": st["trim_cmd"], "final_pos": st["final_pos"],
+               # signed distance from the middle of the target's measured blocked span: |e| < width/2 is inside it
+               "final_error_steps": ((st["final_pos"] - st["trigger_pos"]) * dirn - w // 2) if fired and w else "",
+               "final_zone": st["final_zone"] if fired else "", "final_blocked": int(bool(st["final_blocked"])),
+               "edges_still": st["edges_still"], "fw_result": res, "fw_detail": st["result_detail"],
+               "pluck": "no", "pluck_moved_spoke": "", "acoustic_status": "", "acoustic_reason": "",
+               "acoustic_f1_hz": "", "capture_result": "", "shot": "",
+               "alignment_reference": "laser beam; beam_at_station=%s" % cfg["beam_at_station"]}
+        plucked = pluck_ok = acoustic_ok = False
+        n_pl = max(1, int(cfg.get("plucks") or 1))
+        # `always` plucks wherever the wheel ended, so the strike result judges the position -- but never after the
+        # controller lost the plot (no trigger, an abort, a fault, an ambiguous beam).
+        lost = res in ("ABORTED", "FAULT", "LASER_MISSED", "LASER_AMBIGUOUS")
+        if (res == "ALIGNED" and cfg["pluck"] in ("aligned", "always")) or (cfg["pluck"] == "always" and fired
+                                                                              and not lost):
+            plucked = True
+            before = self._laser()
+            fired_n = hits = dsp_ok = 0
+            burst = cfg.get("pluckmode") == "burst"
+            if burst:
+                try:
+                    pulse = int(self.s.knobs["pulse"] or 0) or 20
+                    print("   [PLUCK] BURST %d strikes, %s station on spoke %d, %d ms each" % (n_pl, station, idx, pulse))
+                    hits, gap = self._strike_burst(station, n_pl, pulse, int(cfg.get("pgap") or 0))
+                    fired_n = n_pl
+                    row.update(pluck="fired (burst, gap %d ms)" % gap, acoustic_status="burst",
+                               acoustic_reason="impacts counted from the mic stream", shot="burst")
+                except (ValueError, OSError, SystemExit) as e:
+                    row["pluck"] = "FAILED: %s" % e
+                    print("   !! burst failed: %s" % e)
+            for k in range(1, 1 if burst else n_pl + 1):
+                print("   [PLUCK] FIRE %d/%d %s station on spoke %d" % (k, n_pl, station, idx))
+                try:
+                    saved = self.s.knobs["spoke"]
+                    self.s.knobs["spoke"] = idx
+                    try:
+                        self._one("strike", 0, 1, show=False)
+                    finally:
+                        self.s.knobs["spoke"] = saved
+                    rec = self.s.shots[-1]
+                    b = rec.get("board", {})
+                    p_ok = b.get("fired") is not False
+                    # a HIT is a strike the capture heard: an impact onset. It is NOT the DSP accepting the
+                    # tension estimate (LOW_SNR / AMBIGUOUS_PEAK rejections still saw the strike), which is
+                    # counted apart as `dsp_ok`.
+                    a_ok = (b.get("capture_result") in (None, "OK") and b.get("status") is not None
+                            and b.get("reason") != "NO_ONSET_DETECTED")
+                    dsp_ok += int(p_ok and a_ok and str(b.get("status")).lower() != "rejected")
+                    fired_n += int(p_ok)
+                    hits += int(p_ok and a_ok)
+                    row.update(pluck="fired" if p_ok else "NOT FIRED", acoustic_status=b.get("status"),
+                               acoustic_reason=b.get("reason"), acoustic_f1_hz=b.get("expect_f1_hz") or "",
+                               capture_result=b.get("capture_result") or "", shot=rec["name"])
+                    print("   [ACOUSTIC] CAPTURE %d/%d %s/%s f1 %s  (%s)  -> %s" % (
+                        k, n_pl, b.get("status"), b.get("reason"), b.get("expect_f1_hz"), rec["name"],
+                        "HIT (strike heard)" if p_ok and a_ok else "NO HIT"))
+                except (ValueError, OSError, SystemExit) as e:
+                    row["pluck"] = "FAILED: %s" % e
+                    print("   !! pluck %d/%d failed: %s" % (k, n_pl, e))
+            pluck_ok, acoustic_ok = fired_n == n_pl, hits == n_pl
+            row.update(pluck_n=n_pl, pluck_hits=hits, pluck_dsp_ok=dsp_ok)
+            after = self._laser()
+            moved = int(after.get("edges", 0)) != int(before.get("edges", 0)) or after.get("beam") != before.get("beam")
+            row["pluck_moved_spoke"] = int(moved)
+            if moved:
+                print("   [PLUCK] the beam changed during the strikes: the spoke moved")
+            if burst:
+                print("   [PLUCK] %d of %d strikes heard (impacts counted from the mic stream; no per-strike analysis "
+                      "in burst mode)" % (hits, n_pl))
+            else:
+                print("   [PLUCK] %d of %d strikes heard (impact onset); the DSP accepted the tension estimate on %d of "
+                      "%d (the rest were rejected for LOW_SNR/AMBIGUOUS_PEAK etc.)" % (hits, n_pl, dsp_ok, n_pl))
+        row["verdict"] = align_verdict(res, plucked, pluck_ok, acoustic_ok)
+        row = self._csv_log("align_trials.csv", ALIGN_FIELDS, row)
+        print("   [TRIAL] %s  -- %s spoke %d, %s: overshoot %s steps, final %s steps from the span middle (width %s), "
+              "zone %s%s" % (row["verdict"], cls, idx, strategy, row["overshoot_steps"], row["final_error_steps"],
+                             w, row["final_zone"], ", reacquired %s (%s)" % (row["reacq_offset"], row["same_spoke"])
+                             if st.get("reacquired") else ""))
+        return row
+
+    # the adaptive ladder ---------------------------------------------------------------------------------
+    def _align_series(self, cls, strategy, n, stage):
+        rows = []
+        for _ in range(n):
+            r = self._align_trial(cls, strategy, stage)
+            rows.append(r)
+            if r["fw_result"] in ("ABORTED", "FAULT", "LASER_MISSED", "LASER_AMBIGUOUS") or self._acfg()["belief"] is None:
+                print("   series stopped: %s (the next trial would not know which spoke it targets)" % r["fw_result"])
+                break
+        return rows
+
+    def _align_campaign(self, cls):
+        """Hypothesize -> run -> classify -> choose the next bounded test, for ONE spoke class. Rules, in order:
+          1. STOP x3. All ALIGNMENT_SUCCESS -> repeat STOP x5 (stage 3).
+          2. Else, if every stop fired and the overshoot spread is under half the measured blocked width, the stop
+             is predictable enough for a step-based correction: RETURN_TO_EDGE (centered) x3 -> x5 if all succeed.
+          3. Else (or if 2 failed): REACQUIRE (centered) x3 -> x5 if all succeed.
+          4. Nothing passed: report what failed; no strategy is called adoptable."""
+        cfg = self._acfg()
+        print("\n######## CAMPAIGN %s ########" % cls)
+        s1 = self._align_series(cls, "STOP", 3, "1")
+        ok = lambda rows, k: len(rows) == k and all(r["verdict"] == "ALIGNMENT_SUCCESS" for r in rows)  # noqa: E731
+        if ok(s1, 3):
+            print("   decision: STOP aligned 3/3 -> stage 3 repeat x%d" % ADOPT_RUN)
+            return ("STOP", self._align_series(cls, "STOP", ADOPT_RUN, "3"))
+        if len(s1) < 3:
+            return (None, s1)
+        overs = [int(r["overshoot_steps"]) for r in s1 if r["overshoot_steps"] != ""]
+        widths = [int(r["width_used"]) for r in s1 if r["width_used"] != ""]
+        spread = (max(overs) - min(overs)) if len(overs) == 3 else None
+        width = _median(widths) or cfg["width"]
+        print("   STOP: %d/3 aligned; overshoot %s steps (spread %s); blocked width %s steps" % (
+            sum(1 for r in s1 if r["verdict"] == "ALIGNMENT_SUCCESS"), overs, spread, width))
+        tried = []
+        saved_center = cfg["center"]
+        cfg["center"] = True
+        try:
+            if spread is not None and width and spread * 2 < width:
+                print("   decision: the stop is repeatable within half a spoke width -> step-based RETURN_TO_EDGE x3")
+                tried.append("RETURN_TO_EDGE")
+                s2 = self._align_series(cls, "RETURN_TO_EDGE", 3, "2")
+                if ok(s2, 3):
+                    print("   decision: RETURN_TO_EDGE 3/3 -> stage 3 repeat x%d" % ADOPT_RUN)
+                    return ("RETURN_TO_EDGE", self._align_series(cls, "RETURN_TO_EDGE", ADOPT_RUN, "3"))
+                if len(s2) < 3:
+                    return (None, s2)
+            else:
+                print("   decision: the stop is not predictable enough for a fixed step correction -> laser-guided "
+                      "REACQUIRE")
+            if not (cfg["slow_hz"] and cfg["slow_accel"]):
+                print("   !! REACQUIRE needs `align set slow <steps/s> <steps/s2>`: stopping here")
+                return (None, [])
+            tried.append("REACQUIRE")
+            s2 = self._align_series(cls, "REACQUIRE", 3, "2")
+            if ok(s2, 3):
+                print("   decision: REACQUIRE 3/3 -> stage 3 repeat x%d" % ADOPT_RUN)
+                return ("REACQUIRE", self._align_series(cls, "REACQUIRE", ADOPT_RUN, "3"))
+            print("   decision: no strategy passed (%s): nothing adoptable for %s yet" % (", ".join(tried), cls))
+            return (None, s2)
+        finally:
+            cfg["center"] = saved_center
+            self.s.save()
+
+    def _align_log(self):
+        counts = self._csv_rows("align_count.csv")
+        if counts:
+            print("   STAGE 0  laser count reliability")
+            print("   %3s %5s %6s %6s %6s %6s %5s %4s %5s %6s %6s %7s  %s" % (
+                "n", "run", "speed", "accel", "breaks", "missed", "extra", "glit", "time", "pitch", "rev", "ret_err",
+                "verdict"))
+            for r in counts:
+                print("   %3s %5s %6s %6s %3s/%-2s %6s %5s %4s %5s %6s %6s %7s  %s" % (
+                    r["n"], r["run"], r["speed"], r["accel"], r["breaks"], r["expected_breaks"], r["missed"],
+                    r["duplicates"], r["glitches"], r["elapsed_s"], r["pitch_med"], r["rev_steps"],
+                    r["return_error_steps"], r["verdict"]))
+        rows = self._csv_rows("align_trials.csv")
+        if not rows:
+            print("   no alignment trials in this session yet")
+            return
+        print("\n   STAGES 1-3  per class and policy (alignment reference: %s)" % rows[-1]["alignment_reference"])
+        if "beam_at_station=True" not in rows[-1]["alignment_reference"]:
+            print("   !! `aligned` means the spoke blocks the BEAM. It means aligned with the STATION only if the beam "
+                  "crosses the strike point: `align set beam_at_station yes` once you have checked that")
+        print("   %-13s %-52s %4s %-24s %-11s %-11s %s" % (
+            "class", "policy", "n", "verdicts", "overshoot", "final err", "adoption"))
+        by_class = {}
+        for key, rs in sorted(align_groups(rows).items()):
+            cls, pol = key[0], key[1:]
+            v = {}
+            for r in rs:
+                v[r["verdict"]] = v.get(r["verdict"], 0) + 1
+            overs = [int(r["overshoot_steps"]) for r in rs if r["overshoot_steps"] != ""]
+            errs = [int(r["final_error_steps"]) for r in rs if r["final_error_steps"] != ""]
+            status = adoption_status(rs)
+            by_class.setdefault(cls, []).append((pol, status))
+            print("   %-13s %-52s %4d %-24s %-11s %-11s %s" % (
+                cls, policy_str(pol), len(rs),
+                " ".join("%s:%d" % (k.replace("ALIGNMENT_", "").replace("_FAILED", "_F"), n) for k, n in v.items()),
+                ("%d..%d" % (min(overs), max(overs))) if overs else "-",
+                ("%+d..%+d" % (min(errs), max(errs))) if errs else "-", status))
+        cands = {c: [p for p, st in v if st == "CANDIDATE"] for c, v in by_class.items()}
+        print("\n   VERDICT (a candidate = the last %d trials of that policy on that class all ALIGNMENT_SUCCESS)" %
+              ADOPT_RUN)
+        for c in SPOKE_CLASS_BY_MOD4.values():
+            print("   %-13s %s" % (c, "; ".join(policy_str(p) for p in cands.get(c, [])) or "no adoptable policy yet"))
+        common = set.intersection(*[set(cands.get(c, [])) for c in SPOKE_CLASS_BY_MOD4.values()])
+        if common:
+            print("   ONE GLOBAL POLICY is supported for all four classes: %s" % "; ".join(
+                policy_str(p) for p in sorted(common)))
+        elif all(cands.get(c) for c in SPOKE_CLASS_BY_MOD4.values()):
+            print("   every class has a candidate but not the same one: CLASS-DEPENDENT policies")
+        else:
+            print("   not every class has evidence yet: no global or class policy can be called")
+        print("   %s" % self._align_csv("align_trials.csv"))
+
+    def do_align(self, arg):
+        """align [status | set <key> <value> | spoke <k> | count <steps/s>... | trial <class> [n] [strategy] |
+        campaign <class|all> | log | abort]: the roller / laser / acoustic ALIGNMENT campaign (lab image). The control
+        decisions run on the board in real time (beam interrupt -> controlled stop -> correction); this only
+        configures, sequences, plucks and logs. docs/ALIGN_CAMPAIGN.md has the plan.
+          align                       controller state, laser, campaign parameters, which spoke is believed in the beam
+          align set <key> <value>     dir +1|-1, index_dir +1|-1, spokes 32, settle <ms>, slow <steps/s> <steps/s2>,
+                                      rev <steps>, off <steps>, center on|off, rmax <steps>, max <steps>,
+                                      pluck aligned|always|never, beam_at_station yes|no,
+                                      plucks <n> (strikes per trial), pluckmode capture|burst, pgap <ms> (burst gap)
+          align spoke <k>             declare: spoke k is in the beam now (you placed it)
+          align count [v1 v2 ...]     STAGE 0: count 32 passages at each speed (steps/s): missed/extra/return error
+          align trial <class> [n] [STOP|REVERSE_FIXED|RETURN_TO_EDGE|REACQUIRE|REACQUIRE_CLEAR]   n trials on the next spokes of a class
+          align campaign <class|all>  the adaptive ladder per class (STOP -> step-based or laser-guided -> repeat)
+          align log                   stage-0 table, per-class policy table, adoption verdicts
+          align abort                 end a run now (controlled stop)
+        Classes: NDS-leading, DS-leading, NDS-trailing, DS-trailing (spoke m mod 4, the artifact's class map)."""
+        if self.offline and not arg.strip().startswith("log"):
+            raise ValueError("offline session: no board")
+        t = shlex.split(arg)
+        head = t[0].lower() if t else "status"
+        cfg = self._acfg()
+        if head == "status":
+            z = self._align()
+            print("   controller: run %s %s, phase %s, result %s %s; beam %s" % (
+                z.get("run"), "ACTIVE" if z.get("active") else "idle", z.get("phase"), z.get("result", "NONE"),
+                z.get("result_detail", ""), "BLOCKED" if z.get("beam_blocked") else "CLEAR"))
+            self._laser_status(self._laser())
+            print("   campaign parameters (provisional, chosen by you): %s" % ", ".join(
+                "%s=%s" % (k, cfg[k]) for k in ("dir", "index_dir", "spokes", "settle_ms", "slow_hz", "slow_accel",
+                                                "rev_steps", "offset", "center", "rmax", "max", "pluck", "plucks", "pluckmode", "pgap",
+                                                "beam_at_station")))
+            print("   measured (stage 0): spacing %s, blocked width %s, revolution %s steps  [%s]" % (
+                cfg["pitch"], cfg["width"], cfg["rev_steps_measured"], cfg["measured_by"] or "not yet"))
+            b = cfg["belief"]
+            print("   believed in / just behind the beam: %s" % ("spoke %d (%s)" % (b, spoke_class(b)) if b is not None
+                                                                  else "UNKNOWN -- `align spoke <k>`"))
+        elif head == "set":
+            if len(t) < 3:
+                raise ValueError("align set <key> <value>")
+            k, v = t[1].lower(), t[2:]
+            if k in ("dir", "index_dir"):
+                if v[0] not in ("+1", "1", "-1"):
+                    raise ValueError("%s is +1 or -1" % k)
+                cfg[k] = -1 if v[0] == "-1" else 1
+            elif k == "slow":
+                if len(v) != 2:
+                    raise ValueError("align set slow <steps/s> <steps/s2>")
+                cfg["slow_hz"], cfg["slow_accel"] = int(v[0]), int(v[1])
+            elif k in ("spokes", "settle", "rev", "off", "rmax", "max", "plucks", "pgap"):
+                cfg[{"settle": "settle_ms", "rev": "rev_steps", "off": "offset"}.get(k, k)] = int(v[0])
+            elif k == "center":
+                cfg["center"] = v[0].lower() in ("on", "1", "yes", "true")
+            elif k == "pluckmode":
+                if v[0] not in ("capture", "burst"):
+                    raise ValueError("align set pluckmode capture|burst  (capture = one analysed capture per strike; "
+                                     "burst = all strikes in one request at the shortest safe gap, impacts counted "
+                                     "from the mic stream)")
+                cfg["pluckmode"] = v[0]
+            elif k == "pluck":
+                if v[0] not in ("aligned", "always", "never"):
+                    raise ValueError("align set pluck aligned|always|never")
+                cfg["pluck"] = v[0]
+            elif k == "beam_at_station":
+                cfg["beam_at_station"] = v[0].lower() in ("yes", "1", "true")
+            else:
+                raise ValueError("unknown key %r -- `help align`" % k)
+            self.s.save()
+            print("   %s set" % k)
+        elif head == "spoke":
+            cfg["belief"] = int(t[1]) % int(cfg["spokes"])
+            cfg["belief_blocked"] = None
+            self.s.save()
+            print("   spoke %d (%s) is in the beam" % (cfg["belief"], spoke_class(cfg["belief"])))
+        elif head == "count":
+            breaks = None
+            speeds = []
+            for x in t[1:]:
+                if x.lower().startswith("breaks="):
+                    breaks = int(x.split("=", 1)[1])
+                else:
+                    speeds.append(int(x))
+            self._align_count(speeds, breaks)
+        elif head == "trial":
+            if len(t) < 2:
+                raise ValueError("align trial <class> [n] [strategy]")
+            cls = parse_class(t[1])
+            n = int(t[2]) if len(t) > 2 and t[2].isdigit() else 1
+            strat = (t[3] if len(t) > 3 else t[2] if len(t) > 2 and not t[2].isdigit() else "STOP").upper()
+            if strat not in STRATEGIES:
+                raise ValueError("strategy is one of %s" % ", ".join(STRATEGIES))
+            self._align_series(cls, strat, n, "manual")
+        elif head == "campaign":
+            classes = list(SPOKE_CLASS_BY_MOD4.values()) if len(t) > 1 and t[1].lower() == "all" else [parse_class(t[1])]
+            for c in classes:
+                strat, rows = self._align_campaign(c)
+                if strat is None and rows and rows[-1]["fw_result"] in ("ABORTED", "FAULT", "LASER_MISSED",
+                                                                        "LASER_AMBIGUOUS"):
+                    print("   campaign stopped: fix the cause, `align spoke <k>`, then resume with this class")
+                    break
+            self._align_log()
+        elif head == "log":
+            self._align_log()
+        elif head == "abort":
+            z = self._align("abort=1")
+            print("   %s" % z.get("detail"))
+        else:
+            raise ValueError(ALIGN_USAGE)
+
     # ---- 0 is anything listening
     def do_mic(self, arg):
         """mic [n]: heartbeat -- a silent capture every few seconds, printing whether each mic is ALIVE, DEAD or
@@ -919,6 +2164,67 @@ class Workbench(cmd.Cmd):
 
     do_heartbeat = do_mic
     do_hb = do_mic
+
+    @staticmethod
+    def _open_listen(url, timeout, wait_s=10.0):
+        """Open a listen/strike stream, waiting out a 409 that says the board is still busy (a previous stream or a
+        capture settling): the board refuses BEFORE it fires anything, so asking again cannot double-strike. A 409 that
+        says no solenoid is enabled on the station is permanent and is raised at once. Timeouts are NOT retried: a
+        request that timed out may already have fired."""
+        import urllib.request
+        t_end = time.time() + wait_s
+        while True:
+            try:
+                return urllib.request.urlopen(url, timeout=timeout)
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", "replace")
+                except OSError:
+                    pass
+                if e.code != 409 or "PRESENT=0" in body or time.time() > t_end:
+                    raise
+                time.sleep(0.3)
+
+    def _strike_burst(self, station, shots, pulse, gap):
+        """Fire `shots` strikes from ONE solenoid in a single request, `gap` ms apart (never under 4 x the pulse, the
+        25 % duty bound `burst` holds), and count the impacts the mic stream shows (a 50 ms block whose peak sits
+        TAP_DB over the quiet baseline, a run of such blocks counted once). Returns (impacts heard, gap used). No per-strike analysis: that is the
+        point -- the capture path spends seconds per strike."""
+        import urllib.request
+        fs = {"LEFT": 0, "RIGHT": 1}[station]
+        gap = max(int(gap), 4 * int(pulse), 100)
+        ms = 400 + shots * gap + 800
+        url = "http://%s/debug/listen.pcm?ms=%d&station=2&fn=%d&fp=%d&fg=%d&fs=%d" % (
+            self.s.knobs["host"], ms, shots, pulse, gap, fs)
+        self._drop_ws()
+        blk = 2400                                            # 50 ms of frames, two words each: strikes 100 ms
+        need = blk * 2 * 4                                    # apart (a 20 ms pulse) must land in different blocks
+        peaks = {"left_slot": [], "right_slot": []}
+        hits, was_hit = 0, False
+        with self._open_listen(url, ms / 1000.0 + 20) as r:
+            buf = b""
+            while True:
+                part = r.read(need - len(buf))
+                if not part:
+                    break
+                buf += part
+                if len(buf) < need:
+                    continue
+                w = np.frombuffer(buf, dtype="<i4")
+                buf = b""
+                hit = False
+                for slot, arr in (("left_slot", w[0::2]), ("right_slot", w[1::2])):
+                    h = wa.mic_health(arr)
+                    pk = h["peak_dbfs"] if h["peak_dbfs"] is not None else -999.0
+                    base = np.median(peaks[slot][-8:]) if len(peaks[slot]) >= 2 else None
+                    this_hit = h["state"] != "DEAD" and base is not None and pk > base + TAP_DB
+                    hit = hit or this_hit
+                    if h["state"] != "DEAD" and not this_hit:
+                        peaks[slot].append(pk)
+                hits += 1 if (hit and not was_hit) else 0       # one impact = a run of loud blocks, counted once
+                was_hit = hit
+        return min(hits, shots), gap
 
     def do_burst(self, arg):
         """burst [shots] [pulse_ms] [gap_ms] [left|right|both]: fire the solenoids in a rapid burst (default 20 shots

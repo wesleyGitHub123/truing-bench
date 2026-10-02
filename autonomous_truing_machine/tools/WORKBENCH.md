@@ -79,6 +79,57 @@ away from the mic wires, and keep the mic leads short. The stepper's chopping no
 opens a new epoch when you energise the coils, so a `ctrl 3` with the roller on and one with it off give
 two floors.
 
+### Laser break-beam receiver (lab image only)
+
+The receiver's OUT reaches **GPIO 7** through a divider (**50 kΩ** from OUT to the pin, **100 kΩ** from the pin to GND; modelled at about 3 V with the beam blocked, to be measured). OUT is a 5 V logic level and
+the pin is not 5 V tolerant, so never wire it straight. The transmitter runs from 5 V with `S` tied high,
+so the laser is always on. `docs/LASER_BENCH.md` has the module facts, the meter checks to do before
+trusting it, and what is still unfrozen.
+
+    laser                    # input driven/floating, beam CLEAR/BLOCKED, edges, glitches, trials
+    laser watch              # every break/clear live (wave a card through the beam); Ctrl+C stops
+    laser scan 3200          # a DISARMED move: steps each spoke blocks the beam, and the spacing
+    laser arm                # one-shot: the next break while the roller moves requests its controlled stop
+    roll 3200                #   ...an ordinary move then reports the trial and logs it
+    laser trial 3200 5       # 5 trials in a row: arm, move, stop on the break, report, log
+    laser log                # this session's trials side by side (laser_trials.csv in the session folder)
+
+`roll stop`, `roll off` and driver faults keep priority: the laser only ever asks for the same stop
+`roll stop` does. Each trial records:
+- the speed and acceleration it ran at;
+- the step at the break and at the last pulse;
+- the overshoot, with the ramp's own arithmetic beside it (about v²/2a from cruise);
+- the stop time (about ±2 ms);
+- the beam at the last pulse and 0.5 s later;
+- where the beam cleared, if it did;
+- the edges after the trigger, the glitch total, and the driver state.
+
+The heartbeat gains a `laser` line under the `roller` line:
+
+| line | meaning |
+|---|---|
+| `OK` | the beam is clear, or recently changed |
+| `DARK` | no laser seen for 10 s or more |
+| `!  NO INPUT` | GPIO 7 floats (not reported with the 50k + 100k divider, which has no pull test) |
+| `!  CHATTER` | new glitches since the last beat |
+
+### Alignment campaign: roller + laser + pluck (lab image only)
+
+The board's own real-time controller counts beam breaks, stops on the chosen spoke with the drive's
+controlled stop, applies a correction strategy (STOP, REVERSE_FIXED, RETURN_TO_EDGE, REACQUIRE) and
+classifies the result. The workbench configures it, follows it live (`[LASER]`, `[ROLLER]`, `[REVERSE]`,
+`[ALIGN]`, `[PLUCK]`, `[ACOUSTIC]`, `[TRIAL]`), plucks the aligned spoke and logs everything.
+`docs/ALIGN_CAMPAIGN.md` has the plan, the decision rules and the adoption criteria.
+
+    align set max 20000          # travel bound (yours; more than one wheel turn)
+    align set slow 200 1000      # the correction ramp (yours)
+    align count 300 600 900      # STAGE 0: 32 spoke passages per speed -- laser counting only
+    align set index_dir +1       # which way spoke numbers run (watch it: bench wheel 2026-10-02 was +1, spoke 1 follows 0)
+    align spoke 0                # spoke 0 is in the beam now
+    align campaign all           # STOP -> step-based or laser-guided correction -> repeat x5, per class
+    align log                    # stage-0 table, policy table, adoption verdicts
+    align abort                  # end a run (controlled stop); Ctrl+C does the same
+
 ## 2. Image and first run
 
 For the mics alone:
@@ -93,7 +144,9 @@ The lab image is the same firmware plus the roller as a bench drive, and `GET /i
 `"mode":"fastdemo+inmp441x2+campaign+drive"`. In the workbench:
 
     roll                # state: energised or off, moving or idle, position, speed, faults
-    roll on             # energise the coils (opens a new epoch; the board keeps holding until `roll off`)
+    roll on             # energise the coils (opens a new epoch; the board keeps holding until `roll off`). It also reads the
+                        # driver's microstep setting back and rewrites it if a driver reset reverted it (the roll line flags
+                        # `MICROSTEPS REVERTED`; `align` trials are refused until it is rewritten)
     roll 1600           # move +1600 steps at the current ramp; Ctrl+C decelerates it to a stop
     roll -1600          # and back (position returns to 0)
     roll speed 3818 1600  # cruise steps/s and acceleration steps/s2 for the next moves
