@@ -873,18 +873,62 @@ sandbox.handle(MR(1, 'suspect', 'FORCED_CANDIDATE', 421.0, null));
 ok(txt('spkunit') === 'radius: frequency (Hz)' && spkL().indexOf('mean Hz') >= 0 && /<circle class='d pR'/.test(radar()),
   'with frequencies only, the radar and stats switch to frequency and say so', txt('spkunit'));
 
-// ---- the always-read pipeline build says its readings are not validated tensions -------------
-IDENT.mode = 'fastdemo+inmp441+alwaysread';
-sandbox.loadIdent();
-ok(byId['arbanner'].className.indexOf('hide') < 0, 'an alwaysread build shows the pipeline-demonstration banner');
-ok(byId['spkdemo'].className.indexOf('hide') < 0, 'and repeats it over the spoke table');
+// ---- the pipeline-demonstration build (tension survey, operator's decision 2026-10-03) ---------
+// Readings without status wording; no banner, footnote or session-progress card; tables of
+// Spoke / Hz / N / ±20%; the run ends TENSION_SURVEY_COMPLETE and the page shows a plan computed
+// from the readings with the slope /id reports.
 const flat = page.replace(/\s+/g, ' ');
-ok(flat.indexOf('every excitation yields a frequency candidate') >= 0 && flat.indexOf('they are not validated tensions') >= 0,
-  'the banner says every excitation yields a candidate and that these are not validated tensions');
+ok(flat.indexOf('they are not validated tensions') < 0 && flat.indexOf("id='arbanner'") < 0 && flat.indexOf("id='spkdemo'") < 0,
+  'no pipeline-demonstration banner remains on the page');
+Object.assign(IDENT, { mode: 'fastdemo+inmp441x2+alwaysread+jog+survey', always_read: true, survey: true,
+  c_side_a_n_per_rev: 473, c_side_b_n_per_rev: 473, max_adjustment_rev: 1 });
+sandbox.loadIdent();
+ok(byId['stepcard'].className.indexOf('hide') >= 0, 'the demonstration build hides the session-progress card');
+ok(byId['spknote'].className.indexOf('hide') >= 0, 'and the spoke-table footnote');
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 60000, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
+ok(byId['plancard'].className.indexOf('hide') >= 0, 'no plan while the survey runs');
+[MR(0, 'suspect', 'FORCED_CANDIDATE', 412.3, 900), MR(1, 'valid', 'NONE', 431.7, 1000),
+ MR(2, 'suspect', 'FORCED_CANDIDATE', 405.2, 1100)].forEach(f => sandbox.handle(f));
+const noStatus = (s) => !/suspect|forced|candidate|rejected|valid/i.test(s);
+ok(noStatus(spkL()) && noStatus(spkR()), 'the station tables carry no status wording', spkL());
+ok(spkL().indexOf('<th>&#177;20%</th></tr>') >= 0 && spkL().indexOf('kgf') < 0 && spkL().indexOf('Status') < 0,
+  'the tables are Spoke, Hz, N and the 20% check: no kgf, no status column');
+ok(spkL().indexOf('>412.3<') >= 0 && spkL().indexOf('>900<') >= 0, 'readings still show in Hz and N');
+ok(noStatus(txt('last')) && txt('last').indexOf('412.3') < 0 && txt('last').indexOf('405.2') >= 0,
+  'the latest-measurement card shows the reading and no status', txt('last'));
+const lastLines = feedText('act').split('\n').filter(l => l.indexOf('measured') >= 0).slice(-3).join(' | ');
+ok(lastLines.indexOf('spoke 0 measured: 412.3 Hz') >= 0 && noStatus(lastLines),
+  'activity lines for this session\'s measurements carry no status', lastLines);
+sandbox.handle({ t: 'event', kind: 'TERMINAL_RESULT', ts_ms: 61000, result: 'TENSION_SURVEY_COMPLETE' });
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null,
+  last_known_result: 'TENSION_SURVEY_COMPLETE' }));
+ok(/Complete - 3 of \d+ spoke tensions recorded/.test(txt('statusbody')) && /3 \/ \d+ spokes recorded/.test(txt('statusbody')),
+  'a survey that recorded fewer than all spokes says how many, never "every spoke"', txt('statusbody'));
+for (let i = 3; i < 32; i++) sandbox.handle(MR(i, 'suspect', 'FORCED_CANDIDATE', 410 + i, 1000));
+sandbox.handle(S({ current_state: 'TERMINAL', session_active: false, active_wait: null,
+  last_known_result: 'TENSION_SURVEY_COMPLETE' }));
+ok(txt('statusbody').indexOf('Complete - every spoke tension recorded') >= 0 && txt('statusbody').indexOf('32 / 32 spokes recorded') >= 0,
+  'all 32 recorded: the Complete card says every spoke', txt('statusbody'));
+for (let i = 3; i < 32; i++) delete sandbox.spk[i];
+sandbox.renderSpk();
+ok(byId['plancard'].className.indexOf('hide') < 0, 'and shows the adjustment plan');
+const plan = byId['plan'].innerHTML;
+ok(plan.indexOf('+0.21 rev tighten') >= 0 && plan.indexOf('-0.21 rev loosen') >= 0,
+  'turns = (side mean - reading) / N-per-rev: 100 N / 473 N/rev = 0.21 rev, signed tighten / loosen', plan);
+ok(plan.indexOf('no change') >= 0, 'a spoke at its side mean needs no change');
+ok(txt('plansub').indexOf('473 N per nipple revolution') >= 0 && txt('plansub').indexOf('capped at 1 rev') >= 0,
+  'the plan says which slope and cap it used', txt('plansub'));
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 62000, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
+ok(byId['plancard'].className.indexOf('hide') >= 0, 'a new session takes the plan down');
+['always_read', 'survey', 'c_side_a_n_per_rev', 'c_side_b_n_per_rev', 'max_adjustment_rev'].forEach(k => delete IDENT[k]);
 IDENT.mode = 'interactive';
 sandbox.loadIdent();
-ok(byId['arbanner'].className.indexOf('hide') >= 0 && byId['spkdemo'].className.indexOf('hide') >= 0,
-  'any other build shows no pipeline-demonstration banner');
+ok(byId['stepcard'].className.indexOf('hide') < 0 && byId['spknote'].className.indexOf('hide') < 0,
+  'any other build keeps the session-progress card and the footnote');
+sandbox.handle(MR(0, 'suspect', 'FORCED_CANDIDATE', 412.3, 900));
+ok(spkL().indexOf('SUSPECT') >= 0 && spkL().indexOf('kgf') >= 0, 'and its tables keep kgf and the status chip');
 
 // ---- roller jog scaffold: only when /id says so, signed steps, the reply rendered as given ----
 delete IDENT.jog;
