@@ -1177,7 +1177,12 @@ static void derive_credentials(char *ssid, size_t ssid_cap, char *pass, size_t p
     uint8_t mac[6] = { 0 };
     (void)esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     (void)snprintf(ssid, ssid_cap, "truing-%02x%02x%02x", mac[3], mac[4], mac[5]);
+#ifdef TRUING_DEMO_AP_PASSPHRASE
+    /* The demonstration image only (build_mode.h): a passphrase the operator can read out. */
+    (void)snprintf(pass, pass_cap, "%s", TRUING_DEMO_AP_PASSPHRASE);
+#else
     (void)snprintf(pass, pass_cap, "truing-%02x%02x%02x%02x", mac[2], mac[3], mac[4], mac[5]);
+#endif
 }
 
 static bool wifi_start_ap(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap)

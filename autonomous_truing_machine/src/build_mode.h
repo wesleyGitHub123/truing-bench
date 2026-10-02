@@ -268,6 +268,13 @@
 #error "TRUING_DEMO_TENSION_ONLY is part of the pipeline-demonstration build: it needs TRUING_DEMO_ALWAYS_READ."
 #endif
 
+/* The access point's passphrase on the pipeline-demonstration image (operator's decision, 2026-10-03, so it can
+ * be read out at the demonstration). It is a fixed string in the source -- every other image derives it from the
+ * board's MAC (net_transport.c) -- so it protects a demo network, nothing more. The SSID stays truing-<mac>. */
+#if TRUING_DEMO_ALWAYS_READ
+#define TRUING_DEMO_AP_PASSPHRASE "truing-demo"
+#endif
+
 #ifndef TRUING_DEMO_LASER_NAV
 #define TRUING_DEMO_LASER_NAV 0
 #endif
