@@ -884,6 +884,14 @@ Object.assign(IDENT, { mode: 'fastdemo+inmp441x2+alwaysread+jog+survey', always_
   c_side_a_n_per_rev: 473, c_side_b_n_per_rev: 473, max_adjustment_rev: 1 });
 sandbox.loadIdent();
 ok(byId['stepcard'].className.indexOf('hide') >= 0, 'the demonstration build hides the session-progress card');
+IDENT.acquisition = 'auto';
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') >= 0, 'and the orange FAST DEMO synthetic-mode card');
+IDENT.always_read = false; IDENT.mode = 'fastdemo';
+sandbox.loadIdent();
+ok(byId['demobanner'].className.indexOf('hide') < 0, 'a plain fast-demo image still shows that card');
+IDENT.acquisition = 'manual'; IDENT.always_read = true; IDENT.mode = 'fastdemo+inmp441x2+alwaysread+jog+survey';
+sandbox.loadIdent();
 ok(byId['spknote'].className.indexOf('hide') >= 0, 'and the spoke-table footnote');
 sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
 sandbox.handle({ t: 'event', kind: 'STATE_TRANSITION', ts_ms: 60000, from: 'READY', to: 'MEASURE_WHEEL_STATE' });
