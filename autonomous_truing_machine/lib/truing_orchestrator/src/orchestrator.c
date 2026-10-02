@@ -293,6 +293,15 @@ static truing_orch_step_t poll_navigation(truing_orchestrator_t *o)
         set_state(o, state_after_continuation(o->continuation));
         return TRUING_ORCH_ADVANCED;
     }
+    if (r.outcome == TRUING_NAV_PENDING_OPERATOR) {
+        /* An automated move that gave up hands the positioning to the operator (the laser-guided roller
+         * after its bounded retries): the same wait a manual request issues, with the same continuation. */
+        truing_wait_prompt_t p;
+        if (!truing_nav_result_to_prompt(&r, &p)) {
+            return navigation_failed(o, &r, o->continuation);
+        }
+        return issue_wait(o, &p, o->continuation);
+    }
     return navigation_failed(o, &r, o->continuation);
 }
 
@@ -528,6 +537,14 @@ truing_orch_step_t truing_orch_step(truing_orchestrator_t *o)
     }
 
     case TRUING_STATE_MEASURE_WHEEL_STATE: {
+        if (o->deps.end_after_tension_pass && !o->remeasure_mode) {
+            /* Tension targets come first (next_measurement_target): the first non-spoke target is
+             * the end of the acoustic pass, and in the survey image the end of the session. */
+            truing_nav_target_t t;
+            if (!next_measurement_target(o, &t) || t.kind != TRUING_NAV_TARGET_SPOKE) {
+                return terminal(o, TRUING_TERMINAL_TENSION_SURVEY_COMPLETE, TRUING_REASON_NONE);
+            }
+        }
         bool complete = false;
         const truing_orch_step_t s = dispatch_measurement(o, TRUING_STATE_MEASURE_WHEEL_STATE, &complete);
         if (complete) {

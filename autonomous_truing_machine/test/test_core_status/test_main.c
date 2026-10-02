@@ -88,6 +88,10 @@ static void test_terminal_vocabulary(void)
     TEST_ASSERT_TRUE(truing_terminal_is_abort(TRUING_TERMINAL_ABORT_PARTIAL_STATE));
     TEST_ASSERT_EQUAL_STRING("CONVERGED_GEOMETRIC_ONLY", truing_terminal_str(TRUING_TERMINAL_CONVERGED_GEOMETRIC_ONLY));
     TEST_ASSERT_EQUAL_STRING("ABORT_UNSAFE_ADJUSTMENT", truing_terminal_str(TRUING_TERMINAL_ABORT_UNSAFE_ADJUSTMENT));
+    /* The survey image's end: not a truing success, not an abort. */
+    TEST_ASSERT_FALSE(truing_terminal_is_success(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE));
+    TEST_ASSERT_FALSE(truing_terminal_is_abort(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE));
+    TEST_ASSERT_EQUAL_STRING("TENSION_SURVEY_COMPLETE", truing_terminal_str(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE));
 }
 
 static void test_string_tables_cover_every_value(void)

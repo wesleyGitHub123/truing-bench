@@ -46,6 +46,7 @@ static const char *const k_terminal_str[TRUING_TERMINAL__COUNT] = {
     "ABORT_NO_MODEL",
     "ABORT_OPERATOR",
     "ABORT_PARTIAL_STATE",
+    "TENSION_SURVEY_COMPLETE",
 };
 
 static const char *const k_source_str[TRUING_SOURCE__COUNT] = {

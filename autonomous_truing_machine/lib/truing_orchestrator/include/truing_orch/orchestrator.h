@@ -74,6 +74,10 @@ typedef struct {
      * bound ONLY while the selected layout is TENSION_ABSENT, i.e. while those rows are not in
      * the solve at all (SPEC §8.11). Under any layout that uses tension this is ignored. */
     uint8_t                 tension_sample_limit;
+    /* The tension-survey demonstration (TRUING_DEMO_TENSION_ONLY) only: the session is the acoustic
+     * pass and ends TENSION_SURVEY_COMPLETE once that pass has collected its spokes -- no runout, no
+     * solve, no adjustment. false in every other image, where the cycle runs as SPEC §7 describes. */
+    bool                    end_after_tension_pass;
 } truing_orch_deps_t;
 
 /* What the machine resumes with once the active wait is answered. */

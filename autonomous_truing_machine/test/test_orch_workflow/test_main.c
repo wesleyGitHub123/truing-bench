@@ -160,6 +160,8 @@ static void two_spoke_lateral(float *lat)
  * gauge ever produced, and the session would claim to be physical. */
 /* Re-initialise the orchestrator against whatever interfaces the rig holds now, optionally
  * with a bound on the acoustic pass. limit 0 is the machine's setting: collect every spoke. */
+static bool g_end_after_tension;   /* the tension-survey image's setting; false everywhere else */
+
 static void rig_reinit(rig_t *r, uint8_t tension_sample_limit)
 {
     truing_orch_deps_t deps;
@@ -177,6 +179,7 @@ static void rig_reinit(rig_t *r, uint8_t tension_sample_limit)
     deps.clock = r->clock;
     deps.firmware_version = "test";
     deps.tension_sample_limit = tension_sample_limit;
+    deps.end_after_tension_pass = g_end_after_tension;
     TEST_ASSERT_TRUE(truing_orch_init(&r->orch, &deps));
 }
 
@@ -557,7 +560,174 @@ static void test_acoustic_demo_still_asks_for_adjustments_and_aborts(void)
     TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, g.sctx.last_terminal);
 }
 
-void setUp(void) {}
+/* ---- the tension-survey demonstration (TRUING_DEMO_TENSION_ONLY) ------------------------
+ * The session is the acoustic pass and nothing after it: once every spoke the pass collects has
+ * been measured, the run ends TENSION_SURVEY_COMPLETE. No runout is read, nothing is solved and
+ * nobody is asked to turn a nipple. */
+static void test_tension_survey_ends_after_the_last_spoke(void)
+{
+    float lat[TRUING_MAX_RIM_ANGLES];
+    two_spoke_lateral(lat);
+    g_end_after_tension = true;
+    rig_build_acoustic_composite(&g, lat, 32u);
+    g_end_after_tension = false;
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 8000u));
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE, g.sctx.last_terminal);
+    TEST_ASSERT_EQUAL_UINT32(32u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    TEST_ASSERT_EQUAL_UINT32(32u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);
+    for (uint8_t i = 0; i < 32u; ++i) {
+        TEST_ASSERT_EQUAL_INT(truing_acoustic_station_for_spoke(i), g.sctx.spoke_prompt_station[i]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_READ_RUNOUT]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_CHECK_SOLVER_ADMISSION]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_COMPUTE_ADJUSTMENTS]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.waits_by_kind[TRUING_WAIT_APPLY_ADJUSTMENT]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_VERIFY]);
+    TEST_ASSERT_EQUAL_INT(TRUING_STATE_TERMINAL, g.orch.state);
+    TEST_ASSERT_FALSE(truing_terminal_is_abort(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE));
+    TEST_ASSERT_FALSE(truing_terminal_is_success(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE));   /* nothing was trued */
+}
+
+/* The end follows the pass, whatever its bound: at 3 spokes it ends after the third. */
+static void test_tension_survey_ends_after_a_bounded_pass(void)
+{
+    g_end_after_tension = true;
+    rig_build_acoustic_composite(&g, NULL, 3u);
+    g_end_after_tension = false;
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 4000u));
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE, g.sctx.last_terminal);
+    TEST_ASSERT_EQUAL_UINT32(3u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_READ_RUNOUT]);
+}
+
+/* ABORT during the survey is still the operator's abort, not a completed survey. */
+static void test_tension_survey_abort_is_still_an_abort(void)
+{
+    g_end_after_tension = true;
+    rig_build_acoustic_composite(&g, NULL, 32u);
+    g_end_after_tension = false;
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    (void)run(&g, 40u);
+    truing_intent_t a;
+    memset(&a, 0, sizeof(a));
+    a.type = TRUING_INTENT_ABORT;
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, truing_orch_submit_intent(&g.orch, &a, NULL));
+    (void)run(&g, 4000u);
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_ABORT_OPERATOR, g.sctx.last_terminal);
+}
+
+/* A spoke whose every capture is rejected still ends the survey: the pass records what it got, the run
+ * does not re-measure or abort, and the page counts the spokes that have a reading. */
+static void test_tension_survey_ends_with_a_rejected_spoke(void)
+{
+    g_end_after_tension = true;
+    rig_build_acoustic_composite(&g, NULL, 4u);
+    g_end_after_tension = false;
+    truing_acoustic_synthetic_set_failure(&g.actx, 2u, TRUING_STATUS_REJECTED, TRUING_REASON_LOW_SNR);
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 4000u));
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE, g.sctx.last_terminal);
+    TEST_ASSERT_EQUAL_UINT32(0u, g.sctx.state_entries[TRUING_STATE_REMEASURE_GAPS]);
+}
+
+/* ---- an automated move that hands over to the operator (the laser-guided roller's fallback) ------
+ * A stub physical child: every request moves (IN_MOTION) for two polls, then lands -- except spoke 1, which
+ * gives up and answers PENDING_OPERATOR from poll(). The orchestrator must issue the positioning wait from
+ * the poll path exactly as it does from a request, and resume on the operator's confirmation. */
+typedef struct {
+    truing_nav_result_t active;
+    int polls;
+    uint32_t handed_over, confirmed;
+} stub_nav_t;
+static stub_nav_t g_stub;
+static truing_navigation_if_t g_stub_if;
+
+static void stub_request(truing_navigation_if_t *self, const truing_nav_target_t *t, truing_nav_result_t *out)
+{
+    (void)self;
+    memset(&g_stub.active, 0, sizeof(g_stub.active));
+    g_stub.active.target = *t;
+    g_stub.active.outcome = TRUING_NAV_IN_MOTION;
+    g_stub.polls = 2;
+    *out = g_stub.active;
+}
+static void stub_poll(truing_navigation_if_t *self, truing_nav_result_t *out)
+{
+    (void)self;
+    if (g_stub.active.outcome == TRUING_NAV_IN_MOTION && --g_stub.polls <= 0) {
+        if (g_stub.active.target.index == 1u) {
+            g_stub.active.outcome = TRUING_NAV_PENDING_OPERATOR;
+            g_stub.active.wait_kind = TRUING_WAIT_POSITION_TO_SPOKE;
+            g_stub.handed_over++;
+        } else {
+            g_stub.active.outcome = TRUING_NAV_DONE;
+        }
+    }
+    *out = g_stub.active;
+}
+static void stub_confirm(truing_navigation_if_t *self, truing_nav_result_t *out)
+{
+    (void)self;
+    g_stub.confirmed++;
+    g_stub.active.outcome = TRUING_NAV_DONE;
+    *out = g_stub.active;
+}
+static void stub_reference(truing_navigation_if_t *self, truing_nav_result_t *out)
+{
+    (void)self;
+    memset(&g_stub.active, 0, sizeof(g_stub.active));
+    g_stub.active.target.kind = TRUING_NAV_TARGET_SPOKE;
+    g_stub.active.target.station = TRUING_STATION_ACOUSTIC_LEFT;
+    g_stub.active.outcome = TRUING_NAV_PENDING_OPERATOR;
+    g_stub.active.wait_kind = TRUING_WAIT_CONFIRM_SPOKE0_AT_STATION;
+    *out = g_stub.active;
+}
+static void stub_query(truing_navigation_if_t *self, truing_wheel_position_t *out)
+{
+    (void)self;
+    memset(out, 0, sizeof(*out));
+    out->status = TRUING_STATUS_VALID;
+    out->reference_established = true;
+}
+static void stub_stop(truing_navigation_if_t *self) { (void)self; }
+
+static void test_an_automated_move_can_hand_the_spoke_to_the_operator(void)
+{
+    memset(&g_stub, 0, sizeof(g_stub));
+    g_stub_if.impl_name = "stub_auto";
+    g_stub_if.source_impl = TRUING_SOURCE_REAL;
+    g_stub_if.request = stub_request;
+    g_stub_if.poll = stub_poll;
+    g_stub_if.note_operator_confirmation = stub_confirm;
+    g_stub_if.establish_reference = stub_reference;
+    g_stub_if.query = stub_query;
+    g_stub_if.stop = stub_stop;
+    rig_build_fastdemo(&g, NULL);
+    g.cctx.n_mt_identified = false;
+    static const truing_station_id_t physical[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT };
+    truing_navigation_synthetic_init(&g.nav_sim, &g.nsyn, g.clock, 32u, 32u, &g.machine, NULL, 0.0f, 0u);
+    TEST_ASSERT_TRUE(truing_navigation_composite_init(&g.nav, &g.ncomp, &g_stub_if, &g.nav_sim, physical, 2u));
+    g_end_after_tension = true;
+    rig_reinit(&g, 4u);
+    g_end_after_tension = false;
+    bring_to_ready(&g);
+    TEST_ASSERT_EQUAL_INT(TRUING_INTENT_ADMIT_ACCEPT, start(&g, NULL));
+    TEST_ASSERT_EQUAL_INT(TRUING_ORCH_TERMINAL, run(&g, 4000u));
+    TEST_ASSERT_EQUAL_INT(TRUING_TERMINAL_TENSION_SURVEY_COMPLETE, g.sctx.last_terminal);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_stub.handed_over);
+    TEST_ASSERT_EQUAL_UINT32(1u, g.sctx.waits_by_kind[TRUING_WAIT_POSITION_TO_SPOKE]);   /* spoke 1 only */
+    TEST_ASSERT_EQUAL_INT(TRUING_STATION_ACOUSTIC_RIGHT, g.sctx.spoke_prompt_station[1]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1u, g_stub.confirmed);
+    TEST_ASSERT_EQUAL_UINT32(4u, g.sctx.state_entries[TRUING_STATE_MEASURE_SPOKE_TENSION]);
+}
+
+void setUp(void) { g_end_after_tension = false; }
 void tearDown(void) {}
 
 /* ---- tests ------------------------------------------------------------------------------ */
@@ -1392,6 +1562,11 @@ int main(int argc, char **argv)
     RUN_TEST(test_acoustic_demo_provenance_reports_the_bound);
     RUN_TEST(test_without_a_bound_every_spoke_is_measured_under_tension_absent);
     RUN_TEST(test_acoustic_demo_still_asks_for_adjustments_and_aborts);
+    RUN_TEST(test_tension_survey_ends_after_the_last_spoke);
+    RUN_TEST(test_tension_survey_ends_after_a_bounded_pass);
+    RUN_TEST(test_tension_survey_abort_is_still_an_abort);
+    RUN_TEST(test_tension_survey_ends_with_a_rejected_spoke);
+    RUN_TEST(test_an_automated_move_can_hand_the_spoke_to_the_operator);
     RUN_TEST(test_initialize_establishes_reference_through_navigation);
     RUN_TEST(test_start_is_refused_without_a_usable_model_or_profile);
     RUN_TEST(test_full_workflow_reaches_converged_geometric_only);

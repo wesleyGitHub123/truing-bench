@@ -91,6 +91,9 @@ typedef enum {
     TRUING_TERMINAL_ABORT_NO_MODEL,
     TRUING_TERMINAL_ABORT_OPERATOR,
     TRUING_TERMINAL_ABORT_PARTIAL_STATE,
+    /* Demonstration-image deviation from §13.2 (docs/DEMO_BUILD.md): the tension survey ended after
+     * its acoustic pass. Neither success (nothing was trued) nor an abort. */
+    TRUING_TERMINAL_TENSION_SURVEY_COMPLETE,
     TRUING_TERMINAL__COUNT
 } truing_terminal_result_t;
 
