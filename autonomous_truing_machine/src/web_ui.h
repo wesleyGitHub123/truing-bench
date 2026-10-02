@@ -652,6 +652,7 @@ static const char TRUING_WEB_UI_HTML[] =
 " el('b-start').textContent=auto?'Start Fast Demo':'Start truing';\n"
 " el('acqcard').className=sel?'card':'card hide';\n"
 " el('b-acq-auto').textContent=ar?'Automatic':'Automatic (synthetic)';\n"
+" el('acqnote').className=ar?'acqnote hide':'acqnote';\n"
 " el('b-acq-auto').className=auto?'sel':'';\n"
 " el('b-acq-manual').className=auto?'':'sel';\n"
 " el('acqnote').textContent=auto\n"

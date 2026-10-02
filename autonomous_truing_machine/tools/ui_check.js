@@ -893,11 +893,13 @@ sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') >= 0, 'and the orange FAST DEMO synthetic-mode card');
 ok(byId['modechip'].className.indexOf('hide') >= 0, 'and the FAST DEMO chip beside the title');
 ok(byId['b-acq-auto'].textContent === 'Automatic', 'the Automatic button carries no (synthetic) label', byId['b-acq-auto'].textContent);
+ok(byId['acqnote'].className.indexOf('hide') >= 0, 'and the note under it (runout simulated, not a physical result) is hidden');
 IDENT.always_read = false; IDENT.mode = 'fastdemo';
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') < 0 && byId['modechip'].className.indexOf('hide') < 0,
   'a plain fast-demo image still shows that card and chip');
-ok(byId['b-acq-auto'].textContent === 'Automatic (synthetic)', 'and keeps its Automatic (synthetic) label');
+ok(byId['b-acq-auto'].textContent === 'Automatic (synthetic)' && byId['acqnote'].className.indexOf('hide') < 0,
+  'and keeps its Automatic (synthetic) label and the note');
 IDENT.acquisition = 'manual'; IDENT.always_read = true; IDENT.mode = 'fastdemo+inmp441x2+alwaysread+jog+survey';
 sandbox.loadIdent();
 ok(byId['spknote'].className.indexOf('hide') >= 0, 'and the spoke-table footnote');
