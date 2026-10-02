@@ -952,6 +952,20 @@ IDENT.jog = false;
 sandbox.loadIdent();
 ok(byId['jogcard'].className.indexOf('hide') >= 0, 'jog:false hides the roller card again');
 
+// ---- laser-guided roller: the two waits it can still ask for -------------------------------------
+IDENT.laser = true;
+sandbox.loadIdent();
+sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[0] }));
+ok(txt('statusbody').indexOf('just before the laser beam') >= 0, 'laser mode: the reference asks for spoke 0 just before the beam', txt('statusbody'));
+sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[1] }));
+ok(txt('statusbody').indexOf('could not land spoke 17 by itself') >= 0 && txt('statusbody').indexOf('Roller card') >= 0,
+  'laser mode: a handed-over spoke says the roller gave up and to jog it', txt('statusbody'));
+delete IDENT.laser;
+sandbox.loadIdent();
+sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[1] }));
+ok(txt('statusbody').indexOf('could not land') < 0, 'without the laser the positioning prompt is the manual one');
+sandbox.handle(S({ current_state: 'READY', session_active: false, active_wait: null, last_known_result: null }));
+
 // ---- always light ------------------------------------------------------------------------------
 ok(!/prefers-color-scheme\s*:\s*dark/.test(page), 'no dark-mode media query remains');
 
