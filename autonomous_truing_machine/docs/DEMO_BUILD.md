@@ -90,6 +90,10 @@ sensor driver, the counting of spokes from the spoke-0 reference, the stopping-d
 (edge to strike point at a given speed), and the navigation implementation that would replace the
 manual stations in the composite.
 
+The first bench step toward it exists on the lab image (`s3_devkit_lab`, not this one): the receiver on GPIO
+7 as an observable subsystem and a one-shot laser-stop that measures trigger -> controlled stop -> where the
+counter and the beam ended up (`docs/LASER_BENCH.md`). It is characterization, not this navigation.
+
 If the automatic mode is not ready by the demo, this image IS the fallback: manual roller, operator
 confirms by eye.
 

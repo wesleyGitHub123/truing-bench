@@ -52,7 +52,9 @@ The ESP32's TX and RX therefore have to share that wire, and the board hears its
 ## What the UART gives the bench (lab image)
 
 - `GET /debug/drive.json` -> `drv_ok`, `drv_status`, `gstat`, `cs_actual`, `drv_flags` (OT, OTPW,
-  S2GA/B, S2VSA/B, OLA/OLB or `ok`). The workbench `roll` line prints them.
+  S2GA/B, S2VSA/B, OLA/OLB or `ok`). The workbench `roll` line prints them. Also `microsteps_want`, `mres_ok`,
+  `mres_repairs`: GCONF/CHOPCONF read back against the 16 the driver enforced (a driver reset reverts it to the
+  MS1/MS2 pins' 8, halving every step count). `roll on` rewrites a reverted setting; `mres_ok` false refuses `align` trials.
 - Microsteps: the bench drive now requests **16** and the driver verifies it over the UART, refusing
   moves (MICROSTEP_MISMATCH) if it cannot. 16 is the measured count (3200 steps = 1 revolution,
   ROLLER_BENCH R1). The MRES register read 8 before because it is ignored unless `mstep_reg_select`

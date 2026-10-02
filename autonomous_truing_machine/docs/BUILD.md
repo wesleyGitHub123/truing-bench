@@ -367,6 +367,14 @@ illegal together with `TRUING_ROLLER_NAV` (one owner of the STEP pin). `GET /id`
 - **Driven from `tools/workbench.py`**: `roll on`, `roll 1600`, `roll -1600`, `roll stop`, `roll off`,
   `roll speed <steps/s> [accel]`. Energising the coils opens a new workbench epoch (holding current is a
   noise source beside the mics), and every saved shot records the roller state.
+- **The laser break-beam receiver** is read on GPIO 7 (the reserved index-sensor pin) as an observable bench
+  subsystem, `GET /debug/laser.json`. An optional one-shot laser-stop can be armed from there (`laser arm`,
+  `laser trial` in the workbench): a beam break while the roller moves requests the drive's own controlled
+  stop and the trial is recorded. Bench characterization only, not navigation (`docs/LASER_BENCH.md`).
+- **The alignment campaign's real-time controller** (`truing_hal/beam_align.h`, `GET /debug/align.json`,
+  workbench `align`) runs on the same input: stop on the Nth beam break, then a correction strategy, with
+  zone accounting of which spoke is in the beam (`docs/ALIGN_CAMPAIGN.md`). Also not navigation; its
+  adoption into navigation is a separate change.
 - **Still needs a reflash:** the formal solenoid electrical check (`tools/bench/solenoid_smoke`), the
   roller's R3/R4 bench stages (`tools/bench/roller_smoke`), and flipping a `PRESENT` flag once a station
   has passed its check.
