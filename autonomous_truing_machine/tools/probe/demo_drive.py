@@ -4,6 +4,10 @@ spoke's reading. For checking a demo build on the bench with nobody at the page.
     python tools/probe/demo_drive.py                 # confirm the reference, start, confirm each struck spoke
     python tools/probe/demo_drive.py --spokes 3 --out run.json
 
+On the tension-survey image (/id survey:true) the session ends by itself with TENSION_SURVEY_COMPLETE after
+its last spoke; on that image that terminal is required for a pass. With laser navigation (TRUING_DEMO_LASER_NAV)
+there are no positioning waits unless a spoke is handed to the operator.
+
 It answers the reference confirmation (spoke 0 at LEFT) and every positioning wait at an acoustic station
 with the intent the wait names -- i.e. it CLAIMS the spoke is at the station; it does not move the wheel
 (the manual roller is the operator's, through the page). It stops with ABORT at the first wait that is not
@@ -28,8 +32,8 @@ ANSWERABLE = ("CONFIRM_SPOKE0_AT_STATION", "POSITION_TO_SPOKE")
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--host", default="192.168.4.1")
-    p.add_argument("--spokes", type=int, default=3, help="stop after this many distinct spokes reported")
-    p.add_argument("--seconds", type=float, default=240.0)
+    p.add_argument("--spokes", type=int, default=32, help="stop after this many distinct spokes reported")
+    p.add_argument("--seconds", type=float, default=900.0)
     p.add_argument("--out")
     p.add_argument("--jog-test", type=int, default=-1, metavar="N",
                    help="at the N-th positioning wait (0-based): jog +steps, then -steps, and confirm while that "
@@ -38,6 +42,12 @@ def main():
     p.add_argument("--jog-steps", type=int, default=200)
     a = p.parse_args()
     jog_log = []
+    try:
+        with urllib.request.urlopen("http://%s/id" % a.host, timeout=5) as r:
+            survey = bool(json.loads(r.read().decode("utf-8")).get("survey"))
+    except (OSError, ValueError):
+        survey = False
+    print("image: %s" % ("tension survey (must end TENSION_SURVEY_COMPLETE)" if survey else "full cycle"), flush=True)
 
     def jog(query):
         with urllib.request.urlopen("http://%s/demo/jog?%s" % (a.host, query), timeout=5) as r:
@@ -82,8 +92,14 @@ def main():
         return True
 
     frames, results, started, stop_at, done = [], {}, False, time.time() + a.seconds, False
+    terminal = [None]
+    grace_until = [None]   # after the last wanted spoke: a survey image ends by itself; give it a moment
     send("GET_CURRENT_STATE")
     while time.time() < stop_at and not done:
+        if grace_until[0] is not None and time.time() > grace_until[0]:
+            send("ABORT")
+            done = True
+            continue
         raw = ws.recv()
         if not raw:
             continue
@@ -123,10 +139,11 @@ def main():
             results[f.get("index")] = f
             print("   RESULT sp%s %s/%s f=%s Hz T=%s N" % (f.get("index"), f.get("status"), f.get("reason"),
                                                          f.get("selected_frequency_hz"), f.get("tension_n")), flush=True)
-            if len(results) >= a.spokes:
-                send("ABORT")
-                done = True
+            if len(results) >= a.spokes and grace_until[0] is None:
+                grace_until[0] = time.time() + 5.0
         elif kind == "TERMINAL_RESULT":
+            terminal[0] = f.get("result")
+            print("   TERMINAL %s" % terminal[0], flush=True)
             done = True
     ws.close()
     print("\nper spoke (last frame wins):")
@@ -138,6 +155,12 @@ def main():
         with open(a.out, "w", encoding="utf-8") as fh:
             json.dump({"frames": frames}, fh, indent=1)
     ok = len(results) >= a.spokes and all(r.get("selected_frequency_hz") is not None for r in results.values())
+    if terminal[0] is not None:
+        print("session ended: %s" % terminal[0])
+    if survey:
+        ok = ok and terminal[0] == "TENSION_SURVEY_COMPLETE"
+        if terminal[0] != "TENSION_SURVEY_COMPLETE":
+            print("!! the survey did not end TENSION_SURVEY_COMPLETE (%s)" % terminal[0])
     if a.jog_test >= 0:
         refused = [d for q, d in jog_log if q == "steps=%d" % a.jog_steps and not d.get("ok")]
         print("jog test: %d jog calls; the mid-measurement jog was %s" % (
