@@ -268,9 +268,25 @@
 #error "TRUING_DEMO_TENSION_ONLY is part of the pipeline-demonstration build: it needs TRUING_DEMO_ALWAYS_READ."
 #endif
 
+#ifndef TRUING_DEMO_LASER_NAV
+#define TRUING_DEMO_LASER_NAV 0
+#endif
+
+/* TRUING_DEMO_LASER_NAV: the AUTOMATIC roller mode of the demonstration build (operator's decision,
+ * 2026-10-03), the firmware form of the alignment campaign's revolution sequencer. The laser receiver on
+ * BOARD_SPOKE_BEAM_GPIO and the beam_align controller (laser_bench.c) run beside the jog drive;
+ * navigation_laser finds, stops on and names each struck spoke, and after bounded retries hands that one
+ * spoke to the operator (the manual jog stays available for exactly that). Forward only, one spoke after
+ * another: the tension survey. Supersedes the reserved TRUING_SPOKE_SENSOR scaffold. */
+#if TRUING_DEMO_LASER_NAV && !(TRUING_DEMO_ROLLER_JOG && TRUING_DEMO_TENSION_ONLY)
+#error "TRUING_DEMO_LASER_NAV drives the demonstration roller through a tension survey: it needs TRUING_DEMO_ROLLER_JOG and TRUING_DEMO_TENSION_ONLY."
+#endif
+
 /* One string, used by the boot log, GET /id and the page header, so that "which image is
  * this" has a single answer no matter who asks. */
-#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG && TRUING_DEMO_TENSION_ONLY
+#if TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_LASER_NAV
+#define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+laser+survey"
+#elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG && TRUING_DEMO_TENSION_ONLY
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+jog+survey"
 #elif TRUING_FAST_DEMO && TRUING_REAL_FRONT_END && TRUING_DEMO_ALWAYS_READ && TRUING_DUAL_MIC && TRUING_DEMO_ROLLER_JOG
 #define TRUING_BUILD_MODE_STR "fastdemo+inmp441x2+alwaysread+jog"

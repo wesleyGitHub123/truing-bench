@@ -1092,7 +1092,7 @@ static esp_err_t id_get_handler(httpd_req_t *req)
         "{\"board\":\"%s\",\"firmware\":\"%s\",\"build\":\"%s\",\"ui\":\"%s\",\"mode\":\"%s\","
         "\"acquisition\":\"%s\",\"acquisition_selectable\":%s,"
         "\"real_front_end\":%s,\"acoustic_demo_spokes\":%d,\"composite_navigation\":%s,"
-        "\"always_read\":%s,\"jog\":%s,\"survey\":%s,"
+        "\"always_read\":%s,\"jog\":%s,\"survey\":%s,\"laser\":%s,"
         "\"c_side_a_n_per_rev\":%.1f,\"c_side_b_n_per_rev\":%.1f,\"max_adjustment_rev\":%.2f,"
         "\"ssid\":\"truing-%02x%02x%02x\",\"uptime_s\":%lld,\"clients\":%u}",
         BOARD_NAME, TRUING_FIRMWARE_VERSION, TRUING_BUILD_REV, TRUING_UI_HASH, TRUING_BUILD_MODE_STR,
@@ -1100,7 +1100,7 @@ static esp_err_t id_get_handler(httpd_req_t *req)
         TRUING_REAL_FRONT_END ? "true" : "false", (int)TRUING_ACOUSTIC_DEMO_SPOKES,
         truing_demo_navigation_is_composite() ? "true" : "false",
         truing_demo_always_read_active() ? "true" : "false", TRUING_DEMO_ROLLER_JOG ? "true" : "false",
-        TRUING_DEMO_TENSION_ONLY ? "true" : "false", (double)c_a, (double)c_b, (double)max_rev,
+        TRUING_DEMO_TENSION_ONLY ? "true" : "false", truing_demo_laser_nav_active() ? "true" : "false", (double)c_a, (double)c_b, (double)max_rev,
         mac[3], mac[4], mac[5], (long long)(esp_timer_get_time() / 1000000), (unsigned)st.clients);
     no_store(req);
     httpd_resp_set_type(req, "application/json");

@@ -26,6 +26,7 @@
 #include "truing_hal/audio_source_if.h"
 #include "truing_hal/pluck_if.h"
 #include "truing_hal/navigation_composite.h"
+#include "truing_hal/navigation_laser.h"
 #include "truing_hal/navigation_manual.h"
 #include "truing_hal/navigation_roller.h"
 #include "truing_hal/navigation_synthetic.h"
@@ -62,6 +63,9 @@ static const char *TAG = "orch_demo";
 #endif
 #if TRUING_DEMO_ROLLER_JOG && !defined(BOARD_PROFILE_S3_DEVKIT)
 #error "TRUING_DEMO_ROLLER_JOG is DevKit only (s3_devkit_demo): the Nano's pins carry no roller."
+#endif
+#if TRUING_DEMO_LASER_NAV && !defined(BOARD_PROFILE_S3_DEVKIT)
+#error "TRUING_DEMO_LASER_NAV is DevKit only (s3_devkit_demo): the laser receiver is on the DevKit's GPIO 7."
 #endif
 
 /* Manual roller jog of the pipeline-demonstration build (TRUING_DEMO_ROLLER_JOG): brisk enough to turn
@@ -111,6 +115,12 @@ static struct {
     bool composite_nav;   /* the wiring above is in use; reported by /id so the page does not infer it */
     /* ROLLER image: the automated navigation over the real TMC2209 drive (TRUING_ROLLER_NAV). */
     truing_navigation_roller_ctx_t nroll;
+#if TRUING_DEMO_LASER_NAV
+    /* The demo's automatic roller: laser-guided navigation as the composite's physical child. */
+    truing_navigation_laser_ctx_t nlaser;
+    bool laser_tried;
+    bool laser_ok;   /* the receiver and its poll task are up: otherwise the stations stay manual */
+#endif
     truing_wheel_drive_if_t drive;
     truing_wheel_drive_tmc2209_ctx_t drive_ctx;
     bool drive_inited;
@@ -230,6 +240,87 @@ static void roller_drive_init_once(void)
 }
 #endif
 
+#if TRUING_DEMO_LASER_NAV
+/* ---- the laser-guided roller's hardware port (navigation_laser.h) ----------------------------------
+ * Thin: the controller (beam_align, fed by laser_bench.c's interrupt and poll) owns the stop; these only
+ * start runs and plain moves on the jog drive and report what it and the receiver say. */
+static bool lp_enable(void *u, bool *rescaled)
+{
+    (void)u;
+    const uint32_t before = s.drive_ctx.mres_repairs;
+    const bool ok = truing_wheel_drive_enable(&s.drive, true, NULL) == TRUING_STATUS_VALID && !s.drive_ctx.faulted;
+    *rescaled = s.drive_ctx.mres_repairs != before;
+    return ok;
+}
+
+static bool lp_start_trial(void *u, const truing_align_config_t *cfg, uint32_t hz, uint32_t accel)
+{
+    (void)u;
+    const char *why = NULL;
+    if (truing_wheel_drive_set_motion(&s.drive, hz, accel, NULL) != TRUING_STATUS_VALID) {
+        ESP_LOGW(TAG, "laser nav: ramp %lu/%lu refused", (unsigned long)hz, (unsigned long)accel);
+        return false;
+    }
+    const bool ok = truing_laser_align_start(cfg, &why);
+    if (!ok) {
+        ESP_LOGW(TAG, "laser nav: run refused: %s", why != NULL ? why : "?");
+    }
+    return ok;
+}
+
+static bool lp_trial(void *u, truing_laser_trial_t *out)
+{
+    (void)u;
+    static truing_beam_align_t a;   /* too big for the orchestrator task's stack */
+    if (!truing_laser_align_snapshot(&a)) {
+        return false;
+    }
+    out->active = truing_beam_align_active(&a);
+    out->result = a.result;
+    out->fired = a.fired;
+    out->trigger_pos = a.trigger_pos;
+    out->stop_pos = a.stop_pos;
+    out->final_zone = a.final_zone;
+    out->final_blocked = a.final_blocked;
+    out->width_used = a.width_used;
+    return true;
+}
+
+static bool lp_move(void *u, int32_t steps, uint32_t hz, uint32_t accel)
+{
+    (void)u;
+    return truing_wheel_drive_set_motion(&s.drive, hz, accel, NULL) == TRUING_STATUS_VALID &&
+           truing_wheel_drive_move_relative(&s.drive, steps, NULL) == TRUING_STATUS_VALID;
+}
+
+static bool lp_moving(void *u) { (void)u; return truing_wheel_drive_is_moving(&s.drive); }
+static int32_t lp_position(void *u) { (void)u; return truing_wheel_drive_position_steps(&s.drive); }
+
+static bool lp_beam_blocked(void *u)
+{
+    (void)u;
+    truing_laser_bench_io_t io;
+    return truing_laser_bench_snapshot(NULL, &io) && io.level == BOARD_SPOKE_BEAM_BLOCKED_LEVEL;
+}
+
+static uint32_t lp_beam_edges(void *u)
+{
+    (void)u;
+    static truing_beam_stop_t b;
+    return truing_laser_bench_snapshot(&b, NULL) ? b.edges : 0u;
+}
+
+static void lp_stop(void *u)
+{
+    (void)u;
+    (void)truing_laser_align_abort(NULL);
+    truing_wheel_drive_stop(&s.drive);
+}
+
+static const truing_laser_port_t k_laser_port = { lp_enable, lp_start_trial, lp_trial, lp_move, lp_moving,
+                                                  lp_position, lp_beam_blocked, lp_beam_edges, lp_stop, NULL };
+#endif
+
 static void wire_acquisition(bool automatic)
 {
     s.composite_nav = false;
@@ -244,9 +335,33 @@ static void wire_acquisition(bool automatic)
          * data is simulated, stay simulated, behind one navigation authority. The composite is
          * labelled SYNTHETIC (the weakest of its parts). This removes the orchestrator's belief that a
          * spoke is positioned when nothing moved; it does NOT verify that the spoke the operator placed
-         * is the one requested -- nothing senses placement (sensor_confirmed is false). */
+         * is the one requested -- nothing senses placement (sensor_confirmed is false). With
+         * TRUING_DEMO_LASER_NAV the physical child is the laser-guided roller instead (below), which
+         * names a spoke by the beam's spacing and reports sensor_confirmed only when it did. */
         static const truing_station_id_t k_physical[] = { TRUING_STATION_ACOUSTIC_LEFT, TRUING_STATION_ACOUSTIC_RIGHT };
         truing_navigation_manual_init(&s.nav_phys, &s.nctx, s.clock, 32u, 32u, &s.machine);
+#if TRUING_DEMO_LASER_NAV
+        /* The automatic roller: the laser finds, stops on and names each struck spoke; after bounded retries
+         * that spoke falls back to the operator (the manual jog). Without a working receiver or drive the
+         * stations stay MANUAL, never synthetic. */
+        roller_drive_init_once();
+        if (!s.laser_tried) {
+            s.laser_tried = true;
+            s.laser_ok = s.drive_ok && truing_laser_bench_init(&s.drive, &s.drive_ctx);
+        }
+        if (s.laser_ok) {
+            truing_laser_nav_config_t lcfg;
+            truing_laser_nav_config_bench_2026_10_03(&lcfg);
+            truing_navigation_laser_init(&s.nav_phys, &s.nlaser, s.clock, 32u, &s.machine, &lcfg, &k_laser_port,
+                                         TRUING_SOURCE_REAL);
+            ESP_LOGW(TAG, "LASER NAVIGATION: the roller positions each spoke by the beam (per-class recipes of "
+                          "2026-10-03); a spoke it cannot land after %u tries is handed to the operator.",
+                     (unsigned)lcfg.max_tries);
+        } else {
+            ESP_LOGE(TAG, "LASER NAVIGATION unavailable (receiver or drive not up): spokes are positioned by the "
+                          "operator with the jog.");
+        }
+#endif
         truing_navigation_synthetic_init(&s.nav_sim, &s.nsyn, s.clock, 32u, 32u, &s.machine, NULL, 0.0f, 0u);
         if (!truing_navigation_composite_init(&s.nav, &s.ncomp, &s.nav_phys, &s.nav_sim, k_physical, 2u)) {
             /* Fail closed: a composite that did not initialise refuses every request, so no session can
@@ -410,7 +525,9 @@ static bool jog_guarded_fire(truing_pluck_if_t *self, float pulse_ms)
     if (s.drive_ok && truing_wheel_drive_is_moving(&s.drive)) {
         ESP_LOGW(TAG, "strike refused: the roller is still moving after %u ms", (unsigned)DEMO_JOG_WAIT_MS);
     } else {
-        if (s.drive_ok && s.drive_ctx.enabled) {
+        /* The manual roller lets go before a strike. The laser-guided one does NOT: the campaign struck every
+         * aligned spoke with the coils energised (32/32), and released coils let the wheel drift off it. */
+        if (s.drive_ok && s.drive_ctx.enabled && !truing_demo_laser_nav_active()) {
             (void)truing_wheel_drive_enable(&s.drive, false, NULL);
             settle = true;
         }
@@ -450,6 +567,15 @@ static bool jog_window_open(const char **why)
 bool truing_demo_always_read_active(void)
 {
     return TRUING_REAL_FRONT_END && s.actx.always_read;
+}
+
+bool truing_demo_laser_nav_active(void)
+{
+#if TRUING_DEMO_LASER_NAV
+    return s.laser_ok && s.composite_nav;
+#else
+    return false;
+#endif
 }
 
 void truing_demo_plan_model(float *c_side_a_n_per_rev, float *c_side_b_n_per_rev, float *max_adjustment_rev)
@@ -505,6 +631,9 @@ bool truing_demo_jog(int32_t steps, bool release, const char **detail)
             d = "the roller is still moving";
         } else if (!s.drive_ctx.enabled && truing_wheel_drive_enable(&s.drive, true, &reason) != TRUING_STATUS_VALID) {
             d = truing_reason_str(reason);
+        } else if (truing_wheel_drive_set_motion(&s.drive, DEMO_JOG_CRUISE_HZ, DEMO_JOG_ACCEL_SS, &reason) !=
+                   TRUING_STATUS_VALID) {
+            d = truing_reason_str(reason);   /* the laser roller leaves its last recipe's ramp: the jog sets its own */
         } else if (truing_wheel_drive_move_relative(&s.drive, steps, &reason) != TRUING_STATUS_VALID) {
             d = truing_reason_str(reason);
         } else {
@@ -1088,7 +1217,11 @@ static void demo_task(void *arg)
                 continue;
             }
         }
-        ++steps;
+        /* A navigation poll is the wheel moving, not the machine making progress: a laser-guided session
+         * polls every 10 ms for each spoke's run, which must not eat the runaway budget below. */
+        if (r != TRUING_ORCH_POLL_NAVIGATION) {
+            ++steps;
+        }
         /* Let the core-0 idle task run between steps. This task outranks IDLE0, which must
          * run for the scheduler's own housekeeping and now shares core 0 with the web
          * server. It has to be EVERY step, not every N: a single step can be a whole

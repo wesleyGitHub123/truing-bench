@@ -5,7 +5,9 @@
 
 #include "build_mode.h"
 
-#if TRUING_BENCH_DRIVE
+/* The lab image's bench subsystem, and the demonstration image's laser-guided roller (TRUING_DEMO_LASER_NAV),
+ * which drives the same controller through navigation_laser. */
+#if TRUING_BENCH_DRIVE || TRUING_DEMO_LASER_NAV
 
 #include <string.h>
 
@@ -399,7 +401,7 @@ bool truing_laser_align_snapshot(truing_beam_align_t *out)
     return true;
 }
 
-#else /* !TRUING_BENCH_DRIVE: no bench drive, so no laser-stop */
+#else /* neither the bench drive nor the demo's laser roller: no laser receiver */
 
 bool truing_laser_align_start(const truing_align_config_t *cfg, const char **detail)
 {
