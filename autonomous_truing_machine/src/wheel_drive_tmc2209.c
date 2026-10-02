@@ -137,6 +137,40 @@ bool truing_wheel_drive_tmc2209_set_microsteps(truing_wheel_drive_tmc2209_ctx_t 
     return ok;
 }
 
+bool truing_wheel_drive_tmc2209_check_microsteps(truing_wheel_drive_tmc2209_ctx_t *ctx, bool repair)
+{
+    if (ctx == NULL || !ctx->uart_ok || ctx->microsteps_wanted == 0u || ctx->moving) {
+        return true;
+    }
+    uint32_t gconf = 0u, chop = 0u;
+    if (!truing_wheel_drive_tmc2209_read(ctx, TRUING_TMC2209_GCONF, &gconf) ||
+        !truing_wheel_drive_tmc2209_read(ctx, TRUING_TMC2209_CHOPCONF, &chop)) {
+        ctx->mres_ok = false;   /* cannot vouch for it */
+        return false;
+    }
+    ctx->gconf = gconf;
+    ctx->chopconf = chop;
+    if (truing_tmc2209_microsteps_intact(gconf, chop, ctx->microsteps_wanted)) {
+        ctx->mres_ok = true;
+        return true;
+    }
+    ctx->mres_ok = false;
+    if (!repair) {
+        return false;
+    }
+    ESP_LOGW(TAG, "TMC2209 microstep setting had REVERTED (GCONF 0x%08lx CHOPCONF 0x%08lx: %u usteps, %s): the driver reset or "
+                  "lost power. Rewriting %u.",
+             (unsigned long)gconf, (unsigned long)chop, truing_tmc2209_chopconf_microsteps(chop),
+             (gconf & TRUING_TMC2209_GCONF_MSTEP_REG_SELECT) ? "from MRES" : "MS1/MS2 pins govern", ctx->microsteps_wanted);
+    if (!truing_wheel_drive_tmc2209_set_microsteps(ctx, ctx->microsteps_wanted)) {
+        ESP_LOGE(TAG, "could not rewrite %u microsteps; moves refused", ctx->microsteps_wanted);
+        return false;
+    }
+    ctx->mres_repairs++;
+    ctx->mres_ok = true;
+    return true;
+}
+
 bool truing_wheel_drive_tmc2209_diag_level(const truing_wheel_drive_tmc2209_ctx_t *ctx)
 {
     return ctx != NULL && ctx->pins.diag_gpio >= 0 && gpio_get_level((gpio_num_t)ctx->pins.diag_gpio) != 0;
@@ -160,9 +194,17 @@ static truing_status_t tmc_enable(truing_wheel_drive_if_t *self, bool on, truing
         /* Every enable(true) clears what a restart can clear, whether or not it was already
          * enabled -- pressing enable again is how an operator clears a latched fault, and
          * gating this on a disabled->enabled transition left it stuck if they never explicitly
-         * disabled first. A microstep mismatch is a configuration fact, not a transient fault,
-         * and stays until the configuration changes. */
+         * disabled first. A microstep mismatch is a configuration fact, not a transient fault: it stays until
+         * the registers are read back and hold the wanted setting, which is checked here (and rewritten if the
+         * driver had reset), since the steps of every later move mean what the microstep count says. */
         c->fault_detail &= TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
+        if (c->uart_ok && c->microsteps_wanted != 0u && !c->moving) {
+            if (truing_wheel_drive_tmc2209_check_microsteps(c, true)) {
+                c->fault_detail &= ~TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
+            } else {
+                c->fault_detail |= TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
+            }
+        }
         c->faulted = c->fault_detail != 0u;
         gpio_set_level((gpio_num_t)c->pins.en_gpio, 0);
         c->enabled = true;
@@ -350,11 +392,13 @@ static void probe_uart(truing_wheel_drive_tmc2209_ctx_t *c, unsigned microsteps)
         ESP_LOGW(TAG, "calibration expects %u microsteps; NOT verifiable without the UART", microsteps);
         return;
     }
+    c->microsteps_wanted = microsteps;   /* re-checked at every enable(true) and by check_microsteps() */
     if (!truing_wheel_drive_tmc2209_set_microsteps(c, microsteps)) {
         c->fault_detail |= TRUING_TMC2209_FAULT_MICROSTEP_MISMATCH;
         c->faulted = true;
         ESP_LOGE(TAG, "could not set and verify %u microsteps; moves refused", microsteps);
     } else {
+        c->mres_ok = true;
         ESP_LOGI(TAG, "microsteps set and verified: %u", microsteps);
     }
 }

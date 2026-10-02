@@ -13,6 +13,7 @@
 #include "artifact_store.h"
 #include "audio_i2s.h"
 #include "board/board_profile.h"
+#include "laser_bench.h"
 #include "pluck_gpio.h"
 #include "firmware_version.h"
 #include "net_transport.h"
@@ -542,6 +543,11 @@ bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
     out->gstat = 0u;
     out->cs_actual = 0u;
     out->drv_flags[0] = '\0';
+    /* Read-only: a revert is reported here and repaired by the next enable(true) (`roll on`), never behind the operator's back. */
+    out->microsteps_want = c->microsteps_wanted;
+    (void)truing_wheel_drive_tmc2209_check_microsteps(&s.drive_ctx, false);
+    out->mres_ok = c->microsteps_wanted == 0u || c->mres_ok;
+    out->mres_repairs = c->mres_repairs;
     if (c->uart_ok) {
         uint32_t st = 0u, gs = 0u;
         if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_DRV_STATUS, &st)) {
@@ -978,6 +984,11 @@ static void demo_task(void *arg)
      * in a session can move it. A drive that failed to initialise is not handed over (DRIVE_* refused). */
     roller_drive_init_once();
     deps.bench_drive = s.drive_ok ? &s.drive : NULL;
+    if (s.drive_ok) {
+        /* The laser receiver as a bench subsystem beside the drive (laser_bench.h): observable always,
+         * and a one-shot stop trigger only when armed from GET /debug/laser.json. */
+        (void)truing_laser_bench_init(&s.drive, &s.drive_ctx);
+    }
 #elif TRUING_DEMO_ROLLER_JOG
     roller_drive_init_once();   /* the operator's jog only: never handed to navigation or the orchestrator */
 #endif

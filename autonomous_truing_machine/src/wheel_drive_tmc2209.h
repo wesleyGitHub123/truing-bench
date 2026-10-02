@@ -64,6 +64,9 @@ typedef struct {
     uint32_t              gconf;
     uint32_t              chopconf;
     unsigned              microsteps_verified;   /* 0 = not verified (no UART, or none requested) */
+    unsigned              microsteps_wanted;     /* what init was asked to enforce (0 = nothing to re-check) */
+    bool                  mres_ok;               /* the last registers read back still held the wanted setting */
+    uint32_t              mres_repairs;          /* times the setting had reverted and was rewritten */
     uint32_t              moves;
     uint32_t              refused;
 } truing_wheel_drive_tmc2209_ctx_t;
@@ -84,6 +87,12 @@ bool truing_wheel_drive_tmc2209_read(truing_wheel_drive_tmc2209_ctx_t *ctx, uint
 bool truing_wheel_drive_tmc2209_write(truing_wheel_drive_tmc2209_ctx_t *ctx, uint8_t reg, uint32_t value);
 /* Write MRES for `microsteps` (and GCONF.mstep_reg_select/pdn_disable), then read it back. */
 bool truing_wheel_drive_tmc2209_set_microsteps(truing_wheel_drive_tmc2209_ctx_t *ctx, unsigned microsteps);
+/* Re-read GCONF and CHOPCONF and compare with the setting init enforced. True when it still holds (or there is nothing to
+ * check: no UART, no wanted count, or a move in progress -- the UART is not touched mid-move). When it does not hold:
+ * with `repair` the setting is rewritten and verified (counted in mres_repairs) and the result is whether that worked;
+ * without, false and nothing is written. A TMC2209 that browned out or reset comes back on its MS1/MS2 pins, so every
+ * step count changes scale without any error being raised; this is how that is noticed. */
+bool truing_wheel_drive_tmc2209_check_microsteps(truing_wheel_drive_tmc2209_ctx_t *ctx, bool repair);
 bool truing_wheel_drive_tmc2209_diag_level(const truing_wheel_drive_tmc2209_ctx_t *ctx);
 
 #endif /* TRUING_WHEEL_DRIVE_TMC2209_H */

@@ -21,6 +21,7 @@
 #include "esp_timer.h"
 #include "build_mode.h"
 #include "firmware_version.h"
+#include "laser_bench.h"
 #include "truing/limits.h"
 #include "truing_proto/json.h"
 #include "truing_proto/wire.h"
@@ -704,7 +705,7 @@ static esp_err_t drive_json_handler(httpd_req_t *req)
         httpd_resp_set_status(req, "404 Not Found");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no bench drive (init failed)\"}");
     }
-    char body[480];
+    char body[640];
     truing_json_writer_t w;
     truing_json_init(&w, body, sizeof(body));
     truing_json_obj_open(&w, NULL);
@@ -723,11 +724,308 @@ static esp_err_t drive_json_handler(httpd_req_t *req)
     truing_json_i32(&w, "position_steps", d.position_steps);
     truing_json_u32(&w, "max_step_hz", d.max_step_hz);
     truing_json_u32(&w, "accel_steps_s2", d.accel_steps_s2);
+    truing_json_u32(&w, "microsteps_want", d.microsteps_want);
+    truing_json_bool(&w, "mres_ok", d.mres_ok);
+    truing_json_u32(&w, "mres_repairs", d.mres_repairs);
     truing_json_obj_close(&w);
     size_t len = 0u;
     if (!truing_json_finish(&w, &len)) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"drive state did not fit\"}");
+    }
+    return httpd_resp_send(req, body, len);
+}
+
+static void laser_trial_json(truing_json_writer_t *w, const char *key, const truing_beam_trial_t *t)
+{
+    truing_json_obj_open(w, key);
+    truing_json_u32(w, "trial", t->trial);
+    truing_json_str(w, "result", truing_beam_result_str(t->result));
+    truing_json_bool(w, "fired", t->fired);
+    truing_json_bool(w, "ended", t->ended);
+    truing_json_bool(w, "blocked_at_arm", t->blocked_at_arm);
+    truing_json_u32(w, "max_step_hz", t->max_step_hz);
+    truing_json_u32(w, "accel_steps_s2", t->accel_steps_s2);
+    truing_json_i32(w, "trigger_pos", t->trigger_pos);
+    truing_json_i32(w, "final_pos", t->final_pos);
+    /* end_t_us is when the 2 ms poll saw the pulse train over: the stop time is good to about 2 ms */
+    truing_json_u32(w, "stop_us", t->fired && t->ended ? t->end_t_us - t->trigger_t_us : 0u);
+    truing_json_bool(w, "left_beam", t->left_beam);
+    truing_json_i32(w, "leave_pos", t->leave_pos);
+    truing_json_u32(w, "edges_after", t->edges_after);
+    truing_json_bool(w, "blocked_at_end", t->blocked_at_end);
+    truing_json_bool(w, "coils_at_end", t->coils_at_end);
+    truing_json_bool(w, "fault_at_end", t->fault_at_end);
+    truing_json_obj_close(w);
+}
+
+/* GET /debug/laser.json[?arm=1|0][&probe=1][&since=<edge seq>]: the bench laser receiver and laser-stop
+ * (laser_bench.h). Plain state always; arm/disarm/probe are the only actions, and arming can only ever
+ * request the drive's own controlled stop, so it needs no admission. `since` returns the beam edges newer
+ * than that sequence number (at most 16 per call; `log_lost` counts any the ring already overwrote). */
+static esp_err_t laser_json_handler(httpd_req_t *req)
+{
+    static truing_beam_stop_t bs;          /* the httpd task is the only caller: static keeps it off its stack */
+    static truing_beam_edge_rec_t recs[16];
+    static char body[2560];
+    char q[64], v[12];
+    const char *action = NULL, *detail = NULL;
+    bool action_ok = true;
+    uint32_t since = UINT32_MAX;
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        if (httpd_query_key_value(q, "arm", v, sizeof(v)) == ESP_OK) {
+            const bool on = strcmp(v, "0") != 0;
+            action = on ? "arm" : "disarm";
+            action_ok = truing_laser_bench_arm(on, &detail);
+        }
+        if (httpd_query_key_value(q, "probe", v, sizeof(v)) == ESP_OK && strcmp(v, "1") == 0) {
+            const char *pd = NULL;
+            const bool pok = truing_laser_bench_probe(&pd);
+            if (action == NULL) {
+                action = "probe";
+                action_ok = pok;
+                detail = pd;
+            }
+        }
+        if (httpd_query_key_value(q, "since", v, sizeof(v)) == ESP_OK) {
+            since = (uint32_t)strtoul(v, NULL, 10);
+        }
+    }
+    truing_laser_bench_io_t io;
+    if (!truing_laser_bench_snapshot(&bs, &io)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no laser receiver input (lab image only, needs the bench drive)\"}");
+    }
+    truing_json_writer_t w;
+    truing_json_init(&w, body, sizeof(body));
+    truing_json_obj_open(&w, NULL);
+    truing_json_str(&w, "schema", "truing.bench.laser/1");
+    if (action != NULL) {
+        truing_json_str(&w, "action", action);
+        truing_json_bool(&w, "action_ok", action_ok);
+        truing_json_str(&w, "detail", detail != NULL ? detail : "");
+    }
+    truing_json_u32(&w, "gpio", (uint32_t)io.gpio);
+    truing_json_u32(&w, "level", (uint32_t)io.level);
+    truing_json_str(&w, "beam", io.level == BOARD_SPOKE_BEAM_BLOCKED_LEVEL ? "BLOCKED" : "CLEAR");
+    truing_json_str(&w, "input", io.input == TRUING_LASER_INPUT_DRIVEN     ? "driven"
+                                 : io.input == TRUING_LASER_INPUT_FLOATING ? "floating"
+                                                                            : "unprobed");
+    truing_json_u32(&w, "probed_age_ms", io.probed_age_ms);
+    truing_json_u32(&w, "edges", bs.edges);
+    truing_json_u32(&w, "enters", bs.enters);
+    truing_json_u32(&w, "leaves", bs.leaves);
+    truing_json_u32(&w, "glitches", bs.glitches);
+    truing_json_u32(&w, "resyncs", bs.resyncs);
+    if (bs.edges != 0u) {
+        truing_json_u32(&w, "last_edge_age_ms", (io.now_us - bs.last_edge_t_us) / 1000u);
+    } else {
+        truing_json_null(&w, "last_edge_age_ms");
+    }
+    truing_json_bool(&w, "armed", bs.armed);
+    truing_json_u32(&w, "trials", bs.trials);
+    truing_json_u32(&w, "stops_requested", bs.stops_requested);
+    if (bs.trials != 0u) {
+        laser_trial_json(&w, "trial", &bs.cur);
+    }
+    if (bs.last.result != TRUING_BEAM_RESULT_NONE) {
+        laser_trial_json(&w, "last", &bs.last);
+    }
+    truing_json_u32(&w, "log_seq", bs.log_seq);
+    if (since != UINT32_MAX) {
+        uint32_t lost = 0u;
+        const size_t n = truing_beam_stop_edges_since(&bs, since, recs, sizeof(recs) / sizeof(recs[0]), &lost);
+        truing_json_u32(&w, "log_lost", lost);
+        truing_json_arr_open(&w, "log");
+        for (size_t i = 0; i < n; ++i) {
+            truing_json_obj_open(&w, NULL);
+            truing_json_u32(&w, "seq", recs[i].seq);
+            truing_json_str(&w, "edge", recs[i].edge == TRUING_SPOKE_EDGE_ENTER ? "ENTER" : "LEAVE");
+            truing_json_u32(&w, "t_us", recs[i].t_us);
+            truing_json_i32(&w, "pos", recs[i].pos);
+            truing_json_bool(&w, "moving", recs[i].moving);
+            truing_json_obj_close(&w);
+        }
+        truing_json_arr_close(&w);
+    }
+    truing_json_obj_close(&w);
+    size_t len = 0u;
+    if (!truing_json_finish(&w, &len)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"laser state did not fit\"}");
+    }
+    return httpd_resp_send(req, body, len);
+}
+#endif
+
+#if TRUING_BENCH_DRIVE
+static uint32_t q_u32(const char *q, const char *key, uint32_t dflt)
+{
+    char v[16];
+    return httpd_query_key_value(q, key, v, sizeof(v)) == ESP_OK ? (uint32_t)strtoul(v, NULL, 10) : dflt;
+}
+
+static int32_t q_i32(const char *q, const char *key, int32_t dflt)
+{
+    char v[16];
+    return httpd_query_key_value(q, key, v, sizeof(v)) == ESP_OK ? (int32_t)strtol(v, NULL, 10) : dflt;
+}
+
+/* GET /debug/align.json: the alignment campaign's real-time controller (truing_hal/beam_align.h, run by
+ * laser_bench.c on the board). Plain state always, including the run record, its phase events and its beam
+ * edges after ?since=<index> (at most 24 per call). Actions:
+ *   ?start=count|align&dir=+-1&n=<break>&max=<steps>&settle=<ms>&strat=STOP|REVERSE_FIXED|RETURN_TO_EDGE|REACQUIRE|REACQUIRE_CLEAR
+ *          &rev=<steps>&off=<steps>&center=0|1&shz=<steps/s>&sacc=<steps/s2>&rmax=<steps>
+ *   ?abort=1
+ * Every parameter is the operator's campaign choice for that run; nothing here has a physical default. */
+static esp_err_t align_json_handler(httpd_req_t *req)
+{
+    static truing_beam_align_t a;   /* the httpd task is the only caller */
+    static char body[7168];
+    char q[320], v[20];
+    const char *action = NULL, *detail = NULL;
+    bool action_ok = true;
+    uint32_t since = UINT32_MAX;
+    no_store(req);
+    httpd_resp_set_type(req, "application/json");
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        if (httpd_query_key_value(q, "abort", v, sizeof(v)) == ESP_OK) {
+            action = "abort";
+            action_ok = truing_laser_align_abort(&detail);
+        } else if (httpd_query_key_value(q, "start", v, sizeof(v)) == ESP_OK) {
+            truing_align_config_t c;
+            memset(&c, 0, sizeof(c));
+            action = "start";
+            c.mode = strcmp(v, "count") == 0 ? TRUING_ALIGN_MODE_COUNT
+                     : strcmp(v, "align") == 0 ? TRUING_ALIGN_MODE_ALIGN : (truing_align_mode_t)0;
+            c.dir = (int8_t)q_i32(q, "dir", 0);
+            c.target_break = (uint16_t)q_u32(q, "n", 0u);
+            c.max_steps = q_u32(q, "max", 0u);
+            c.settle_ms = q_u32(q, "settle", 0u);
+            c.reverse_steps = q_u32(q, "rev", 0u);
+            c.offset_steps = q_i32(q, "off", 0);
+            c.center = q_u32(q, "center", 0u) != 0u;
+            c.slow_hz = q_u32(q, "shz", 0u);
+            c.slow_accel = q_u32(q, "sacc", 0u);
+            c.reacq_max_steps = q_u32(q, "rmax", 0u);
+            c.strategy = TRUING_ALIGN_STRAT_STOP;
+            if (httpd_query_key_value(q, "strat", v, sizeof(v)) == ESP_OK && !truing_align_strategy_parse(v, &c.strategy)) {
+                action_ok = false;
+                detail = "unknown strategy (STOP, REVERSE_FIXED, RETURN_TO_EDGE, REACQUIRE, REACQUIRE_CLEAR)";
+            }
+            if (action_ok) {
+                action_ok = truing_laser_align_start(&c, &detail);
+            }
+        }
+        if (httpd_query_key_value(q, "since", v, sizeof(v)) == ESP_OK) {
+            since = (uint32_t)strtoul(v, NULL, 10);
+        }
+    }
+    if (!truing_laser_align_snapshot(&a)) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"no alignment controller (lab image only, needs the laser input)\"}");
+    }
+    truing_json_writer_t w;
+    truing_json_init(&w, body, sizeof(body));
+    truing_json_obj_open(&w, NULL);
+    truing_json_str(&w, "schema", "truing.bench.align/1");
+    if (action != NULL) {
+        truing_json_str(&w, "action", action);
+        truing_json_bool(&w, "action_ok", action_ok);
+        truing_json_str(&w, "detail", detail != NULL ? detail : "");
+    }
+    truing_json_u32(&w, "run", a.run);
+    truing_json_str(&w, "phase", truing_align_phase_str(a.phase));
+    truing_json_bool(&w, "active", truing_beam_align_active(&a));
+    truing_json_str(&w, "result", truing_align_result_str(a.result));
+    truing_json_str(&w, "result_detail", truing_align_detail_str(a.detail));
+    truing_json_bool(&w, "beam_blocked", a.blocked);
+    truing_json_obj_open(&w, "cfg");
+    truing_json_str(&w, "mode", a.cfg.mode == TRUING_ALIGN_MODE_COUNT ? "count" : "align");
+    truing_json_str(&w, "strategy", truing_align_strategy_str(a.cfg.strategy));
+    truing_json_i32(&w, "dir", a.cfg.dir);
+    truing_json_u32(&w, "target_break", a.cfg.target_break);
+    truing_json_u32(&w, "max_steps", a.cfg.max_steps);
+    truing_json_u32(&w, "settle_ms", a.cfg.settle_ms);
+    truing_json_u32(&w, "reverse_steps", a.cfg.reverse_steps);
+    truing_json_i32(&w, "offset_steps", a.cfg.offset_steps);
+    truing_json_bool(&w, "center", a.cfg.center);
+    truing_json_u32(&w, "slow_hz", a.cfg.slow_hz);
+    truing_json_u32(&w, "slow_accel", a.cfg.slow_accel);
+    truing_json_u32(&w, "reacq_max_steps", a.cfg.reacq_max_steps);
+    truing_json_obj_close(&w);
+    truing_json_u32(&w, "approach_hz", a.approach_hz);
+    truing_json_u32(&w, "approach_accel", a.approach_accel);
+    truing_json_i32(&w, "start_pos", a.start_pos);
+    truing_json_bool(&w, "start_blocked", a.start_blocked);
+    truing_json_u32(&w, "start_t_us", a.start_t_us);
+    truing_json_u32(&w, "breaks", a.breaks);
+    truing_json_bool(&w, "fired", a.fired);
+    truing_json_i32(&w, "trigger_pos", a.trigger_pos);
+    truing_json_u32(&w, "trigger_t_us", a.trigger_t_us);
+    truing_json_i32(&w, "stop_pos", a.stop_pos);
+    truing_json_u32(&w, "stop_t_us", a.stop_t_us);
+    truing_json_bool(&w, "blocked_after_stop", a.blocked_after_stop);
+    truing_json_i32(&w, "zone_after_stop", a.zone_after_stop);
+    truing_json_u32(&w, "edges_in_stop", a.edges_in_stop);
+    truing_json_bool(&w, "target_left", a.target_left);
+    truing_json_i32(&w, "target_leave_pos", a.target_leave_pos);
+    truing_json_i32(&w, "pitch_med", a.pitch_med);
+    truing_json_i32(&w, "pitch_min", a.pitch_min);
+    truing_json_i32(&w, "width_med", a.width_med);
+    truing_json_i32(&w, "width_used", a.width_used);
+    truing_json_i32(&w, "corr_cmd", a.corr_cmd);
+    truing_json_u32(&w, "corr_edges", a.corr_edges);
+    truing_json_bool(&w, "reacquired", a.reacquired);
+    truing_json_u32(&w, "reacquisitions", a.reacquisitions);
+    truing_json_i32(&w, "reacq_pos", a.reacq_pos);
+    truing_json_bool(&w, "cleared", a.cleared);
+    truing_json_i32(&w, "clear_pos", a.clear_pos);
+    truing_json_bool(&w, "same_spoke_checked", a.same_spoke_checked);
+    truing_json_bool(&w, "same_spoke_ok", a.same_spoke_ok);
+    truing_json_i32(&w, "trim_cmd", a.trim_cmd);
+    truing_json_i32(&w, "final_pos", a.final_pos);
+    truing_json_bool(&w, "final_blocked", a.final_blocked);
+    truing_json_i32(&w, "final_zone", a.final_zone);
+    truing_json_u32(&w, "end_t_us", a.end_t_us);
+    truing_json_u32(&w, "edges_still", a.edges_still);
+    truing_json_bool(&w, "parity_bad", a.parity_bad);
+    truing_json_arr_open(&w, "events");
+    for (uint16_t i = 0; i < a.n_events; ++i) {
+        truing_json_obj_open(&w, NULL);
+        truing_json_str(&w, "phase", truing_align_phase_str((truing_align_phase_t)a.events[i].phase));
+        truing_json_u32(&w, "t_us", a.events[i].t_us);
+        truing_json_i32(&w, "pos", a.events[i].pos);
+        truing_json_bool(&w, "blocked", a.events[i].blocked);
+        truing_json_obj_close(&w);
+    }
+    truing_json_arr_close(&w);
+    truing_json_u32(&w, "n_edges", a.n_edges);
+    truing_json_u32(&w, "edges_dropped", a.edges_dropped);
+    if (since != UINT32_MAX) {
+        truing_json_u32(&w, "since", since);
+        truing_json_arr_open(&w, "edges");
+        for (uint32_t i = since, n = 0u; i < a.n_edges && n < 24u; ++i, ++n) {
+            const truing_align_edge_t *e = &a.edges[i];
+            truing_json_obj_open(&w, NULL);
+            truing_json_u32(&w, "i", i);
+            truing_json_bool(&w, "enter", e->enter);
+            truing_json_u32(&w, "t_us", e->t_us);
+            truing_json_i32(&w, "pos", e->pos);
+            truing_json_i32(&w, "sign", e->sign);
+            truing_json_str(&w, "phase", truing_align_phase_str((truing_align_phase_t)e->phase));
+            truing_json_i32(&w, "zone", e->zone);
+            truing_json_obj_close(&w);
+        }
+        truing_json_arr_close(&w);
+    }
+    truing_json_obj_close(&w);
+    size_t len = 0u;
+    if (!truing_json_finish(&w, &len)) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"detail\":\"alignment state did not fit\"}");
     }
     return httpd_resp_send(req, body, len);
 }
@@ -927,7 +1225,8 @@ bool truing_net_start(void)
      * on target rather than assumed. */
     hc.stack_size = HTTPD_STACK_BYTES;
     hc.lru_purge_enable = true;
-    /* The default is 8, which the lab image (ui, id, ws, capture x3, drive, acquisition) exactly fills. */
+    /* The default is 8; the lab image registers eleven (ui, id, ws, capture x3, listen, drive, laser, align,
+     * acquisition). */
     hc.max_uri_handlers = 12;
     /* Core 1 is the audio core (SPEC §4.5); the web server belongs with the control
      * work on core 0 so it cannot preempt a capture. */
@@ -973,6 +1272,16 @@ bool truing_net_start(void)
                                            .handler = drive_json_handler };
     if (httpd_register_uri_handler(s_server, &drive_uri) != ESP_OK) {
         ESP_LOGW(TAG, "bench-drive endpoint not registered; /debug/drive.json will 404");
+    }
+    static const httpd_uri_t laser_uri = { .uri = "/debug/laser.json", .method = HTTP_GET,
+                                           .handler = laser_json_handler };
+    if (httpd_register_uri_handler(s_server, &laser_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "bench laser endpoint not registered; /debug/laser.json will 404");
+    }
+    static const httpd_uri_t align_uri = { .uri = "/debug/align.json", .method = HTTP_GET,
+                                           .handler = align_json_handler };
+    if (httpd_register_uri_handler(s_server, &align_uri) != ESP_OK) {
+        ESP_LOGW(TAG, "alignment campaign endpoint not registered; /debug/align.json will 404");
     }
 #endif
 #if TRUING_FAST_DEMO

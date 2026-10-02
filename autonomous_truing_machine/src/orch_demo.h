@@ -63,6 +63,11 @@ typedef struct {
     uint32_t gstat;            /* GSTAT register: reset / drv_err / uv_cp latches */
     unsigned cs_actual;        /* motor current the driver is actually applying, 0..31 */
     char     drv_flags[40];    /* the fault flags set in DRV_STATUS, or "ok" */
+    /* The microstep setting the step counts assume, read back from the driver's registers (a driver reset reverts it
+     * to its MS1/MS2 pins, halving every step count). `mres_ok` false = reverted or unreadable: `roll on` rewrites it. */
+    unsigned microsteps_want;  /* 0 = nothing enforced */
+    bool     mres_ok;
+    uint32_t mres_repairs;     /* times it had reverted and was rewritten since boot */
 } truing_demo_drive_state_t;
 /* False when this image has no bench drive (or it failed to initialise); `out` is then untouched. */
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out);

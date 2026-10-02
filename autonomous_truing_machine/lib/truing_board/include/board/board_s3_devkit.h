@@ -43,6 +43,22 @@
  * Wheel Navigation subsystem (SPEC §10A) — owns these pins exclusively.
  * Index / reference sensor input. */
 #define BOARD_INDEX_SENSOR_GPIO        7
+/* The laser break-beam RECEIVER (bench laser-stop, s3_devkit_lab only: src/laser_bench.c) is read on the
+ * index-sensor pin above -- the pin this map already reserves for a wheel sensor, so nothing moves. The
+ * module (e-Gizmo "Laser Sensor and Receiver Module", 5 V) is ACTIVE LOW, as tested on the bench
+ * (2026-10-02, operator): OUT goes LOW while the laser hits the receiver, so a clear beam reads 0 and a
+ * blocked beam reads 1. (The seller's listing says the opposite -- "logic low on no laser detection" --
+ * and is wrong for this unit.) Its output is a 5 V logic level and this GPIO is NOT 5 V tolerant:
+ * it reaches the pin through a divider (docs/LASER_BENCH.md), never directly. */
+#define BOARD_SPOKE_BEAM_GPIO           BOARD_INDEX_SENSOR_GPIO
+#define BOARD_SPOKE_BEAM_BLOCKED_LEVEL  1
+/* Internal pull on the receiver pin at rest: 0 = none, 1 = pull-up. The receiver's output is weak (about
+ * 13 kohm of source impedance: it sagged 5 V -> 3.5 V into a 10k/20k divider), so the divider is 50 kohm
+ * from OUT to the pin and 100 kohm from the pin to GND (operator, 2026-10-02). Against a 100 kohm bottom
+ * leg the ~45 kohm internal pull-up would lift the LOW level to about 1.4 V, above the ~0.8 V the pin reads
+ * as low: so no internal pull here. A broken OUT wire then reads CLEAR (the 100k pulls it to 0) instead of
+ * BLOCKED, which the pull test cannot catch at this impedance either: check with a card in the beam. */
+#define BOARD_SPOKE_BEAM_RESTING_PULL   0
 /* Wheel-drive actuator, RESERVED for the Stage 2 development motor driver (expected
  * first: TMC2209 in STEP/DIR mode with single-wire UART on TX/RX). Not validated;
  * not a final hardware commitment. */
