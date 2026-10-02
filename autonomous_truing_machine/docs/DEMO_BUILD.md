@@ -122,9 +122,10 @@ spokes found, stopped on and struck with nothing missed (`docs/ALIGN_CAMPAIGN.md
   `/id` reports `"laser":false`.
 - **Fallback image:** `s3_devkit_demo_manual` is the same survey with the manual roller only.
 
-What is unproven: none of this has run on the board yet (it was written while the perfboard was being
-resoldered); the recipes were tuned on one wheel in one power state; the mic noise floor with energised
-coils is unmeasured.
+First run on the board (2026-10-03, build 40f05f7, operator): the full survey, every spoke hit, nothing missed
+by the operator's own eye -- the same verdict as the PC-driven revolution. Not yet known: how often a spoke is
+handed over (not recorded this run), repeatability across runs and power states, and the mic noise floor with
+energised coils; the recipes were tuned on one wheel.
 
 ### The earlier scaffold
 
