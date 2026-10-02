@@ -884,14 +884,20 @@ Object.assign(IDENT, { mode: 'fastdemo+inmp441x2+alwaysread+jog+survey', always_
   c_side_a_n_per_rev: 473, c_side_b_n_per_rev: 473, max_adjustment_rev: 1 });
 sandbox.loadIdent();
 ok(byId['stepcard'].className.indexOf('hide') >= 0, 'the demonstration build hides the session-progress card');
+IDENT.jog = true;
+sandbox.loadIdent();
+ok(byId['jogcard'].className.indexOf('hide') >= 0, 'and the Roller card, even though the image reports jog:true');
+delete IDENT.jog;
 IDENT.acquisition = 'auto';
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') >= 0, 'and the orange FAST DEMO synthetic-mode card');
 ok(byId['modechip'].className.indexOf('hide') >= 0, 'and the FAST DEMO chip beside the title');
+ok(byId['b-acq-auto'].textContent === 'Automatic', 'the Automatic button carries no (synthetic) label', byId['b-acq-auto'].textContent);
 IDENT.always_read = false; IDENT.mode = 'fastdemo';
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') < 0 && byId['modechip'].className.indexOf('hide') < 0,
   'a plain fast-demo image still shows that card and chip');
+ok(byId['b-acq-auto'].textContent === 'Automatic (synthetic)', 'and keeps its Automatic (synthetic) label');
 IDENT.acquisition = 'manual'; IDENT.always_read = true; IDENT.mode = 'fastdemo+inmp441x2+alwaysread+jog+survey';
 sandbox.loadIdent();
 ok(byId['spknote'].className.indexOf('hide') >= 0, 'and the spoke-table footnote');
@@ -968,8 +974,9 @@ sandbox.loadIdent();
 sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[0] }));
 ok(txt('statusbody').indexOf('just before the laser beam') >= 0, 'laser mode: the reference asks for spoke 0 just before the beam', txt('statusbody'));
 sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[1] }));
-ok(txt('statusbody').indexOf('could not land spoke 17 by itself') >= 0 && txt('statusbody').indexOf('Roller card') >= 0,
-  'laser mode: a handed-over spoke says the roller gave up and to jog it', txt('statusbody'));
+ok(txt('statusbody').indexOf('could not land spoke 17 by itself') >= 0 && txt('statusbody').indexOf('Turn the wheel by hand') >= 0 &&
+  txt('statusbody').indexOf('Roller card') < 0,
+  'laser mode: a handed-over spoke says the roller gave up and to turn the wheel by hand', txt('statusbody'));
 delete IDENT.laser;
 sandbox.loadIdent();
 sandbox.handle(S({ current_state: 'WAIT_FOR_OPERATOR', active_wait: WAITS[1] }));

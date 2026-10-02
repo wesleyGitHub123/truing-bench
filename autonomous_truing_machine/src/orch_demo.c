@@ -74,6 +74,9 @@ static const char *TAG = "orch_demo";
 #define DEMO_JOG_ACCEL_SS    3000u
 #define DEMO_JOG_MAX_STEPS   16000   /* one request: five motor turns at 16 microsteps */
 
+/* Every strike's solenoid on-time in the pipeline-demonstration image (TRUING_DEMO_ALWAYS_READ). */
+#define DEMO_STRIKE_PULSE_MS 60.0f
+
 /* Bench drive ramp (TRUING_BENCH_DRIVE): roller_smoke's cautious first-spin knobs, not a measured
  * calibration. `roll speed` (DRIVE_MOTION) changes them for the running image. */
 #define BENCH_DRIVE_CRUISE_HZ 800u
@@ -317,8 +320,16 @@ static void lp_stop(void *u)
     truing_wheel_drive_stop(&s.drive);
 }
 
+static void lp_release(void *u)
+{
+    (void)u;
+    truing_wheel_drive_stop(&s.drive);
+    (void)truing_wheel_drive_enable(&s.drive, false, NULL);
+}
+
 static const truing_laser_port_t k_laser_port = { lp_enable, lp_start_trial, lp_trial, lp_move, lp_moving,
-                                                  lp_position, lp_beam_blocked, lp_beam_edges, lp_stop, NULL };
+                                                  lp_position, lp_beam_blocked, lp_beam_edges, lp_stop, lp_release,
+                                                  NULL };
 #endif
 
 static void wire_acquisition(bool automatic)
@@ -905,6 +916,14 @@ static void demo_task(void *arg)
     truing_fixture_solver_config(&s.solver, 32u);
     truing_fixture_chain_profile_inmp441(&s.chain);
     truing_fixture_excitation_profile(&s.excitation);
+#if TRUING_DEMO_ALWAYS_READ
+    /* The demonstration image strikes every spoke with the 60 ms pulse the alignment campaign struck with
+     * (operator's decision, 2026-10-03); the fixture's 20 ms was never fitted to a solenoid. This image
+     * only: the fixture, and every other image, keep theirs. */
+    for (uint32_t i = 0; i < TRUING_ACOUSTIC_STATIONS; ++i) {
+        s.excitation.pulse_ms[i] = DEMO_STRIKE_PULSE_MS;
+    }
+#endif
     truing_fixture_tension_model_profile_complete(&s.tmodel);
     truing_fixture_machine_profile(&s.machine);
     s.clock.now_ms = boot_clock_now;

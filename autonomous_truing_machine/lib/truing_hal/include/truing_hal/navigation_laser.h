@@ -88,6 +88,7 @@ typedef struct {
     bool (*beam_blocked)(void *user);
     uint32_t (*beam_edges)(void *user);   /* a running count of every beam edge */
     void (*stop)(void *user);             /* end any run and request the drive's controlled stop */
+    void (*release)(void *user);          /* de-energise the coils: the operator turns the wheel by hand */
     void *user;
 } truing_laser_port_t;
 

@@ -23,7 +23,7 @@ typedef struct {
     bool     skip_break_next;   /* the next run misses one break: it stops one spoke late */
     bool     chatter_next;
     int32_t  stop_noise;        /* added to every stop distance */
-    uint32_t starts, moves, stops;
+    uint32_t starts, moves, stops, releases;
     int32_t  last_trigger_spoke;
 } sim_t;
 
@@ -143,9 +143,10 @@ static int32_t sim_position(void *u) { (void)u; return g_sim.p; }
 static bool sim_blocked(void *u) { (void)u; return blocked_at(g_sim.p); }
 static uint32_t sim_edges(void *u) { (void)u; return g_sim.edges; }
 static void sim_stop(void *u) { (void)u; g_sim.stops++; g_sim.t.active = false; g_sim.trial_polls = 0; }
+static void sim_release(void *u) { (void)u; g_sim.releases++; }
 
 static const truing_laser_port_t k_port = { sim_enable, sim_start, sim_trial, sim_move, sim_moving, sim_position,
-                                            sim_blocked, sim_edges, sim_stop, NULL };
+                                            sim_blocked, sim_edges, sim_stop, sim_release, NULL };
 
 static truing_nav_target_t spoke_target(uint8_t i)
 {
@@ -300,6 +301,7 @@ static void test_bounded_retries_then_the_operator_then_automatic_again(void)
     TEST_ASSERT_EQUAL_UINT8(2u, r.target.index);
     TEST_ASSERT_EQUAL_UINT32(3u, g_ctx.trials - trials0);
     TEST_ASSERT_EQUAL_UINT32(1u, g_ctx.handovers);
+    TEST_ASSERT_EQUAL_UINT32(1u, g_sim.releases);   /* the roller let go so the operator can turn the wheel */
     g_sim.stop_noise = 0;
     g_sim.p = edge(2) + 30;   /* the operator jogs spoke 2 to the strike point */
     g_nav.note_operator_confirmation(&g_nav, &r);

@@ -112,6 +112,9 @@ static void hand_over(truing_navigation_laser_ctx_t *c, const char *why, truing_
     c->handovers++;
     c->phase = TRUING_LASER_NAV_MANUAL;
     forget_position(c);
+    if (c->port.release != NULL) {
+        c->port.release(c->port.user);   /* the operator turns the wheel by hand: the roller lets go */
+    }
     c->manual.request(&c->manual, &c->target, out);
     if (out->outcome != TRUING_NAV_PENDING_OPERATOR) {
         c->phase = TRUING_LASER_NAV_IDLE;
