@@ -648,7 +648,7 @@ static const char TRUING_WEB_UI_HTML[] =
 " if(was!==AR&&spk){renderSpk();renderLast();}\n"
 " el('jogcard').className=ident&&ident.jog===true?'card':'card hide';\n"
 " el('demobanner').className=auto&&!ar?'card demo':'card demo hide';\n"
-" el('modechip').className=auto?'demochip':'demochip hide';\n"
+" el('modechip').className=auto&&!ar?'demochip':'demochip hide';\n"
 " el('b-start').textContent=auto?'Start Fast Demo':'Start truing';\n"
 " el('acqcard').className=sel?'card':'card hide';\n"
 " el('b-acq-auto').className=auto?'sel':'';\n"

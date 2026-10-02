@@ -887,9 +887,11 @@ ok(byId['stepcard'].className.indexOf('hide') >= 0, 'the demonstration build hid
 IDENT.acquisition = 'auto';
 sandbox.loadIdent();
 ok(byId['demobanner'].className.indexOf('hide') >= 0, 'and the orange FAST DEMO synthetic-mode card');
+ok(byId['modechip'].className.indexOf('hide') >= 0, 'and the FAST DEMO chip beside the title');
 IDENT.always_read = false; IDENT.mode = 'fastdemo';
 sandbox.loadIdent();
-ok(byId['demobanner'].className.indexOf('hide') < 0, 'a plain fast-demo image still shows that card');
+ok(byId['demobanner'].className.indexOf('hide') < 0 && byId['modechip'].className.indexOf('hide') < 0,
+  'a plain fast-demo image still shows that card and chip');
 IDENT.acquisition = 'manual'; IDENT.always_read = true; IDENT.mode = 'fastdemo+inmp441x2+alwaysread+jog+survey';
 sandbox.loadIdent();
 ok(byId['spknote'].className.indexOf('hide') >= 0, 'and the spoke-table footnote');
