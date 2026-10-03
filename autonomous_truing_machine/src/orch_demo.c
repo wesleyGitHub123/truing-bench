@@ -721,6 +721,50 @@ bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out)
 #endif
 }
 
+bool truing_demo_pin_probe(truing_demo_pin_probe_t *out)
+{
+#if TRUING_DEMO_ROLLER_JOG
+    if (out == NULL || !s.drive_ok || !s.drive_ctx.uart_ok) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    out->tstep_min = 0xFFFFFu;
+    for (unsigned i = 0; i < 40u; ++i) {
+        uint32_t v = 0u;
+        uint32_t ts = 0u;
+        /* TSTEP is the driver's own measurement of the time between the STEP edges it receives: a 2 us pulse is
+         * invisible to a sampled pin, but the period shows whether any pulse arrived at all. */
+        if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_TSTEP, &ts)) {
+            ts &= 0xFFFFFu;
+            out->tstep_samples++;
+            out->tstep_last = ts;
+            if (ts != 0u && ts < out->tstep_min) {
+                out->tstep_min = ts;
+            }
+        }
+        if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_IOIN, &v)) {
+            out->samples++;
+            out->enn_low += (v & (1u << 0)) == 0u;
+            out->step_high += (v & (1u << 7)) != 0u;
+            out->dir_high += (v & (1u << 9)) != 0u;
+        }
+        if ((i % 4u) == 3u) {
+            uint32_t st = 0u;
+            if (truing_wheel_drive_tmc2209_read(&s.drive_ctx, TRUING_TMC2209_DRV_STATUS, &st)) {
+                out->drv_samples++;
+                out->drv_or |= st & ~TRUING_TMC2209_DRV_STST;
+            }
+        }
+    }
+    truing_tmc2209_describe_drv_status(out->drv_or, out->drv_flags, sizeof(out->drv_flags));
+    out->ok = out->samples > 0u;
+    return out->ok;
+#else
+    (void)out;
+    return false;
+#endif
+}
+
 truing_source_impl_t truing_demo_acoustic_source(void)
 {
     return s.acoustic.source_impl;

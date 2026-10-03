@@ -1083,7 +1083,7 @@ static esp_err_t jog_handler(httpd_req_t *req)
  * image has no debug channel on purpose; this reports state and changes none. */
 static esp_err_t diag_handler(httpd_req_t *req)
 {
-    static char body[1100];
+    static char body[1400];
     static truing_beam_stop_t bs;
     static truing_beam_align_t al;
     truing_laser_bench_io_t io;
@@ -1112,6 +1112,25 @@ static esp_err_t diag_handler(httpd_req_t *req)
         truing_json_i32(&w, "position_steps", d.position_steps);   /* pulses sent: not evidence the wheel moved */
     }
     truing_json_obj_close(&w);
+    {
+        /* ?probe=1: what the driver sees on its EN / STEP / DIR pins, sampled over the UART. Ask while the roller moves. */
+        char q[24];
+        const bool want = httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && strstr(q, "probe=1") != NULL;
+        truing_demo_pin_probe_t pp;
+        if (want && truing_demo_pin_probe(&pp)) {
+            truing_json_obj_open(&w, "pins");
+            truing_json_u32(&w, "samples", pp.samples);
+            truing_json_u32(&w, "enn_low", pp.enn_low);       /* == samples: the EN pin reaches the driver and enables it */
+            truing_json_u32(&w, "step_high", pp.step_high);   /* a sampled 2 us pulse: usually 0 even when connected; not evidence */
+            truing_json_u32(&w, "tstep_samples", pp.tstep_samples);
+            truing_json_u32(&w, "tstep_min", pp.tstep_min);   /* ~4000 at 3000 steps/s when STEP reaches the driver; 1048575 = none */
+            truing_json_u32(&w, "tstep_last", pp.tstep_last);
+            truing_json_u32(&w, "dir_high", pp.dir_high);
+            truing_json_u32(&w, "drv_samples", pp.drv_samples);
+            truing_json_str(&w, "drv_flags_seen", pp.drv_flags);   /* OLA / OLB: a coil wire is open */
+            truing_json_obj_close(&w);
+        }
+    }
     truing_json_obj_open(&w, "laser");
     truing_json_bool(&w, "present", have_laser);
     if (have_laser) {

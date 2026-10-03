@@ -69,6 +69,22 @@ typedef struct {
     bool     mres_ok;
     uint32_t mres_repairs;     /* times it had reverted and was rewritten since boot */
 } truing_demo_drive_state_t;
+/* What the driver SEES on its own pins, sampled by reading IOIN repeatedly over the UART (GET /demo/diag?probe=1).
+ * Take it while the roller is moving: a STEP wire that reaches the driver shows as a mix of high and low samples. */
+typedef struct {
+    bool     ok;              /* at least one IOIN read answered */
+    unsigned samples;         /* reads that answered */
+    unsigned enn_low;         /* samples with ENN low = the driver is enabled by its EN pin */
+    unsigned step_high;       /* samples with STEP high */
+    unsigned dir_high;        /* samples with DIR high */
+    unsigned tstep_samples;   /* TSTEP reads that answered */
+    uint32_t tstep_min;       /* the shortest step period the driver measured (its clock ticks); 1048575 = no steps seen */
+    uint32_t tstep_last;
+    unsigned drv_samples;     /* DRV_STATUS reads taken in between */
+    uint32_t drv_or;          /* every DRV_STATUS flag seen in them, OR-ed: open-coil / short flags show here */
+    char     drv_flags[40];
+} truing_demo_pin_probe_t;
+bool truing_demo_pin_probe(truing_demo_pin_probe_t *out);
 /* False when this image has no bench drive (or it failed to initialise); `out` is then untouched. */
 bool truing_demo_bench_drive_state(truing_demo_drive_state_t *out);
 /* The pipeline-demonstration build's MANUAL roller (TRUING_DEMO_ROLLER_JOG, GET /demo/jog). A jog is a
