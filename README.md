@@ -53,13 +53,15 @@ steps by hand.
 | Time for one analysis on the ESP32-S3 | 16.2 s at first, 3.7 s after profiling and platform settings |
 | Frequency ruler, independent re-implementation, same samples | identical peaks on 20 of 20 real events and 17 synthetic cases |
 | Hand pluck, one spoke, unchanged DSP | 5 of 15 pass the quality gate; 4 of those agree within 0.2 Hz at 406.2 Hz |
-| Solenoid strikes, same DSP | 4 of 168 pass in the pre-registered strike blocks; 1 of 54 in a later pulse-width sweep |
+| Solenoid strikes, same DSP | 4 of 168 pass in the pre-registered strike blocks; 1 of 54 in a later pulse-width sweep; 13 of 18 with a mic beside the strike point, at about 362 Hz rather than the 406 Hz hand-pluck reference |
 
 Limits, stated plainly:
 
-- **The solenoid does not currently produce a usable spoke frequency.** The plunger rings the rig as much
-  as the spoke, and the DSP's quality gates reject nearly every strike. A hand pluck reads on the same
-  chain. Why the strike differs is a hypothesis, not a finding.
+- **The solenoid does not currently give a frequency I can call the spoke's.** The DSP's quality gates
+  rejected nearly every strike with the first mic position. With a mic beside each strike point they pass
+  most strikes, but at a frequency that differs from the hand-pluck reference, and which line is the spoke
+  is unresolved. A hand pluck reads on the same chain. Why the strike differs is a hypothesis, not a
+  finding.
 - **No tension from this machine has been compared with a tensiometer.** The frequency-to-tension
   relation in the firmware is a model, not a calibrated one, and the active configuration excludes
   tension from the solve on purpose.
@@ -106,22 +108,18 @@ Evidence and design notes, newest work first: [roller bench](autonomous_truing_m
 
 ## What went wrong along the way
 
-- **The solenoid rings the rig.** The research constants came from recordings made with a magnetic
-  pickup. On this rig a plunger strike lights up dozens of structural lines, and the spoke's own line, if
-  it is there, is neither the lowest nor the strongest. I first suspected mains hum, tested that against
-  recordings, and dropped it when the operator's ear and the data disagreed with the theory. Hand plucks
-  read fine on the same chain, which points at the excitation, not the DSP. It is still open.
-- **A wiring mistake killed the first board.** While adding the second microphone I damaged the Arduino
-  Nano ESP32 that carried the acoustic rig (2026-09-27). The whole acoustic front end moved to a spare
-  DevKitC-1. The solenoids on the new board stay disabled in firmware until each one passes its own
-  electrical check, because wiring them without it would repeat the unverified assumption behind the loss.
-- **I guessed wrong about what was slow.** One analysis took 16.2 s on the chip. I suspected the peak
-  prominence scan; the profile said it was under 1% of the time. The real cost was double-precision
-  trigonometry in software, because the S3 has no double-precision FPU. The default clock, compiler and
-  cache settings cost another 1.6x. Fixing those took it to 3.7 s.
-- **The laser receiver's listing was backwards.** The seller says the output goes low with no laser; on
-  this unit it goes low while the laser hits it. I tested it first, before writing the edge
-  detection around it.
+- **The strike test mostly failed to find a spoke.** Across 168 solenoid strikes in the pre-registered
+  blocks, the analysis picked out a spoke tone in 4. That is an ambiguous failure and I have not
+  separated the causes. The candidates:
+  - **Mic location.** With the first mic position, strikes passed 4 of 168. After seating a mic beside
+    each strike point the board cleared 13 of 18 strikes on spoke 0, but at about 362 Hz, not the 406 Hz a
+    hand pluck gives. Three lines show up in the strikes and only a tension change on that spoke would say
+    which is the spoke. Not done yet.
+  - **The analysis was built around guitar-pickup recordings.** The research pipeline and its constants,
+    such as the 350 to 600 Hz search band, came from recordings of plucked spokes made with a
+    magnetic guitar-style pickup. A MEMS microphone on a different wheel hears a different spectrum.
+  - **The solenoid excites the frame as much as the spoke.** Hand plucks pass 5 of 15 on the same chain,
+    which points at the excitation.
 
 ## Status
 
@@ -163,7 +161,7 @@ source.
 ## About this project
 
 This was a team project. I wrote the firmware and the test tooling, designed and integrated the
-electronics (solenoid drive, microphones, stepper driver, laser), and ran the bench work. A teammate did
+electronics (solenoid drive, microphones, stepper driver, laser), and ran the bench work. Jan ([jan-orit](https://github.com/jan-orit)) did
 the 3D design and planning of the structure: the aluminium-extrusion frame, the wheel seat, and the
 solenoid and microphone brackets.
 

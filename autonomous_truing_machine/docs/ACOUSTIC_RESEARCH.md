@@ -45,12 +45,17 @@ when first ported and 3.7 s after profiling (`docs/IMPLEMENTATION_NOTES.md`, Pha
 **3. On this machine, with a solenoid and the INMP441.** This is where the evidence is weak, and it is
 recorded in full in `docs/SOLENOID_CAMPAIGN.md`:
 
-- The research constants (for example the 350 to 600 Hz search band) were set on recordings from a
-  magnetic pickup. Nothing guarantees they hold for a MEMS microphone on a different wheel.
+- The research constants (for example the 350 to 600 Hz search band) were set on recordings of plucked
+  spokes made with a magnetic guitar-style pickup. Nothing guarantees they hold for a MEMS microphone on a different wheel.
 - Solenoid strikes excite the rig as much as the spoke. In the pre-registered strike blocks the board's
   DSP passed 4 of 168 strikes, and 1 of 54 in a later pulse-width sweep. Dozens of structural lines
   appear in every strike spectrum.
 - A hand pluck on one spoke (spoke 0) passed 5 of 15 times, and four of those five agreed to within
   0.2 Hz at 406.2 Hz. One spoke, no tension reference.
+- With a mic seated beside each strike point (rig-2, 2026-10-01) the board cleared 13 of 18 strikes on
+  spoke 0 and 0 of 8 no-fire controls, but every clear was at 360.5 to 363.2 Hz. A line at 406 Hz, the
+  hand-pluck reference, is present in 7 of 18 strikes. The firmware picks the lowest strong peak in the
+  band, so it reports 362 Hz. Which of the three lines is the spoke is open; the planned deciding test is
+  a measured tension change.
 
 No frequency or tension reading from this machine has been compared against a tensiometer.
