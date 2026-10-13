@@ -15,5 +15,12 @@ Thumbs.db
 *.swp
 # Machine-specific editor settings at the repo root (contain absolute local paths)
 /.vscode/
-# --- Claude Code: repo settings are committed, local overrides are not ---
-.claude/settings.local.json
+# --- Local-only material: assistant config, raw media, third-party papers ---
+local/
+CLAUDE.md
+.claude/
+.clinerules/
+Hunter*.md
+*.mp4
+*.mov
+*.wav
