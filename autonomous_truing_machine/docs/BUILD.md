@@ -20,7 +20,7 @@ USB-Serial/JTAG port (`COM5`); see "Flashing the Nano ESP32" below.
 ## Path with spaces: build through a junction
 
 PlatformIO's ESP-IDF integration refuses build paths that contain spaces, and
-this project lives under `College Files - 4th Year\…`. Host tests are not
+the checkout often lives under a folder with spaces (for example a synced Documents or Desktop folder). Host tests are not
 affected. For ESP-IDF builds, create a space-free directory junction once (run from inside the repository):
 
 ```powershell
